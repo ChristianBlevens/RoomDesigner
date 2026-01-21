@@ -8,7 +8,6 @@ import {
   getRoomsByHouseId,
   deleteRoom
 } from './database.js';
-import { generateId } from './utils.js';
 
 // Current house state
 let currentHouse = null;
@@ -56,15 +55,14 @@ export async function createHouse(name, startDate, endDate) {
   }
 
   const house = {
-    id: generateId(),
     name: name.trim(),
     startDate: startDate,
     endDate: endDate,
     createdAt: Date.now()
   };
 
-  await dbSaveHouse(house);
-  return house;
+  const id = await dbSaveHouse(house);
+  return { ...house, id };
 }
 
 // Update an existing house

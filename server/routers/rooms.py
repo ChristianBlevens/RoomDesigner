@@ -3,12 +3,30 @@ from typing import List
 import uuid
 import json
 import sys
+import httpx
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.connection import get_houses_db
 from models.room import RoomCreate, RoomUpdate, RoomResponse
 from config import ROOM_BACKGROUNDS, ROOM_MESHES
+
+
+async def download_mesh(room_id: str, mesh_url: str) -> str:
+    """Download mesh from remote URL and save locally. Returns local URL."""
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(mesh_url)
+            if response.status_code != 200:
+                raise HTTPException(502, f"Failed to download mesh: {response.status_code}")
+            mesh_data = response.content
+    except httpx.RequestError as e:
+        raise HTTPException(502, f"Failed to download mesh: {str(e)}")
+
+    path = ROOM_MESHES / f"{room_id}.glb"
+    path.write_bytes(mesh_data)
+
+    return f"/api/files/room/{room_id}/mesh"
 
 router = APIRouter()
 
@@ -74,12 +92,22 @@ def get_room(room_id: str):
     return row_to_response(row)
 
 @router.post("/", response_model=RoomResponse)
-def create_room(room: RoomCreate):
+async def create_room(room: RoomCreate):
     db = get_houses_db()
     room_id = room.id or str(uuid.uuid4())
 
+    # If remoteMeshUrl provided, download mesh first (atomic - if this fails, room not created)
+    moge_data = room.mogeData
+    if room.remoteMeshUrl:
+        local_mesh_url = await download_mesh(room_id, room.remoteMeshUrl)
+        # Update mogeData with local mesh URL
+        if moge_data:
+            moge_data_dict = moge_data.model_dump()
+            moge_data_dict['meshUrl'] = local_mesh_url
+            moge_data = type(moge_data)(**moge_data_dict)
+
     placed_furniture_json = json.dumps([f.model_dump() for f in room.placedFurniture]) if room.placedFurniture else None
-    moge_data_json = json.dumps(room.mogeData.model_dump()) if room.mogeData else None
+    moge_data_json = json.dumps(moge_data.model_dump()) if moge_data else None
     lighting_json = json.dumps(room.lightingSettings.model_dump()) if room.lightingSettings else None
 
     db.execute("""

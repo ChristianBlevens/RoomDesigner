@@ -57,7 +57,6 @@ import {
   getRoomsByHouseId,
   getOrphanRooms
 } from './database.js';
-import { saveMogeMesh } from './api.js';
 import {
   getCurrentHouse,
   setCurrentHouse,
@@ -86,7 +85,6 @@ import {
   deselectFurniture
 } from './furniture.js';
 import {
-  generateId,
   showError,
   hideError,
   extractModelFromZip,
@@ -747,23 +745,9 @@ async function processRoomAutomatically() {
     // Clear CSS background since we use 3D plane
     document.getElementById('background-container').style.backgroundImage = '';
 
-    // Generate room ID upfront for mesh saving
-    const roomId = generateId();
-
-    // Save mesh to server (downloads from HuggingFace and stores locally)
-    let localMeshUrl = geometryUrl;
-    try {
-      loadingText.textContent = 'Saving room mesh...';
-      const { local_url } = await saveMogeMesh(roomId, geometryUrl);
-      localMeshUrl = local_url;
-      console.log('Mesh saved to server:', localMeshUrl);
-    } catch (err) {
-      console.warn('Failed to save mesh to server, using original URL:', err);
-    }
-
-    // Store MoGe data for room persistence
+    // Store MoGe data for room persistence (meshUrl is placeholder - server will set local URL)
     const mogeDataForSave = {
-      meshUrl: localMeshUrl,
+      meshUrl: null,  // Will be set by server after download
       cameraFov: fov,
       imageAspect: imageAspect
     };
@@ -773,13 +757,16 @@ async function processRoomAutomatically() {
     // Show final success
     loadingEl.classList.add('hidden');
     resultEl.classList.remove('hidden');
-    fovInfo.textContent = 'Room ready! Opening scene...';
+    fovInfo.textContent = 'Room ready! Saving...';
 
     // Brief pause to show success
     await new Promise(resolve => setTimeout(resolve, 800));
 
-    // Create the room with MoGe data for persistence
-    const room = await createRoomInCurrentHouse(pendingRoomImage, pendingRoomName, mogeDataForSave, roomId);
+    // Create the room - server downloads mesh atomically
+    loadingText.textContent = 'Saving room and mesh...';
+    loadingEl.classList.remove('hidden');
+    resultEl.classList.add('hidden');
+    const room = await createRoomInCurrentHouse(pendingRoomImage, pendingRoomName, mogeDataForSave, geometryUrl);
 
     // Set as current room
     currentRoomId = room.id;
@@ -1657,7 +1644,7 @@ async function handleEntrySubmit(event) {
   const quantity = parseInt(document.getElementById('entry-quantity').value, 10) || 1;
 
   const entry = {
-    id: editingEntryId || generateId(),
+    id: editingEntryId || null,
     name: name,
     category: categoryInput.value.trim() || null,
     tags: entryTags.length > 0 ? entryTags : null,
@@ -2416,11 +2403,9 @@ async function saveCurrentRoom() {
   await saveRoom(roomState);
 }
 
-async function createRoomInCurrentHouse(image, name, mogeData = null, existingRoomId = null) {
-  const roomId = existingRoomId || generateId();
-
+async function createRoomInCurrentHouse(image, name, mogeData = null, remoteMeshUrl = null) {
   const room = {
-    id: roomId,
+    id: null,  // Server generates ID
     houseId: currentHouseId,
     name: name,
     backgroundImage: image,
@@ -2431,11 +2416,13 @@ async function createRoomInCurrentHouse(image, name, mogeData = null, existingRo
       meshUrl: mogeData.meshUrl,
       cameraFov: mogeData.cameraFov,
       imageAspect: mogeData.imageAspect
-    } : null
+    } : null,
+    // Remote mesh URL for server to download atomically
+    remoteMeshUrl: remoteMeshUrl
   };
 
-  await saveRoom(room);
-  return room;
+  const roomId = await saveRoom(room);
+  return { ...room, id: roomId };
 }
 
 async function closeHouse() {

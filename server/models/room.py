@@ -30,6 +30,7 @@ class RoomCreate(BaseModel):
     placedFurniture: Optional[List[PlacedFurniture]] = []
     mogeData: Optional[MogeData] = None
     lightingSettings: Optional[LightingSettings] = None
+    remoteMeshUrl: Optional[str] = None  # HuggingFace temp URL - server downloads and stores locally
 
 class RoomUpdate(BaseModel):
     name: Optional[str] = None

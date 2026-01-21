@@ -118,15 +118,8 @@ export async function getOrphanRooms() {
 }
 
 export async function saveRoom(roomState) {
-  const roomId = roomState.id;
-
-  // Upload background image if it's a Blob
-  if (roomState.backgroundImage instanceof Blob) {
-    await uploadFile(`/files/room/${roomId}/background`, roomState.backgroundImage, 'background.jpg');
-  }
-
   const payload = {
-    id: roomId,
+    id: roomState.id || null,
     houseId: roomState.houseId,
     name: roomState.name,
     placedFurniture: roomState.placedFurniture || [],
@@ -134,20 +127,34 @@ export async function saveRoom(roomState) {
     lightingSettings: roomState.lightingSettings || null
   };
 
-  // Check if exists first
-  try {
-    await apiFetch(`/rooms/${roomId}`);
-    // Exists, update
-    await apiFetch(`/rooms/${roomId}`, {
+  let roomId;
+
+  if (roomState.id) {
+    // Existing room - upload background first, then update
+    if (roomState.backgroundImage instanceof Blob) {
+      await uploadFile(`/files/room/${roomState.id}/background`, roomState.backgroundImage, 'background.jpg');
+    }
+    await apiFetch(`/rooms/${roomState.id}`, {
       method: 'PUT',
       body: JSON.stringify(payload)
     });
-  } catch (e) {
-    // Doesn't exist, create
-    await apiFetch('/rooms/', {
+    roomId = roomState.id;
+  } else {
+    // New room - include remoteMeshUrl for atomic mesh download
+    if (roomState.remoteMeshUrl) {
+      payload.remoteMeshUrl = roomState.remoteMeshUrl;
+    }
+    const response = await apiFetch('/rooms/', {
       method: 'POST',
       body: JSON.stringify(payload)
     });
+    const created = await response.json();
+    roomId = created.id;
+
+    // Upload background after room created (now we have the ID)
+    if (roomState.backgroundImage instanceof Blob) {
+      await uploadFile(`/files/room/${roomId}/background`, roomState.backgroundImage, 'background.jpg');
+    }
   }
 
   return roomId;
@@ -216,11 +223,8 @@ export async function getFurnitureEntry(id) {
 }
 
 export async function saveFurnitureEntry(entry) {
-  const entryId = entry.id || crypto.randomUUID();
-
-  // Create/update entry first
   const payload = {
-    id: entryId,
+    id: entry.id || null,
     name: entry.name,
     category: entry.category || null,
     tags: entry.tags || null,
@@ -230,20 +234,23 @@ export async function saveFurnitureEntry(entry) {
     dimensionZ: entry.dimensionZ || null
   };
 
-  // Check if exists first
-  try {
-    await apiFetch(`/furniture/${entryId}`);
-    // Exists, update
-    await apiFetch(`/furniture/${entryId}`, {
+  let entryId;
+
+  if (entry.id) {
+    // Existing entry, update
+    await apiFetch(`/furniture/${entry.id}`, {
       method: 'PUT',
       body: JSON.stringify(payload)
     });
-  } catch (e) {
-    // Doesn't exist, create
-    await apiFetch('/furniture/', {
+    entryId = entry.id;
+  } else {
+    // New entry, create (server generates ID)
+    const response = await apiFetch('/furniture/', {
       method: 'POST',
       body: JSON.stringify(payload)
     });
+    const created = await response.json();
+    entryId = created.id;
   }
 
   // Upload files
