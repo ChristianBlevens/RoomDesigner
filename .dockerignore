@@ -30,6 +30,8 @@ assets/
 Dockerfile
 docker-compose.yml
 .dockerignore
+Dockerfile.caddy
+Caddyfile
 
 # Runtime data (mounted as volumes)
 server/data/
