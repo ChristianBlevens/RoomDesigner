@@ -13,7 +13,7 @@ class PlacedFurniture(BaseModel):
     scale: Position
 
 class MogeData(BaseModel):
-    meshUrl: str
+    meshUrl: Optional[str] = None  # Set by server after downloading from remoteMeshUrl
     cameraFov: float
     imageAspect: float
 

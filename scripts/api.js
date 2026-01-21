@@ -16,7 +16,14 @@ async function apiFetch(path, options = {}) {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
+    // Handle Pydantic validation errors (detail is an array)
+    let message;
+    if (Array.isArray(error.detail)) {
+      message = error.detail.map(e => `${e.loc?.join('.')}: ${e.msg}`).join('; ');
+    } else {
+      message = error.detail || `HTTP ${response.status}`;
+    }
+    throw new Error(message);
   }
 
   return response;
