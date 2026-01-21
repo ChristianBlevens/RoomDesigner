@@ -1,0 +1,41 @@
+# Stage 1: Builder - install dependencies
+FROM python:3.12-slim AS builder
+
+WORKDIR /build
+
+# Create virtual environment for clean copying
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install Python dependencies
+COPY server/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+
+# Stage 2: Final minimal image
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copy application code
+COPY server/ ./server/
+COPY scripts/ ./scripts/
+COPY styles/ ./styles/
+COPY huggingface-moge2/ ./huggingface-moge2/
+COPY index.html .
+
+# Create data directories
+RUN mkdir -p /app/server/data /app/server/storage
+
+# Non-root user for security
+RUN useradd --create-home --shell /bin/bash appuser && \
+    chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8000
+
+CMD ["uvicorn", "server.main:app", "--host", "0.0.0.0", "--port", "8000"]

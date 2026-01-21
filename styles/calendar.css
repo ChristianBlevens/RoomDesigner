@@ -1,0 +1,243 @@
+/* Calendar Modal */
+.calendar-modal-content {
+  width: 90vw;
+  max-width: 900px;
+  height: 80vh;
+  max-height: 700px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+}
+
+.calendar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.calendar-nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.calendar-nav-btn {
+  background: none;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 16px;
+  color: #374151;
+  transition: all 0.2s;
+}
+
+.calendar-nav-btn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
+.calendar-month-year {
+  font-size: 20px;
+  font-weight: 600;
+  color: #111827;
+  min-width: 180px;
+  text-align: center;
+}
+
+.calendar-today-btn {
+  background: none;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #374151;
+  transition: all 0.2s;
+}
+
+.calendar-today-btn:hover {
+  background: #f3f4f6;
+}
+
+#calendar-new-house-btn {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+/* Calendar Grid */
+.calendar-grid {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+}
+
+.calendar-weekday {
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+}
+
+.calendar-days {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  grid-template-rows: repeat(6, 1fr);
+  gap: 1px;
+  background: #e5e7eb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.calendar-day {
+  background: #fff;
+  padding: 4px;
+  min-height: 80px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.calendar-day.other-month {
+  background: #f9fafb;
+}
+
+.calendar-day.other-month .day-number {
+  color: #9ca3af;
+}
+
+.calendar-day.today {
+  background: #eff6ff;
+}
+
+.calendar-day.today .day-number {
+  background: #3b82f6;
+  color: #fff;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.day-number {
+  font-size: 12px;
+  font-weight: 500;
+  color: #374151;
+  margin-bottom: 4px;
+}
+
+.day-events {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+/* House Event Bars */
+.house-event {
+  font-size: 10px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: opacity 0.2s;
+}
+
+.house-event:hover {
+  opacity: 0.85;
+}
+
+/* Event position classes for multi-week spanning */
+.house-event.event-start {
+  border-top-left-radius: 3px;
+  border-bottom-left-radius: 3px;
+  margin-left: 0;
+}
+
+.house-event.event-middle {
+  border-radius: 0;
+  margin-left: -4px;
+  margin-right: -4px;
+}
+
+.house-event.event-end {
+  border-top-right-radius: 3px;
+  border-bottom-right-radius: 3px;
+  margin-right: 0;
+}
+
+.house-event.event-single {
+  border-radius: 3px;
+}
+
+/* House event colors (assigned dynamically) */
+.house-color-0 { background: #3b82f6; }
+.house-color-1 { background: #10b981; }
+.house-color-2 { background: #f59e0b; }
+.house-color-3 { background: #ef4444; }
+.house-color-4 { background: #8b5cf6; }
+.house-color-5 { background: #ec4899; }
+.house-color-6 { background: #06b6d4; }
+.house-color-7 { background: #84cc16; }
+
+/* Current house highlight */
+.house-event.current-house {
+  box-shadow: 0 0 0 2px #111827;
+}
+
+/* Empty state */
+.calendar-empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  color: #6b7280;
+}
+
+.calendar-empty p {
+  margin-bottom: 16px;
+}
+
+/* Legacy rooms notice (reused from house modal) */
+.calendar-legacy-notice {
+  margin-top: 16px;
+  padding: 12px 16px;
+  background: #fef3c7;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #92400e;
+}
+
+.calendar-legacy-notice button {
+  background: none;
+  border: none;
+  color: #d97706;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+  font-size: inherit;
+}

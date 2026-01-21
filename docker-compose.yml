@@ -1,0 +1,14 @@
+services:
+  roomdesigner:
+    build: .
+    container_name: roomdesigner
+    ports:
+      - "8000:8000"
+    volumes:
+      - roomdesigner_data:/app/server/data
+      - roomdesigner_storage:/app/server/storage
+    restart: unless-stopped
+
+volumes:
+  roomdesigner_data:
+  roomdesigner_storage:

@@ -1,0 +1,131 @@
+from fastapi import APIRouter, HTTPException
+from typing import List
+import uuid
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from db.connection import get_houses_db
+from models.room import RoomCreate, RoomUpdate, RoomResponse
+from config import ROOM_BACKGROUNDS, ROOM_MESHES
+
+router = APIRouter()
+
+def row_to_response(row) -> RoomResponse:
+    room_id = row[0]
+    background_path = row[3]
+    placed_furniture = json.loads(row[4]) if row[4] else []
+    moge_data = json.loads(row[5]) if row[5] else None
+    lighting_settings = json.loads(row[6]) if row[6] else None
+
+    background_url = f"/api/files/room/{room_id}/background" if background_path else None
+
+    return RoomResponse(
+        id=room_id,
+        houseId=row[1],
+        name=row[2],
+        backgroundImageUrl=background_url,
+        placedFurniture=placed_furniture,
+        mogeData=moge_data,
+        lightingSettings=lighting_settings
+    )
+
+@router.get("/", response_model=List[RoomResponse])
+def get_all_rooms():
+    db = get_houses_db()
+    rows = db.execute("""
+        SELECT id, house_id, name, background_image_path,
+               placed_furniture, moge_data, lighting_settings
+        FROM rooms
+    """).fetchall()
+    return [row_to_response(row) for row in rows]
+
+@router.get("/house/{house_id}", response_model=List[RoomResponse])
+def get_rooms_by_house(house_id: str):
+    db = get_houses_db()
+    rows = db.execute("""
+        SELECT id, house_id, name, background_image_path,
+               placed_furniture, moge_data, lighting_settings
+        FROM rooms WHERE house_id = ?
+    """, [house_id]).fetchall()
+    return [row_to_response(row) for row in rows]
+
+@router.get("/orphans", response_model=List[RoomResponse])
+def get_orphan_rooms():
+    db = get_houses_db()
+    rows = db.execute("""
+        SELECT id, house_id, name, background_image_path,
+               placed_furniture, moge_data, lighting_settings
+        FROM rooms WHERE house_id IS NULL OR house_id = ''
+    """).fetchall()
+    return [row_to_response(row) for row in rows]
+
+@router.get("/{room_id}", response_model=RoomResponse)
+def get_room(room_id: str):
+    db = get_houses_db()
+    row = db.execute("""
+        SELECT id, house_id, name, background_image_path,
+               placed_furniture, moge_data, lighting_settings
+        FROM rooms WHERE id = ?
+    """, [room_id]).fetchone()
+    if not row:
+        raise HTTPException(404, "Room not found")
+    return row_to_response(row)
+
+@router.post("/", response_model=RoomResponse)
+def create_room(room: RoomCreate):
+    db = get_houses_db()
+    room_id = room.id or str(uuid.uuid4())
+
+    placed_furniture_json = json.dumps([f.model_dump() for f in room.placedFurniture]) if room.placedFurniture else None
+    moge_data_json = json.dumps(room.mogeData.model_dump()) if room.mogeData else None
+    lighting_json = json.dumps(room.lightingSettings.model_dump()) if room.lightingSettings else None
+
+    db.execute("""
+        INSERT INTO rooms (id, house_id, name, placed_furniture, moge_data, lighting_settings)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, [room_id, room.houseId, room.name, placed_furniture_json, moge_data_json, lighting_json])
+
+    return get_room(room_id)
+
+@router.put("/{room_id}", response_model=RoomResponse)
+def update_room(room_id: str, room: RoomUpdate):
+    db = get_houses_db()
+    existing = db.execute("SELECT id FROM rooms WHERE id = ?", [room_id]).fetchone()
+    if not existing:
+        raise HTTPException(404, "Room not found")
+
+    updates = []
+    values = []
+
+    if room.name is not None:
+        updates.append("name = ?")
+        values.append(room.name)
+    if room.placedFurniture is not None:
+        updates.append("placed_furniture = ?")
+        values.append(json.dumps([f.model_dump() for f in room.placedFurniture]))
+    if room.mogeData is not None:
+        updates.append("moge_data = ?")
+        values.append(json.dumps(room.mogeData.model_dump()))
+    if room.lightingSettings is not None:
+        updates.append("lighting_settings = ?")
+        values.append(json.dumps(room.lightingSettings.model_dump()))
+
+    if updates:
+        values.append(room_id)
+        db.execute(f"UPDATE rooms SET {', '.join(updates)} WHERE id = ?", values)
+
+    return get_room(room_id)
+
+@router.delete("/{room_id}")
+def delete_room(room_id: str):
+    db = get_houses_db()
+    db.execute("DELETE FROM rooms WHERE id = ?", [room_id])
+
+    # Clean up files
+    for ext in ['jpg', 'jpeg', 'png', 'webp']:
+        (ROOM_BACKGROUNDS / f"{room_id}.{ext}").unlink(missing_ok=True)
+    (ROOM_MESHES / f"{room_id}.glb").unlink(missing_ok=True)
+
+    return {"status": "deleted"}

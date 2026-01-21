@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Room Furniture Planner</title>
+  <link rel="stylesheet" href="styles/main.css">
+  <link rel="stylesheet" href="styles/modal.css">
+  <link rel="stylesheet" href="styles/calendar.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+<body>
+  <!-- Background image container -->
+  <div id="background-container"></div>
+
+  <!-- Three.js canvas container (hidden until orientation is set) -->
+  <div id="canvas-container" class="hidden"></div>
+
+  <!-- Top-left: Undo/Redo/Lighting buttons -->
+  <div id="controls-left" class="hidden">
+    <button id="undo-btn" disabled title="Undo (Ctrl+Z)">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M3 10h10a5 5 0 0 1 5 5v2"></path>
+        <polyline points="3 10 7 6"></polyline>
+        <polyline points="3 10 7 14"></polyline>
+      </svg>
+    </button>
+    <button id="redo-btn" disabled title="Redo (Ctrl+Shift+Z)">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 10H11a5 5 0 0 0-5 5v2"></path>
+        <polyline points="21 10 17 6"></polyline>
+        <polyline points="21 10 17 14"></polyline>
+      </svg>
+    </button>
+    <button id="lighting-btn" title="Lighting Controls">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="5"></circle>
+        <line x1="12" y1="1" x2="12" y2="3"></line>
+        <line x1="12" y1="21" x2="12" y2="23"></line>
+        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+        <line x1="1" y1="12" x2="3" y2="12"></line>
+        <line x1="21" y1="12" x2="23" y2="12"></line>
+        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Lighting Controls Panel -->
+  <div id="lighting-panel" class="lighting-panel hidden">
+    <div class="lighting-panel-header">
+      <span>Lighting</span>
+      <button id="lighting-close-btn" class="lighting-close-btn">&times;</button>
+    </div>
+    <div class="lighting-slider-row">
+      <label>Intensity</label>
+      <input type="range" id="lighting-intensity-slider" min="0" max="2" step="0.1" value="0.8">
+      <span id="lighting-intensity-value">0.8</span>
+    </div>
+    <div class="lighting-slider-row">
+      <label>Temp</label>
+      <input type="range" id="lighting-temp-slider" min="2000" max="10000" step="100" value="6500">
+      <span id="lighting-temp-value">6500K</span>
+    </div>
+    <div class="lighting-direction-row">
+      <button id="lighting-direction-btn" class="btn-secondary">Set Direction</button>
+      <span id="lighting-direction-status"></span>
+    </div>
+  </div>
+
+  <!-- Top-right: House button -->
+  <div id="controls-right" class="hidden">
+    <button id="session-btn">House</button>
+  </div>
+
+  <!-- Room Processing Modal (progress display for MoGe-2 analysis) -->
+  <div class="modal-overlay modal-hidden" id="orientation-modal">
+    <div class="modal-content orientation-modal-content">
+      <h2>Setting Up Room</h2>
+      <p>Using AI to extract 3D geometry from your photo.</p>
+      <div class="orientation-info hidden" id="orientation-default-info">
+        <p class="orientation-note">Preparing to analyze room...</p>
+      </div>
+      <div class="orientation-info hidden" id="orientation-loading">
+        <div class="loading-spinner"></div>
+        <p id="orientation-loading-text">Connecting to MoGe-2...</p>
+      </div>
+      <div class="orientation-info hidden" id="orientation-result">
+        <p class="orientation-success">Room geometry extracted successfully!</p>
+        <p id="orientation-fov-info">Camera FOV: --</p>
+      </div>
+      <div class="orientation-info hidden" id="orientation-error">
+        <p class="orientation-error-text" id="orientation-error-text">Failed to analyze room geometry.</p>
+        <p>A default 3D room will be used instead.</p>
+      </div>
+      <div class="orientation-actions">
+        <button id="apply-orientation-btn" class="btn-primary hidden">Continue</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Furniture Database Modal -->
+  <div class="modal-overlay modal-hidden" id="furniture-modal">
+    <div class="modal-content furniture-modal-content">
+      <div class="furniture-modal-header">
+        <input type="text" id="furniture-search" placeholder="Search furniture...">
+        <select id="category-select">
+          <option value="">All Categories</option>
+        </select>
+        <div id="tags-dropdown-container"></div>
+        <button id="add-entry-btn" class="btn-primary">+ Add Entry</button>
+      </div>
+      <div class="furniture-grid" id="furniture-grid"></div>
+    </div>
+  </div>
+
+  <!-- Calendar Modal -->
+  <div class="modal-overlay modal-hidden" id="calendar-modal">
+    <div class="modal-content calendar-modal-content">
+      <div class="calendar-header">
+        <div class="calendar-nav">
+          <button id="calendar-prev-btn" class="calendar-nav-btn" title="Previous month">&#9664;</button>
+          <span id="calendar-month-year" class="calendar-month-year">January 2026</span>
+          <button id="calendar-next-btn" class="calendar-nav-btn" title="Next month">&#9654;</button>
+          <button id="calendar-today-btn" class="calendar-today-btn">Today</button>
+        </div>
+        <button id="calendar-new-house-btn" class="btn-primary">+ New House</button>
+      </div>
+      <div class="calendar-grid">
+        <div class="calendar-weekdays">
+          <div class="calendar-weekday">Sun</div>
+          <div class="calendar-weekday">Mon</div>
+          <div class="calendar-weekday">Tue</div>
+          <div class="calendar-weekday">Wed</div>
+          <div class="calendar-weekday">Thu</div>
+          <div class="calendar-weekday">Fri</div>
+          <div class="calendar-weekday">Sat</div>
+        </div>
+        <div id="calendar-days" class="calendar-days">
+          <!-- Day cells inserted dynamically -->
+        </div>
+      </div>
+      <!-- Legacy room migration notice -->
+      <div id="legacy-rooms-notice" class="calendar-legacy-notice hidden">
+        <p>You have rooms from a previous version. <button id="migrate-rooms-btn" class="btn-link">Assign to house</button></p>
+      </div>
+    </div>
+    <!-- Hidden file inputs for room image upload flow -->
+    <input type="file" id="image-file-input" accept="image/*" style="display: none;">
+  </div>
+
+  <!-- House Editor Modal -->
+  <div class="modal-overlay modal-hidden" id="house-editor-modal">
+    <div class="modal-content modal-small">
+      <h2 id="house-editor-title">New House</h2>
+      <form id="house-editor-form">
+        <div class="form-group">
+          <label for="house-name">House Name</label>
+          <input type="text" id="house-name" required placeholder="e.g., 123 Oak Street">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="house-start-date">Start Date</label>
+            <input type="date" id="house-start-date" required>
+          </div>
+          <div class="form-group">
+            <label for="house-end-date">End Date</label>
+            <input type="date" id="house-end-date" required>
+          </div>
+        </div>
+        <p class="form-error hidden" id="house-date-error">End date must be after start date</p>
+        <div class="form-actions">
+          <button type="button" class="btn-secondary" id="house-editor-cancel">Cancel</button>
+          <button type="submit" class="btn-primary" id="house-editor-save">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- House Action Popup -->
+  <div id="house-action-popup" class="popup-menu modal-hidden">
+    <button id="house-load-btn">Load House</button>
+    <button id="house-edit-btn">Edit</button>
+    <button id="house-delete-btn" class="danger">Delete</button>
+  </div>
+
+  <!-- Room Name Modal -->
+  <div class="modal-overlay modal-hidden" id="room-name-modal">
+    <div class="modal-content modal-small">
+      <h2>Name This Room</h2>
+      <form id="room-name-form">
+        <div class="form-group">
+          <label for="room-name-input">Room Name</label>
+          <input type="text" id="room-name-input" required placeholder="e.g., Living Room">
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn-primary">Continue</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Entry Editor Modal -->
+  <div class="modal-overlay modal-hidden" id="entry-editor-modal">
+    <div class="modal-content entry-editor-content">
+      <h3 id="entry-editor-title">Add Furniture Entry</h3>
+      <form id="entry-form">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="entry-name">Name</label>
+            <input type="text" id="entry-name" required>
+          </div>
+          <div class="form-group form-group-narrow">
+            <label for="entry-quantity">Qty</label>
+            <input type="number" id="entry-quantity" min="1" value="1" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="entry-category">Category</label>
+          <div id="entry-category-container" class="dropdown-input-container">
+            <input type="text" id="entry-category" placeholder="Select or type new..." autocomplete="off">
+            <div id="category-dropdown" class="tag-dropdown hidden"></div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Tags</label>
+          <div id="entry-tags-container">
+            <div id="entry-tags-list"></div>
+            <input type="text" id="entry-tag-input" placeholder="Add tag..." autocomplete="off">
+            <div id="tag-dropdown" class="tag-dropdown hidden"></div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>
+            Dimensions (meters)
+            <button type="button" class="help-icon" id="dimension-help-btn" title="Help">?</button>
+          </label>
+          <div class="dimension-inputs">
+            <div class="dimension-field">
+              <label for="entry-dimension-x">X (width)</label>
+              <input type="number" id="entry-dimension-x" step="0.01" min="0" placeholder="—">
+            </div>
+            <div class="dimension-field">
+              <label for="entry-dimension-y">Y (height)</label>
+              <input type="number" id="entry-dimension-y" step="0.01" min="0" placeholder="—">
+            </div>
+            <div class="dimension-field">
+              <label for="entry-dimension-z">Z (depth)</label>
+              <input type="number" id="entry-dimension-z" step="0.01" min="0" placeholder="—">
+            </div>
+          </div>
+          <p class="dimension-error hidden" id="dimension-error">
+            Enter one dimension (scale reference) or all three (exact size)
+          </p>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Image</label>
+            <div class="upload-preview" id="image-upload-preview">
+              <span>No image</span>
+            </div>
+            <button type="button" id="upload-image-entry-btn" class="btn-secondary">Upload Image</button>
+            <input type="file" id="entry-image-input" accept="image/*" style="display: none;">
+          </div>
+          <div class="form-group">
+            <label>3D Model</label>
+            <div class="upload-preview" id="model-upload-preview">
+              <span>No model</span>
+            </div>
+            <button type="button" id="upload-model-btn" class="btn-secondary">Upload Model (ZIP)</button>
+            <input type="file" id="entry-model-input" accept=".zip" style="display: none;">
+          </div>
+        </div>
+        <button type="button" id="generate-model-btn" class="btn-secondary" style="display: none;">
+          Generate 3D Model from Image
+        </button>
+        <div class="form-actions">
+          <button type="button" id="cancel-entry-btn" class="btn-secondary">Cancel</button>
+          <button type="submit" class="btn-primary">Save Entry</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Entry Action Popup -->
+  <div class="popup-menu modal-hidden" id="entry-action-popup">
+    <button id="popup-edit-btn">Edit</button>
+    <button id="popup-place-btn">Place</button>
+    <button id="popup-delete-btn" class="danger">Delete</button>
+  </div>
+
+  <!-- Session Modal (House Operations) -->
+  <div class="modal-overlay modal-hidden" id="session-modal">
+    <div class="modal-content session-modal-content">
+      <div class="session-house-info">
+        <h3 id="session-house-name">House Name</h3>
+        <p id="session-house-dates" class="session-dates">Date Range</p>
+      </div>
+      <div class="session-buttons">
+        <button id="edit-house-session-btn" class="btn-secondary">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+          </svg>
+          Edit House
+        </button>
+        <button id="export-session-btn" class="btn-secondary">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          Export House
+        </button>
+        <button id="close-house-session-btn" class="btn-secondary">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+            <polyline points="9 22 9 12 15 12 15 22"></polyline>
+          </svg>
+          Close House
+        </button>
+        <button id="delete-house-session-btn" class="btn-danger">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+          Delete House
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete Confirmation Modal -->
+  <div class="modal-overlay modal-hidden" id="confirm-delete-modal">
+    <div class="modal-content confirm-modal-content">
+      <h3>Confirm Delete</h3>
+      <p id="confirm-delete-message">Are you sure you want to delete this?</p>
+      <div class="confirm-buttons">
+        <button id="confirm-cancel-btn" class="btn-secondary">Cancel</button>
+        <button id="confirm-delete-btn" class="btn-danger">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Error Popup -->
+  <div class="error-popup modal-hidden" id="error-popup">
+    <p id="error-message"></p>
+    <button id="error-close-btn">OK</button>
+  </div>
+
+  <!-- Dimension Help Popup -->
+  <div class="help-popup modal-hidden" id="dimension-help-popup">
+    <h4>Dimension Scaling</h4>
+    <ul>
+      <li><strong>Empty fields:</strong> Model uses default size</li>
+      <li><strong>One dimension:</strong> This value becomes the reference; other dimensions scale proportionally</li>
+      <li><strong>All three dimensions:</strong> Model morphs to fit exact measurements</li>
+    </ul>
+    <p>Dimensions measure the bounding box (farthest points in each direction).</p>
+  </div>
+
+  <!-- Debug Panel (toggle with ` backtick key) -->
+  <div id="debug-panel" class="debug-panel hidden">
+    <h4>Debug Mode</h4>
+    <p style="color:#aaa;font-size:10px;margin:0 0 8px 0;">WASD: move | Mouse drag: look | Space/Ctrl: up/down | Shift: fast</p>
+    <pre id="debug-info"></pre>
+    <button id="debug-close-btn">Close (`)</button>
+  </div>
+
+  <!-- Furniture Gizmo UI -->
+  <div class="gizmo-menu modal-hidden" id="gizmo-menu">
+    <button id="gizmo-drag-btn" class="gizmo-btn" title="Move (G)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="5 9 2 12 5 15"></polyline>
+        <polyline points="9 5 12 2 15 5"></polyline>
+        <polyline points="15 19 12 22 9 19"></polyline>
+        <polyline points="19 9 22 12 19 15"></polyline>
+        <line x1="2" y1="12" x2="22" y2="12"></line>
+        <line x1="12" y1="2" x2="12" y2="22"></line>
+      </svg>
+    </button>
+    <button id="gizmo-rotate-btn" class="gizmo-btn" title="Rotate (R)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21.5 2v6h-6"></path>
+        <path d="M21.34 15.57a10 10 0 1 1-.57-8.38"></path>
+      </svg>
+    </button>
+    <button id="gizmo-scale-btn" class="gizmo-btn" title="Scale (S)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="15 3 21 3 21 9"></polyline>
+        <polyline points="9 21 3 21 3 15"></polyline>
+        <line x1="21" y1="3" x2="14" y2="10"></line>
+        <line x1="3" y1="21" x2="10" y2="14"></line>
+      </svg>
+    </button>
+    <button id="gizmo-delete-btn" class="gizmo-btn danger" title="Delete (Del)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="3 6 5 6 21 6"></polyline>
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Room Tab Bar -->
+  <div id="room-tab-bar" class="room-tab-bar hidden">
+    <div id="room-tabs-container" class="room-tabs-container">
+      <!-- Tabs inserted dynamically -->
+    </div>
+    <button id="add-room-tab-btn" class="add-room-tab-btn" title="Add Room">+</button>
+  </div>
+
+  <script type="module" src="scripts/main.js"></script>
+</body>
+</html>

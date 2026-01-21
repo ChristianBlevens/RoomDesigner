@@ -1,0 +1,191 @@
+// House management for Room Furniture Planner
+
+import {
+  saveHouse as dbSaveHouse,
+  getHouse as dbGetHouse,
+  getAllHouses as dbGetAllHouses,
+  deleteHouse as dbDeleteHouse,
+  getRoomsByHouseId,
+  deleteRoom
+} from './database.js';
+import { generateId } from './utils.js';
+
+// Current house state
+let currentHouse = null;
+
+// Get current house
+export function getCurrentHouse() {
+  return currentHouse;
+}
+
+// Set current house
+export function setCurrentHouse(house) {
+  currentHouse = house;
+}
+
+// Validate house dates
+export function validateHouseDates(startDate, endDate) {
+  if (!startDate || !endDate) {
+    return { valid: false, error: 'Both start and end dates are required' };
+  }
+
+  // Check valid ISO date format
+  const startParsed = Date.parse(startDate);
+  const endParsed = Date.parse(endDate);
+
+  if (isNaN(startParsed)) {
+    return { valid: false, error: 'Invalid start date' };
+  }
+
+  if (isNaN(endParsed)) {
+    return { valid: false, error: 'Invalid end date' };
+  }
+
+  if (startDate > endDate) {
+    return { valid: false, error: 'End date must be after start date' };
+  }
+
+  return { valid: true };
+}
+
+// Create a new house
+export async function createHouse(name, startDate, endDate) {
+  const validation = validateHouseDates(startDate, endDate);
+  if (!validation.valid) {
+    throw new Error(validation.error);
+  }
+
+  const house = {
+    id: generateId(),
+    name: name.trim(),
+    startDate: startDate,
+    endDate: endDate,
+    createdAt: Date.now()
+  };
+
+  await dbSaveHouse(house);
+  return house;
+}
+
+// Update an existing house
+export async function updateHouse(id, updates) {
+  const house = await dbGetHouse(id);
+  if (!house) {
+    throw new Error('House not found');
+  }
+
+  // If updating dates, validate them
+  const newStartDate = updates.startDate !== undefined ? updates.startDate : house.startDate;
+  const newEndDate = updates.endDate !== undefined ? updates.endDate : house.endDate;
+
+  const validation = validateHouseDates(newStartDate, newEndDate);
+  if (!validation.valid) {
+    throw new Error(validation.error);
+  }
+
+  const updatedHouse = {
+    ...house,
+    ...updates,
+    startDate: newStartDate,
+    endDate: newEndDate
+  };
+
+  await dbSaveHouse(updatedHouse);
+  return updatedHouse;
+}
+
+// Delete house and all its rooms
+export async function deleteHouseWithRooms(houseId) {
+  // Get all rooms in this house
+  const rooms = await getRoomsByHouseId(houseId);
+
+  // Delete all rooms
+  for (const room of rooms) {
+    await deleteRoom(room.id);
+  }
+
+  // Delete the house
+  await dbDeleteHouse(houseId);
+}
+
+// Get house by ID
+export async function getHouseById(id) {
+  return await dbGetHouse(id);
+}
+
+// Get room count for a house
+export async function getHouseRoomCount(houseId) {
+  const rooms = await getRoomsByHouseId(houseId);
+  return rooms.length;
+}
+
+// Calculate available quantity for a furniture entry based on current house context
+// Returns { available, total } where available = total - usedInOverlappingHouses - currentRoomCount
+// currentRoomPlacedCount: count of this entry already placed in the current scene (may be unsaved)
+export async function getAvailableQuantity(entryId, currentRoomId, currentRoomPlacedCount = 0) {
+  const { getFurnitureEntry, getAllHouses, getRoomsByHouseId } = await import('./database.js');
+
+  const entry = await getFurnitureEntry(entryId);
+  if (!entry) {
+    return { available: 0, total: 0 };
+  }
+
+  const total = entry.quantity || 1;
+
+  // If no house is loaded, all furniture is available
+  if (!currentHouse) {
+    return { available: total, total };
+  }
+
+  // Find all houses with overlapping time windows
+  const allHouses = await getAllHouses();
+  const overlappingHouses = allHouses.filter(house =>
+    house.startDate <= currentHouse.endDate && house.endDate >= currentHouse.startDate
+  );
+
+  // Count total placed instances across all rooms in overlapping houses (excluding current room)
+  let otherRoomsCount = 0;
+
+  for (const house of overlappingHouses) {
+    const rooms = await getRoomsByHouseId(house.id);
+
+    for (const room of rooms) {
+      // Skip current room - we use the live scene count instead
+      if (room.id === currentRoomId) {
+        continue;
+      }
+
+      if (room.placedFurniture) {
+        const count = room.placedFurniture.filter(f => f.entryId === entryId).length;
+        otherRoomsCount += count;
+      }
+    }
+  }
+
+  // Available = total - used in other rooms - already placed in current room
+  const available = Math.max(0, total - otherRoomsCount - currentRoomPlacedCount);
+  return { available, total };
+}
+
+// Format date range for display
+export function formatDateRange(startDate, endDate) {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+
+  const options = { month: 'short', day: 'numeric' };
+  const startStr = start.toLocaleDateString('en-US', options);
+  const endStr = end.toLocaleDateString('en-US', options);
+
+  // Add year if dates span different years or if not current year
+  const currentYear = new Date().getFullYear();
+  const startYear = start.getFullYear();
+  const endYear = end.getFullYear();
+
+  if (startYear !== endYear) {
+    return `${startStr}, ${startYear} - ${endStr}, ${endYear}`;
+  } else if (startYear !== currentYear) {
+    return `${startStr} - ${endStr}, ${startYear}`;
+  }
+
+  return `${startStr} - ${endStr}`;
+}
