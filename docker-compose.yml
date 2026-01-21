@@ -4,6 +4,8 @@ services:
     container_name: roomdesigner
     expose:
       - "8000"
+    env_file:
+      - .env
     volumes:
       - roomdesigner_data:/app/server/data
       - roomdesigner_storage:/app/server/storage

@@ -34,7 +34,7 @@ class ModalManager {
       const isOutsideModal = modalContent && !modalContent.contains(event.target);
 
       // Special case: certain modals shouldn't close on outside click
-      if ((modal.id === 'initial-modal' || modal.id === 'orientation-modal' || modal.id === 'calendar-modal') && isOutsideModal) {
+      if ((modal.id === 'initial-modal' || modal.id === 'orientation-modal' || modal.id === 'calendar-modal' || modal.id === 'meshy-modal') && isOutsideModal) {
         return;
       }
 
@@ -62,6 +62,11 @@ class ModalManager {
 
   closeModal() {
     if (!this.activeModal) return;
+
+    // Prevent closing meshy modal during processing
+    if (this.activeModal.id === 'meshy-modal' && window.meshyProcessingInProgress) {
+      return;
+    }
 
     // Don't allow closing the calendar modal via closeModal (use closeAllModals when loading a house)
     if (this.activeModal.id === 'calendar-modal' && this.modalStack.length === 0) {

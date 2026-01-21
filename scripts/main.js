@@ -92,6 +92,7 @@ import {
   base64ToBlob,
   debounce
 } from './utils.js';
+import { adjustUrlForProxy } from './api.js';
 
 // Application state
 let currentHouseId = null;
@@ -127,6 +128,10 @@ let entryTags = [];
 
 // Popup state
 let popupEntryId = null;
+
+// Meshy model generation state
+let meshyProcessingInProgress = false;
+window.meshyProcessingInProgress = false;
 
 // Initialize application
 async function init() {
@@ -967,10 +972,66 @@ async function createFurnitureCard(item) {
   // Thumbnail container (holds thumbnail and availability badge)
   const thumbnailContainer = document.createElement('div');
   thumbnailContainer.className = 'card-thumbnail';
-  if (item.thumbnail || item.image) {
+
+  const hasImage = item.thumbnail || item.image;
+  const hasModel = item.model !== null && item.model !== undefined;
+
+  if (hasImage) {
     const img = document.createElement('img');
     img.src = URL.createObjectURL(item.thumbnail || item.image);
+    img.className = 'default-thumbnail';
     thumbnailContainer.appendChild(img);
+
+    // If both image and model exist, add hover behavior for model preview
+    if (hasModel) {
+      thumbnailContainer.classList.add('has-model-preview');
+      thumbnailContainer.dataset.entryId = item.id;
+
+      let modelThumbnailGenerated = false;
+      let modelThumbnailUrl = null;
+      let hoverTimeout = null;
+
+      // Create overlay image element (hidden initially)
+      const modelImg = document.createElement('img');
+      modelImg.className = 'model-thumbnail-overlay';
+      thumbnailContainer.appendChild(modelImg);
+
+      thumbnailContainer.addEventListener('mouseenter', async () => {
+        // Generate model thumbnail on first hover (lazy loading)
+        if (!modelThumbnailGenerated && !thumbnailContainer.dataset.loadingModel) {
+          thumbnailContainer.dataset.loadingModel = 'true';
+          try {
+            const entry = await getFurnitureEntry(item.id);
+            if (entry && entry.model) {
+              const extracted = await extractModelFromZip(entry.model);
+              const model = await loadModelFromExtractedZip(extracted);
+              const blob = await generateThumbnailFromModel(model);
+              modelThumbnailUrl = URL.createObjectURL(blob);
+              modelImg.src = modelThumbnailUrl;
+              modelThumbnailGenerated = true;
+            }
+          } catch (e) {
+            console.warn('Failed to generate model thumbnail on hover:', e);
+          }
+          delete thumbnailContainer.dataset.loadingModel;
+        }
+
+        // Show model thumbnail after 300ms hold
+        if (modelThumbnailGenerated) {
+          hoverTimeout = setTimeout(() => {
+            thumbnailContainer.classList.add('showing-model');
+          }, 300);
+        }
+      });
+
+      thumbnailContainer.addEventListener('mouseleave', () => {
+        if (hoverTimeout) {
+          clearTimeout(hoverTimeout);
+          hoverTimeout = null;
+        }
+        thumbnailContainer.classList.remove('showing-model');
+      });
+    }
   } else {
     thumbnailContainer.innerHTML = '<span class="placeholder">No Image</span>';
   }
@@ -1234,9 +1295,22 @@ function setupEntryEditor() {
     }
   });
 
-  // Generate model button (placeholder - shows error)
-  generateBtn.addEventListener('click', () => {
-    showError('Image-to-3D model generation is not yet implemented.');
+  // Generate model button - starts Meshy.ai generation
+  generateBtn.addEventListener('click', async () => {
+    if (!entryImageBlob) {
+      showError('Please upload an image first');
+      return;
+    }
+    if (entryModelBlob) {
+      showError('A 3D model already exists for this entry');
+      return;
+    }
+    if (!editingEntryId) {
+      showError('Please save the entry first, then generate the 3D model');
+      return;
+    }
+
+    await startMeshyGeneration(editingEntryId);
   });
 
   // Dimension inputs validation
@@ -1366,12 +1440,18 @@ async function openEntryEditor(entryId) {
       if (entry.image) {
         entryImageBlob = entry.image;
         showImagePreview(entry.image, imagePreview);
-        generateBtn.style.display = 'block';
       }
 
       if (entry.model) {
         entryModelBlob = entry.model;
         modelPreview.innerHTML = '<span style="color: #22c55e;">Model loaded</span>';
+      }
+
+      // Show generate button only if: image exists AND no model exists
+      if (entryImageBlob && !entryModelBlob) {
+        generateBtn.style.display = 'block';
+      } else {
+        generateBtn.style.display = 'none';
       }
 
       if (entry.thumbnail) {
@@ -1660,6 +1740,205 @@ async function handleEntrySubmit(event) {
   await saveFurnitureEntry(entry);
   closeEntryEditor();
   await refreshFurnitureModal();
+}
+
+// ============ Meshy Model Generation ============
+
+async function startMeshyGeneration(entryId) {
+  meshyProcessingInProgress = true;
+  window.meshyProcessingInProgress = true;
+
+  const connectingEl = document.getElementById('meshy-connecting');
+  const processingEl = document.getElementById('meshy-processing');
+  const downloadingEl = document.getElementById('meshy-downloading');
+  const resultEl = document.getElementById('meshy-result');
+  const errorEl = document.getElementById('meshy-error');
+  const errorText = document.getElementById('meshy-error-text');
+  const progressFill = document.getElementById('meshy-progress-fill');
+  const progressPercent = document.getElementById('meshy-progress-percent');
+
+  // Reset modal state
+  connectingEl.classList.add('hidden');
+  processingEl.classList.add('hidden');
+  downloadingEl.classList.add('hidden');
+  resultEl.classList.add('hidden');
+  errorEl.classList.add('hidden');
+  progressFill.style.width = '0%';
+  progressPercent.textContent = '0%';
+
+  // Show connecting state and open modal
+  connectingEl.classList.remove('hidden');
+  modalManager.openModal('meshy-modal');
+
+  try {
+    // Build the full image URL for Meshy API
+    const imageUrl = `${window.location.origin}${adjustUrlForProxy(`/api/files/furniture/${entryId}/image`)}`;
+
+    // Step 1: Create Meshy task
+    const createResponse = await fetch(adjustUrlForProxy(`/api/meshy/generate/${entryId}`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_url: imageUrl })
+    });
+
+    if (!createResponse.ok) {
+      const error = await createResponse.json().catch(() => ({ detail: 'Unknown error' }));
+      throw new Error(error.detail || 'Failed to start generation');
+    }
+
+    const { task_id } = await createResponse.json();
+
+    // Step 2: Show processing state and poll for completion
+    connectingEl.classList.add('hidden');
+    processingEl.classList.remove('hidden');
+
+    const result = await pollMeshyTaskStatus(task_id, (progress) => {
+      progressFill.style.width = `${progress}%`;
+      progressPercent.textContent = `${progress}%`;
+    });
+
+    if (result.status === 'FAILED') {
+      throw new Error(result.message || 'Model generation failed');
+    }
+
+    // Step 3: Download the model
+    processingEl.classList.add('hidden');
+    downloadingEl.classList.remove('hidden');
+
+    const glbUrl = result.model_urls?.glb;
+    if (!glbUrl) {
+      throw new Error('No GLB model URL in response');
+    }
+
+    const downloadResponse = await fetch(adjustUrlForProxy(`/api/meshy/download/${entryId}`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ glb_url: glbUrl })
+    });
+
+    if (!downloadResponse.ok) {
+      const error = await downloadResponse.json().catch(() => ({ detail: 'Unknown error' }));
+      throw new Error(error.detail || 'Failed to download model');
+    }
+
+    // Step 4: Fetch the new model and generate thumbnail
+    const modelResponse = await fetch(adjustUrlForProxy(`/api/files/furniture/${entryId}/model`));
+    if (modelResponse.ok) {
+      entryModelBlob = await modelResponse.blob();
+
+      // Generate thumbnail from the new model
+      try {
+        const extractedData = await extractModelFromZip(entryModelBlob);
+        const model = await loadModelFromExtractedZip(extractedData);
+        const thumbnailBlob = await generateThumbnailFromModel(model);
+
+        // Upload thumbnail to server
+        await uploadMeshyThumbnail(entryId, thumbnailBlob);
+        entryThumbnailBlob = thumbnailBlob;
+      } catch (thumbErr) {
+        console.warn('Failed to generate thumbnail:', thumbErr);
+      }
+    }
+
+    // Step 5: Show success
+    downloadingEl.classList.add('hidden');
+    resultEl.classList.remove('hidden');
+
+    // Update entry editor UI
+    document.getElementById('model-upload-preview').innerHTML =
+      '<span style="color: #22c55e;">Model generated</span>';
+    document.getElementById('generate-model-btn').style.display = 'none';
+
+    // Brief pause to show success message
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    meshyProcessingInProgress = false;
+    window.meshyProcessingInProgress = false;
+    modalManager.closeModal();
+
+    // Refresh the furniture modal if it's open
+    await refreshFurnitureModal();
+
+  } catch (err) {
+    console.error('Meshy generation failed:', err);
+
+    // Show error state
+    connectingEl.classList.add('hidden');
+    processingEl.classList.add('hidden');
+    downloadingEl.classList.add('hidden');
+    errorEl.classList.remove('hidden');
+    errorText.textContent = `Generation failed: ${err.message}`;
+
+    // Wait 2.5 seconds (matches orientation modal error pattern)
+    await new Promise(resolve => setTimeout(resolve, 2500));
+
+    meshyProcessingInProgress = false;
+    window.meshyProcessingInProgress = false;
+    modalManager.closeModal();
+  }
+}
+
+async function pollMeshyTaskStatus(taskId, onProgress) {
+  return new Promise((resolve, reject) => {
+    let attempts = 0;
+    const maxAttempts = 120; // 10 minutes at 5-second intervals
+
+    const pollInterval = setInterval(async () => {
+      try {
+        attempts++;
+
+        if (attempts > maxAttempts) {
+          clearInterval(pollInterval);
+          reject(new Error('Generation timed out after 10 minutes'));
+          return;
+        }
+
+        const response = await fetch(adjustUrlForProxy(`/api/meshy/status/${taskId}`));
+
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({ detail: 'Status check failed' }));
+          clearInterval(pollInterval);
+          reject(new Error(error.detail));
+          return;
+        }
+
+        const status = await response.json();
+
+        // Update progress
+        if (status.progress !== undefined) {
+          onProgress(status.progress);
+        }
+
+        // Check completion
+        if (status.status === 'SUCCEEDED') {
+          clearInterval(pollInterval);
+          resolve(status);
+        } else if (status.status === 'FAILED') {
+          clearInterval(pollInterval);
+          resolve(status); // Let caller handle failure
+        }
+        // Continue polling for PENDING/IN_PROGRESS
+
+      } catch (err) {
+        clearInterval(pollInterval);
+        reject(err);
+      }
+    }, 5000); // Poll every 5 seconds
+  });
+}
+
+async function uploadMeshyThumbnail(entryId, thumbnailBlob) {
+  const formData = new FormData();
+  formData.append('file', thumbnailBlob, 'thumbnail.png');
+
+  const response = await fetch(adjustUrlForProxy(`/api/files/furniture/${entryId}/thumbnail`), {
+    method: 'POST',
+    body: formData
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to upload thumbnail');
+  }
 }
 
 // ============ Session Modal (House Operations) ============

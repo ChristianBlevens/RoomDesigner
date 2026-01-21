@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -9,7 +12,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent))
 
 from db.connection import init_databases, close_databases
-from routers import houses, rooms, furniture, files
+from routers import houses, rooms, furniture, files, meshy
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -32,6 +35,7 @@ app.include_router(houses.router, prefix="/api/houses", tags=["houses"])
 app.include_router(rooms.router, prefix="/api/rooms", tags=["rooms"])
 app.include_router(furniture.router, prefix="/api/furniture", tags=["furniture"])
 app.include_router(files.router, prefix="/api/files", tags=["files"])
+app.include_router(meshy.router, prefix="/api/meshy", tags=["meshy"])
 
 # Serve frontend static files
 FRONTEND_DIR = Path(__file__).parent.parent
