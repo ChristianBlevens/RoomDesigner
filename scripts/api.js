@@ -303,7 +303,8 @@ function transformFurnitureResponse(entry) {
     quantity: entry.quantity,
     dimensionX: entry.dimensionX,
     dimensionY: entry.dimensionY,
-    dimensionZ: entry.dimensionZ
+    dimensionZ: entry.dimensionZ,
+    hasModel: !!entry.modelUrl
   };
 }
 

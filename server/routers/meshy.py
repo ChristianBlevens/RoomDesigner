@@ -61,10 +61,21 @@ async def generate_model(furniture_id: str, request: GenerateRequest):
             )
 
             if response.status_code != 200 and response.status_code != 202:
-                error_detail = response.text
+                # Try to parse JSON error for cleaner message
+                try:
+                    error_json = response.json()
+                    error_msg = error_json.get("message", response.text)
+                    # Check for subscription-related errors
+                    if "free plan" in error_msg.lower() or "upgrade" in error_msg.lower():
+                        raise HTTPException(
+                            status_code=402,
+                            detail="Meshy.ai requires a paid subscription. Please upgrade at https://www.meshy.ai/settings/subscription"
+                        )
+                except (ValueError, KeyError):
+                    error_msg = response.text
                 raise HTTPException(
                     status_code=502,
-                    detail=f"Meshy API error: {error_detail}"
+                    detail=f"Meshy API error: {error_msg}"
                 )
 
             result = response.json()

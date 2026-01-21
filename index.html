@@ -108,36 +108,6 @@
     </div>
   </div>
 
-  <!-- Meshy Model Generation Modal -->
-  <div class="modal-overlay modal-hidden" id="meshy-modal">
-    <div class="modal-content meshy-modal-content">
-      <h2>Generating 3D Model</h2>
-      <p>Using AI to create a 3D model from your furniture image.</p>
-      <div class="meshy-info hidden" id="meshy-connecting">
-        <div class="loading-spinner"></div>
-        <p>Connecting to Meshy.ai...</p>
-      </div>
-      <div class="meshy-info hidden" id="meshy-processing">
-        <div class="loading-spinner"></div>
-        <p id="meshy-processing-text">Generating model (1-3 minutes)...</p>
-        <div class="meshy-progress-bar">
-          <div class="meshy-progress-fill" id="meshy-progress-fill"></div>
-        </div>
-        <span id="meshy-progress-percent">0%</span>
-      </div>
-      <div class="meshy-info hidden" id="meshy-downloading">
-        <div class="loading-spinner"></div>
-        <p>Downloading and saving model...</p>
-      </div>
-      <div class="meshy-info hidden" id="meshy-result">
-        <p class="meshy-success">3D model generated successfully!</p>
-      </div>
-      <div class="meshy-info hidden" id="meshy-error">
-        <p class="meshy-error-text" id="meshy-error-text">Failed to generate model.</p>
-      </div>
-    </div>
-  </div>
-
   <!-- Furniture Database Modal -->
   <div class="modal-overlay modal-hidden" id="furniture-modal">
     <div class="modal-content furniture-modal-content">
@@ -447,6 +417,16 @@
     </div>
     <button id="add-room-tab-btn" class="add-room-tab-btn" title="Add Room">+</button>
   </div>
+
+  <!-- Meshy Generation Notifications -->
+  <div id="meshy-task-tracker" class="meshy-task-tracker hidden">
+    <div class="meshy-tracker-header">
+      <span class="meshy-tracker-title">Generating 3D Models</span>
+      <span class="meshy-tracker-count"></span>
+    </div>
+    <div class="meshy-tracker-list" id="meshy-tracker-list"></div>
+  </div>
+  <div id="meshy-toasts" class="meshy-toasts"></div>
 
   <script type="module" src="scripts/main.js"></script>
 </body>
