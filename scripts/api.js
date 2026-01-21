@@ -1,6 +1,9 @@
 // API client for RoomDesigner server communication
 
-const API_BASE = '/api';
+// Detect base path from current URL (handles /room/ prefix when behind nginx proxy)
+// /room/ -> /room/api, / -> /api
+const BASE_PATH = window.location.pathname.replace(/\/+$/, '').replace(/\/index\.html$/i, '');
+const API_BASE = `${BASE_PATH}/api`;
 
 async function apiFetch(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, {
