@@ -1,0 +1,4 @@
+# Replace with your actual domain
+mycomments.duckdns.org:8443 {
+    reverse_proxy roomdesigner:8000
+}

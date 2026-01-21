@@ -2,13 +2,29 @@ services:
   roomdesigner:
     build: .
     container_name: roomdesigner
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     volumes:
       - roomdesigner_data:/app/server/data
       - roomdesigner_storage:/app/server/storage
     restart: unless-stopped
 
+  caddy:
+    image: caddy:2-alpine
+    container_name: roomdesigner-caddy
+    ports:
+      - "8080:80"
+      - "8443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - roomdesigner
+    restart: unless-stopped
+
 volumes:
   roomdesigner_data:
   roomdesigner_storage:
+  caddy_data:
+  caddy_config:
