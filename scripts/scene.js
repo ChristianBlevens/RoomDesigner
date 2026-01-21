@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import { adjustUrlForProxy } from './api.js';
 
 // Scene state
 let scene, camera, renderer;
@@ -615,11 +616,13 @@ export async function loadRoomGeometry(meshUrl, options = {}) {
     wireframeOpacity = 0.5
   } = options;
 
-  console.log('Loading room mesh from:', meshUrl);
+  // Adjust URL for proxy prefix (e.g., /api/... -> /room/api/...)
+  const adjustedUrl = adjustUrlForProxy(meshUrl);
+  console.log('Loading room mesh from:', adjustedUrl);
 
   return new Promise((resolve, reject) => {
     gltfLoader.load(
-      meshUrl,
+      adjustedUrl,
       (gltf) => {
         const model = gltf.scene;
 

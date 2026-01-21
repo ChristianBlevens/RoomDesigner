@@ -5,6 +5,12 @@
 const BASE_PATH = window.location.pathname.replace(/\/+$/, '').replace(/\/index\.html$/i, '');
 const API_BASE = `${BASE_PATH}/api`;
 
+// Adjust server-returned URLs for proxy prefix (e.g., /api/... -> /room/api/...)
+export function adjustUrlForProxy(url) {
+  if (!url) return url;
+  return url.startsWith('/api') ? `${BASE_PATH}${url}` : url;
+}
+
 async function apiFetch(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, {
     headers: {
@@ -30,7 +36,7 @@ async function apiFetch(path, options = {}) {
 }
 
 async function fetchAsBlob(url) {
-  const response = await fetch(url);
+  const response = await fetch(adjustUrlForProxy(url));
   if (!response.ok) return null;
   return response.blob();
 }
