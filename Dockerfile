@@ -21,6 +21,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     xvfb \
     libgl1 \
+    libglu1-mesa \
     libglx-mesa0 \
     libglib2.0-0 \
     libsm6 \
