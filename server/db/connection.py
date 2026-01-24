@@ -59,6 +59,12 @@ def init_databases():
     """)
     _furniture_conn.execute("CREATE INDEX IF NOT EXISTS idx_furniture_category ON furniture(category)")
 
+    # Migration: rename thumbnail_path to preview_3d_path if old column exists
+    columns = _furniture_conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'furniture'").fetchall()
+    column_names = [col[0] for col in columns]
+    if 'thumbnail_path' in column_names and 'preview_3d_path' not in column_names:
+        _furniture_conn.execute("ALTER TABLE furniture RENAME COLUMN thumbnail_path TO preview_3d_path")
+
 def get_houses_db():
     return _houses_conn
 
