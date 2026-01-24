@@ -121,7 +121,7 @@ export async function getHouseRoomCount(houseId) {
 // Returns { available, total } where available = total - usedInOverlappingHouses - currentRoomCount
 // currentRoomPlacedCount: count of this entry already placed in the current scene (may be unsaved)
 export async function getAvailableQuantity(entryId, currentRoomId, currentRoomPlacedCount = 0) {
-  const { getFurnitureEntry, getAllHouses, getRoomsByHouseId } = await import('./database.js');
+  const { getFurnitureEntry, getAllHouses, getRoomsByHouseId } = await import('./api.js');
 
   const entry = await getFurnitureEntry(entryId);
   if (!entry) {
