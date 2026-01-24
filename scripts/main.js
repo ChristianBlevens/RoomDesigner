@@ -2639,7 +2639,21 @@ async function loadRoomById(roomId) {
 
     // Align camera to match saved MoGe settings
     const fov = room.mogeData.cameraFov || 60;
-    const imageAspect = room.mogeData.imageAspect || (window.innerWidth / window.innerHeight);
+
+    // imageAspect must come from mogeData or be recalculated from image
+    // NEVER use window aspect as fallback - it causes distortion
+    let imageAspect = room.mogeData.imageAspect;
+
+    if (!imageAspect && room.backgroundImage) {
+      // Recalculate from stored background image
+      imageAspect = await getImageAspectRatio(room.backgroundImage);
+      console.log('Recalculated imageAspect from background image:', imageAspect);
+    }
+
+    if (!imageAspect) {
+      throw new Error('Room is missing imageAspect and has no background image to calculate it from');
+    }
+
     setCameraForMoGeAlignment(fov, imageAspect);
 
     // Set up background plane

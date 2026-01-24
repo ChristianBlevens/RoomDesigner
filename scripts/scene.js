@@ -16,6 +16,9 @@ let backgroundImagePlane = null;
 let backgroundImageTexture = null;
 let directionalLight = null;
 
+// Aspect ratio locking for MoGe alignment preservation
+let lockedImageAspect = null;  // When set, camera maintains this aspect ratio during resize
+
 // Lighting direction gizmo
 let lightingGizmo = null;
 let lightingGizmoSource = null;  // Sphere at light source
@@ -404,10 +407,11 @@ export function setCameraFov(fov) {
 /**
  * Set camera to MoGe-aligned position (at origin, looking into scene).
  * This is required for the point cloud to align with the background image.
+ * Also locks aspect ratio to maintain alignment during resize.
  * @param {number} fov - Vertical field of view in degrees
- * @param {number} imageAspect - Optional image aspect ratio (width/height) for pixel-perfect alignment
+ * @param {number} imageAspect - Image aspect ratio (width/height) for pixel-perfect alignment
  */
-export function setCameraForMoGeAlignment(fov, imageAspect = null) {
+export function setCameraForMoGeAlignment(fov, imageAspect) {
   if (!camera) return;
 
   // MoGe outputs in OpenCV convention: X-right, Y-down, Z-forward (positive)
@@ -421,16 +425,20 @@ export function setCameraForMoGeAlignment(fov, imageAspect = null) {
     camera.fov = fov;
   }
 
-  // For pixel-perfect alignment, camera aspect should match image aspect
-  // This may cause letterboxing/pillarboxing if window doesn't match image shape
+  // Lock aspect ratio for pixel-perfect alignment
+  // This enables letterboxing/pillarboxing during resize
   if (imageAspect && imageAspect > 0) {
-    camera.aspect = imageAspect;
-    console.log('Camera aspect set to match image:', imageAspect.toFixed(3));
+    lockAspectRatio(imageAspect);
   }
 
   camera.updateProjectionMatrix();
 
-  console.log('Camera aligned for MoGe:', { fov: camera.fov, aspect: camera.aspect.toFixed(3), position: camera.position.toArray() });
+  console.log('Camera aligned for MoGe:', {
+    fov: camera.fov,
+    aspect: camera.aspect.toFixed(3),
+    position: camera.position.toArray(),
+    aspectLocked: isAspectRatioLocked()
+  });
 }
 
 /**
@@ -563,18 +571,28 @@ export function updateBackgroundPlaneSize() {
   const depth = Math.abs(backgroundImagePlane.position.z);
   const imageAspect = backgroundImageTexture.image.width / backgroundImageTexture.image.height;
 
-  // Calculate plane size to fill viewport at the current depth
+  // Calculate visible area at plane depth
   const fovRad = camera.fov * Math.PI / 180;
   const visibleHeight = 2 * Math.tan(fovRad / 2) * depth;
   const visibleWidth = visibleHeight * camera.aspect;
 
   let planeWidth, planeHeight;
-  if (camera.aspect > imageAspect) {
-    planeHeight = visibleHeight;
-    planeWidth = planeHeight * imageAspect;
-  } else {
+
+  // When aspect ratio is locked, camera.aspect === imageAspect
+  // so plane fills the entire viewport perfectly
+  if (lockedImageAspect && Math.abs(camera.aspect - imageAspect) < 0.001) {
+    // Perfect match - fill viewport
     planeWidth = visibleWidth;
-    planeHeight = planeWidth / imageAspect;
+    planeHeight = visibleHeight;
+  } else {
+    // Mismatch - apply letterbox/pillarbox to plane
+    if (camera.aspect > imageAspect) {
+      planeHeight = visibleHeight;
+      planeWidth = planeHeight * imageAspect;
+    } else {
+      planeWidth = visibleWidth;
+      planeHeight = planeWidth / imageAspect;
+    }
   }
 
   // Update geometry
@@ -582,7 +600,8 @@ export function updateBackgroundPlaneSize() {
   backgroundImagePlane.geometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
 
   console.log('Background plane size updated:', {
-    planeSize: [planeWidth.toFixed(2), planeHeight.toFixed(2)]
+    planeSize: [planeWidth.toFixed(2), planeHeight.toFixed(2)],
+    locked: !!lockedImageAspect
   });
 }
 
@@ -600,6 +619,117 @@ export function clearBackgroundImagePlane() {
     backgroundImageTexture.dispose();
     backgroundImageTexture = null;
   }
+}
+
+// ============ Aspect Ratio Locking ============
+
+/**
+ * Lock the scene to a specific image aspect ratio.
+ * When locked, resize events maintain this aspect ratio with letterboxing.
+ * @param {number} imageAspect - Width/height ratio to lock to (must be valid positive number)
+ * @throws {Error} If imageAspect is not a valid positive number
+ */
+export function lockAspectRatio(imageAspect) {
+  if (typeof imageAspect !== 'number' || !isFinite(imageAspect) || imageAspect <= 0) {
+    throw new Error(`Invalid imageAspect: ${imageAspect}. Must be a positive number.`);
+  }
+
+  lockedImageAspect = imageAspect;
+  console.log('Aspect ratio locked to:', imageAspect.toFixed(3));
+
+  // Apply immediately
+  applyAspectRatioResize();
+}
+
+/**
+ * Unlock the aspect ratio, returning to full-window mode.
+ * Used when clearing room or returning to default state.
+ */
+export function unlockAspectRatio() {
+  lockedImageAspect = null;
+  console.log('Aspect ratio unlocked');
+
+  // Return to full window mode
+  const container = document.getElementById('canvas-container');
+  container.style.width = '100%';
+  container.style.height = '100%';
+  container.style.left = '0';
+  container.style.top = '0';
+
+  // Reset camera to window aspect
+  if (camera && renderer) {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+}
+
+/**
+ * Check if aspect ratio is currently locked.
+ * @returns {boolean}
+ */
+export function isAspectRatioLocked() {
+  return lockedImageAspect !== null;
+}
+
+/**
+ * Get the currently locked aspect ratio.
+ * @returns {number|null}
+ */
+export function getLockedAspectRatio() {
+  return lockedImageAspect;
+}
+
+/**
+ * Apply letterbox/pillarbox sizing to maintain locked aspect ratio.
+ * Called on window resize when aspect ratio is locked.
+ */
+function applyAspectRatioResize() {
+  if (!lockedImageAspect || !camera || !renderer) return;
+
+  const container = document.getElementById('canvas-container');
+  const windowWidth = window.innerWidth;
+  const windowHeight = window.innerHeight;
+  const windowAspect = windowWidth / windowHeight;
+
+  let canvasWidth, canvasHeight, offsetX, offsetY;
+
+  if (windowAspect > lockedImageAspect) {
+    // Window is wider than image - pillarbox (black bars on sides)
+    canvasHeight = windowHeight;
+    canvasWidth = windowHeight * lockedImageAspect;
+    offsetX = (windowWidth - canvasWidth) / 2;
+    offsetY = 0;
+  } else {
+    // Window is taller than image - letterbox (black bars top/bottom)
+    canvasWidth = windowWidth;
+    canvasHeight = windowWidth / lockedImageAspect;
+    offsetX = 0;
+    offsetY = (windowHeight - canvasHeight) / 2;
+  }
+
+  // Update container position and size
+  container.style.width = `${canvasWidth}px`;
+  container.style.height = `${canvasHeight}px`;
+  container.style.left = `${offsetX}px`;
+  container.style.top = `${offsetY}px`;
+
+  // Update renderer to match container
+  renderer.setSize(canvasWidth, canvasHeight);
+
+  // Camera aspect matches image aspect (always)
+  camera.aspect = lockedImageAspect;
+  camera.updateProjectionMatrix();
+
+  // Update background plane for new dimensions
+  updateBackgroundPlaneSize();
+
+  console.log('Aspect ratio resize applied:', {
+    window: [windowWidth, windowHeight],
+    canvas: [canvasWidth.toFixed(0), canvasHeight.toFixed(0)],
+    offset: [offsetX.toFixed(0), offsetY.toFixed(0)],
+    imageAspect: lockedImageAspect.toFixed(3)
+  });
 }
 
 /**
@@ -782,6 +912,9 @@ export function clearRoomGeometry() {
   // Clear background image plane as well
   clearBackgroundImagePlane();
 
+  // Unlock aspect ratio - return to full window mode
+  unlockAspectRatio();
+
   // Reset to default bounds
   roomBounds.set(
     new THREE.Vector3(-5, 0, -5),
@@ -911,12 +1044,18 @@ function animate() {
 
 // Handle window resize
 function onWindowResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  if (lockedImageAspect) {
+    // Maintain locked aspect ratio with letterboxing
+    applyAspectRatioResize();
+  } else {
+    // Default: full window mode
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
 
-  // Update background plane to match new viewport size
-  updateBackgroundPlaneSize();
+    // Update background plane to match new viewport size
+    updateBackgroundPlaneSize();
+  }
 }
 
 // Load model from Blob (GLB only)
