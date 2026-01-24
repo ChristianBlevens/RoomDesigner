@@ -54,8 +54,7 @@ import {
   getHouse,
   getRoomsByHouseId,
   getOrphanRooms,
-  subscribeToEvents,
-  getFurnitureThumbnail
+  subscribeToEvents
 } from './api.js';
 import {
   getCurrentHouse,
@@ -218,60 +217,10 @@ async function init() {
   setupDebugPanel();
   setupLightingControls();
 
-  // Subscribe to server events for real-time updates
-  setupServerEvents();
+  // SSE available via subscribeToEvents() for future real-time features
 
   // Show calendar modal on startup
   await openCalendarModal();
-}
-
-// ============ Server Events (SSE) ============
-
-function setupServerEvents() {
-  subscribeToEvents(async (eventType, data) => {
-    if (eventType === 'thumbnail_ready') {
-      await updateCardThumbnail(data.furniture_id);
-    }
-  });
-}
-
-async function updateCardThumbnail(furnitureId) {
-  const card = document.querySelector(`.furniture-card[data-id="${furnitureId}"]`);
-  if (!card) return;
-
-  const thumbnailBlob = await getFurnitureThumbnail(furnitureId);
-  if (!thumbnailBlob) return;
-
-  const thumbnailContainer = card.querySelector('.card-thumbnail');
-  if (!thumbnailContainer) return;
-
-  // Check if there's already a 2D image
-  const existingDefault = thumbnailContainer.querySelector('.default-image');
-
-  if (existingDefault) {
-    // Has 2D image - add hover thumbnail
-    thumbnailContainer.classList.add('has-3d-thumbnail');
-    let hoverImg = thumbnailContainer.querySelector('.hover-image');
-    if (!hoverImg) {
-      hoverImg = document.createElement('img');
-      hoverImg.className = 'hover-image';
-      thumbnailContainer.appendChild(hoverImg);
-    }
-    hoverImg.src = URL.createObjectURL(thumbnailBlob);
-  } else {
-    // No 2D image - replace placeholder or existing image
-    thumbnailContainer.classList.add('has-3d-thumbnail');
-    const placeholder = thumbnailContainer.querySelector('.placeholder');
-    if (placeholder) {
-      placeholder.remove();
-    }
-    let img = thumbnailContainer.querySelector('img');
-    if (!img) {
-      img = document.createElement('img');
-      thumbnailContainer.insertBefore(img, thumbnailContainer.querySelector('.availability-badge'));
-    }
-    img.src = URL.createObjectURL(thumbnailBlob);
-  }
 }
 
 // ============ Debug Panel ============

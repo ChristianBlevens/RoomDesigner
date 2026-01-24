@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -10,7 +10,7 @@ from config import (FURNITURE_IMAGES, FURNITURE_THUMBNAILS, FURNITURE_MODELS,
                     ROOM_BACKGROUNDS, ROOM_MESHES)
 from utils import IMAGE_EXTENSIONS
 from routers.rooms import download_mesh
-from model_processor import ModelProcessor, generate_thumbnail_async
+from model_processor import ModelProcessor
 
 router = APIRouter()
 
@@ -78,22 +78,20 @@ def get_furniture_thumbnail(furniture_id: str):
 @router.post("/furniture/{furniture_id}/model")
 async def upload_furniture_model(
     furniture_id: str,
-    file: UploadFile = File(...),
-    background_tasks: BackgroundTasks = None
+    file: UploadFile = File(...)
 ):
     """
     Upload a furniture model (GLB file).
-    Processes the model to fix bounds and recenter origin.
-    Thumbnail generated async in background.
+    Processes the model to fix bounds, recenter origin, and generate thumbnail.
     """
     content = await file.read()
 
-    # Process the model
+    # Process the model and generate thumbnail
     processor = ModelProcessor()
     result = processor.process_glb(
         content,
         origin_placement='bottom-center',
-        generate_thumbnail=False
+        generate_thumbnail=True
     )
 
     # Save processed GLB
@@ -101,18 +99,22 @@ async def upload_furniture_model(
     model_path = FURNITURE_MODELS / f"{furniture_id}.glb"
     model_path.write_bytes(result['glb'])
 
-    db = get_furniture_db()
-    db.execute("UPDATE furniture SET model_path = ? WHERE id = ?", [str(model_path), furniture_id])
-
-    # Queue async thumbnail generation
-    if background_tasks:
+    # Save thumbnail
+    thumbnail_path = None
+    if result['thumbnail']:
+        FURNITURE_THUMBNAILS.mkdir(parents=True, exist_ok=True)
         thumbnail_path = FURNITURE_THUMBNAILS / f"{furniture_id}.png"
-        background_tasks.add_task(
-            generate_thumbnail_async,
-            model_path,
-            thumbnail_path,
-            furniture_id
+        thumbnail_path.write_bytes(result['thumbnail'])
+
+    # Update database
+    db = get_furniture_db()
+    if thumbnail_path:
+        db.execute(
+            "UPDATE furniture SET model_path = ?, thumbnail_path = ? WHERE id = ?",
+            [str(model_path), str(thumbnail_path), furniture_id]
         )
+    else:
+        db.execute("UPDATE furniture SET model_path = ? WHERE id = ?", [str(model_path), furniture_id])
 
     return {"status": "uploaded", "path": str(model_path)}
 

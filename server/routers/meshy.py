@@ -6,12 +6,12 @@ Handles task creation, status polling, and model download.
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import httpx
 
 from config import FURNITURE_MODELS, FURNITURE_THUMBNAILS
-from model_processor import ModelProcessor, generate_thumbnail_async
+from model_processor import ModelProcessor
 
 router = APIRouter()
 
@@ -141,13 +141,11 @@ async def get_task_status(task_id: str):
 @router.post("/download/{furniture_id}")
 async def download_model(
     furniture_id: str,
-    request: DownloadRequest,
-    background_tasks: BackgroundTasks
+    request: DownloadRequest
 ):
     """
     Download the generated GLB model from Meshy's temporary URL,
-    process it (fix bounds, recenter), save to storage.
-    Thumbnail generation happens async in background.
+    process it (fix bounds, recenter, generate thumbnail), save to storage.
     """
     glb_url = request.glb_url
 
@@ -178,35 +176,39 @@ async def download_model(
                 detail=f"Failed to download model: {str(e)}"
             )
 
-    # Process the model (fix bounds, recenter)
+    # Process the model (fix bounds, recenter, generate thumbnail)
     processor = ModelProcessor()
     result = processor.process_glb(
         glb_content,
         origin_placement='bottom-center',
-        generate_thumbnail=False
+        generate_thumbnail=True
     )
 
-    # Save processed GLB directly
+    # Save processed GLB
     FURNITURE_MODELS.mkdir(parents=True, exist_ok=True)
     model_path = FURNITURE_MODELS / f"{furniture_id}.glb"
     model_path.write_bytes(result['glb'])
 
-    # Update database to set model_path
+    # Save thumbnail
+    thumbnail_path = None
+    if result['thumbnail']:
+        FURNITURE_THUMBNAILS.mkdir(parents=True, exist_ok=True)
+        thumbnail_path = FURNITURE_THUMBNAILS / f"{furniture_id}.png"
+        thumbnail_path.write_bytes(result['thumbnail'])
+
+    # Update database
     from db.connection import get_furniture_db
     conn = get_furniture_db()
-    conn.execute(
-        "UPDATE furniture SET model_path = ? WHERE id = ?",
-        [str(model_path), furniture_id]
-    )
-
-    # Queue async thumbnail generation (runs in background, limited concurrency)
-    thumbnail_path = FURNITURE_THUMBNAILS / f"{furniture_id}.png"
-    background_tasks.add_task(
-        generate_thumbnail_async,
-        model_path,
-        thumbnail_path,
-        furniture_id
-    )
+    if thumbnail_path:
+        conn.execute(
+            "UPDATE furniture SET model_path = ?, thumbnail_path = ? WHERE id = ?",
+            [str(model_path), str(thumbnail_path), furniture_id]
+        )
+    else:
+        conn.execute(
+            "UPDATE furniture SET model_path = ? WHERE id = ?",
+            [str(model_path), furniture_id]
+        )
 
     return {
         "success": True,
