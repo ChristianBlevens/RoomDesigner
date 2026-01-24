@@ -4,6 +4,7 @@ load_dotenv()
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import StreamingResponse
 from contextlib import asynccontextmanager
 from pathlib import Path
 import sys
@@ -13,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from db.connection import init_databases, close_databases
 from routers import houses, rooms, furniture, files, meshy
+from events import subscribe
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -36,6 +38,21 @@ app.include_router(rooms.router, prefix="/api/rooms", tags=["rooms"])
 app.include_router(furniture.router, prefix="/api/furniture", tags=["furniture"])
 app.include_router(files.router, prefix="/api/files", tags=["files"])
 app.include_router(meshy.router, prefix="/api/meshy", tags=["meshy"])
+
+
+@app.get("/api/events")
+async def sse_events():
+    """Server-Sent Events endpoint for real-time notifications."""
+    return StreamingResponse(
+        subscribe(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
 
 # Serve frontend static files
 FRONTEND_DIR = Path(__file__).parent.parent

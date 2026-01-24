@@ -3,7 +3,6 @@
 import {
   initScene,
   loadModelFromExtractedZip,
-  generateThumbnailFromModel,
   collectPlacedFurniture,
   clearAllFurniture,
   addFurnitureToScene,
@@ -54,7 +53,9 @@ import {
   getAllHouses,
   getHouse,
   getRoomsByHouseId,
-  getOrphanRooms
+  getOrphanRooms,
+  subscribeToEvents,
+  getFurnitureThumbnail
 } from './api.js';
 import {
   getCurrentHouse,
@@ -217,8 +218,60 @@ async function init() {
   setupDebugPanel();
   setupLightingControls();
 
+  // Subscribe to server events for real-time updates
+  setupServerEvents();
+
   // Show calendar modal on startup
   await openCalendarModal();
+}
+
+// ============ Server Events (SSE) ============
+
+function setupServerEvents() {
+  subscribeToEvents(async (eventType, data) => {
+    if (eventType === 'thumbnail_ready') {
+      await updateCardThumbnail(data.furniture_id);
+    }
+  });
+}
+
+async function updateCardThumbnail(furnitureId) {
+  const card = document.querySelector(`.furniture-card[data-id="${furnitureId}"]`);
+  if (!card) return;
+
+  const thumbnailBlob = await getFurnitureThumbnail(furnitureId);
+  if (!thumbnailBlob) return;
+
+  const thumbnailContainer = card.querySelector('.card-thumbnail');
+  if (!thumbnailContainer) return;
+
+  // Check if there's already a 2D image
+  const existingDefault = thumbnailContainer.querySelector('.default-image');
+
+  if (existingDefault) {
+    // Has 2D image - add hover thumbnail
+    thumbnailContainer.classList.add('has-3d-thumbnail');
+    let hoverImg = thumbnailContainer.querySelector('.hover-image');
+    if (!hoverImg) {
+      hoverImg = document.createElement('img');
+      hoverImg.className = 'hover-image';
+      thumbnailContainer.appendChild(hoverImg);
+    }
+    hoverImg.src = URL.createObjectURL(thumbnailBlob);
+  } else {
+    // No 2D image - replace placeholder or existing image
+    thumbnailContainer.classList.add('has-3d-thumbnail');
+    const placeholder = thumbnailContainer.querySelector('.placeholder');
+    if (placeholder) {
+      placeholder.remove();
+    }
+    let img = thumbnailContainer.querySelector('img');
+    if (!img) {
+      img = document.createElement('img');
+      thumbnailContainer.insertBefore(img, thumbnailContainer.querySelector('.availability-badge'));
+    }
+    img.src = URL.createObjectURL(thumbnailBlob);
+  }
 }
 
 // ============ Debug Panel ============
@@ -1028,66 +1081,36 @@ async function createFurnitureCard(item) {
   const thumbnailContainer = document.createElement('div');
   thumbnailContainer.className = 'card-thumbnail';
 
-  const hasImage = item.thumbnail || item.image;
-  const hasModel = item.hasModel || (item.model !== null && item.model !== undefined);
+  const has2dImage = item.image !== null && item.image !== undefined;
+  const has3dThumbnail = item.thumbnail !== null && item.thumbnail !== undefined;
 
-  if (hasImage) {
+  if (has2dImage && has3dThumbnail) {
+    // Both exist: show 2D image by default, 3D thumbnail on hover
+    thumbnailContainer.classList.add('has-3d-thumbnail');
+
+    const img2d = document.createElement('img');
+    img2d.src = URL.createObjectURL(item.image);
+    img2d.className = 'default-image';
+    thumbnailContainer.appendChild(img2d);
+
+    const img3d = document.createElement('img');
+    img3d.src = URL.createObjectURL(item.thumbnail);
+    img3d.className = 'hover-image';
+    thumbnailContainer.appendChild(img3d);
+  } else if (has2dImage) {
+    // Only 2D image: show it always
     const img = document.createElement('img');
-    img.src = URL.createObjectURL(item.thumbnail || item.image);
-    img.className = 'default-thumbnail';
+    img.src = URL.createObjectURL(item.image);
     thumbnailContainer.appendChild(img);
+  } else if (has3dThumbnail) {
+    // Only 3D thumbnail: show it always
+    thumbnailContainer.classList.add('has-3d-thumbnail');
 
-    // If both image and model exist, add hover behavior for model preview
-    if (hasModel) {
-      thumbnailContainer.classList.add('has-model-preview');
-      thumbnailContainer.dataset.entryId = item.id;
-
-      let modelThumbnailGenerated = false;
-      let modelThumbnailUrl = null;
-      let hoverTimeout = null;
-
-      // Create overlay image element (hidden initially)
-      const modelImg = document.createElement('img');
-      modelImg.className = 'model-thumbnail-overlay';
-      thumbnailContainer.appendChild(modelImg);
-
-      thumbnailContainer.addEventListener('mouseenter', async () => {
-        // Generate model thumbnail on first hover (lazy loading)
-        if (!modelThumbnailGenerated && !thumbnailContainer.dataset.loadingModel) {
-          thumbnailContainer.dataset.loadingModel = 'true';
-          try {
-            const entry = await getFurnitureEntry(item.id);
-            if (entry && entry.model) {
-              const extracted = await extractModelFromZip(entry.model);
-              const model = await loadModelFromExtractedZip(extracted);
-              const blob = await generateThumbnailFromModel(model);
-              modelThumbnailUrl = URL.createObjectURL(blob);
-              modelImg.src = modelThumbnailUrl;
-              modelThumbnailGenerated = true;
-            }
-          } catch (e) {
-            console.warn('Failed to generate model thumbnail on hover:', e);
-          }
-          delete thumbnailContainer.dataset.loadingModel;
-        }
-
-        // Show model thumbnail after 300ms hold
-        if (modelThumbnailGenerated) {
-          hoverTimeout = setTimeout(() => {
-            thumbnailContainer.classList.add('showing-model');
-          }, 300);
-        }
-      });
-
-      thumbnailContainer.addEventListener('mouseleave', () => {
-        if (hoverTimeout) {
-          clearTimeout(hoverTimeout);
-          hoverTimeout = null;
-        }
-        thumbnailContainer.classList.remove('showing-model');
-      });
-    }
+    const img = document.createElement('img');
+    img.src = URL.createObjectURL(item.thumbnail);
+    thumbnailContainer.appendChild(img);
   } else {
+    // Neither: show placeholder
     thumbnailContainer.innerHTML = '<span class="placeholder">No Image</span>';
   }
 

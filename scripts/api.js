@@ -318,3 +318,53 @@ export async function saveMogeMesh(roomId, meshUrl) {
   return response.json();
 }
 
+// ============ Server-Sent Events ============
+
+let eventSource = null;
+const eventListeners = new Map();
+
+export function subscribeToEvents(callback) {
+  if (!eventSource) {
+    eventSource = new EventSource(`${API_BASE}/events`);
+
+    eventSource.addEventListener('thumbnail_ready', (e) => {
+      const data = JSON.parse(e.data);
+      eventListeners.forEach((cb) => cb('thumbnail_ready', data));
+    });
+
+    eventSource.addEventListener('thumbnail_failed', (e) => {
+      const data = JSON.parse(e.data);
+      eventListeners.forEach((cb) => cb('thumbnail_failed', data));
+    });
+
+    eventSource.onerror = () => {
+      // Reconnect on error after delay
+      eventSource.close();
+      eventSource = null;
+      setTimeout(() => {
+        if (eventListeners.size > 0) {
+          subscribeToEvents(callback);
+        }
+      }, 3000);
+    };
+  }
+
+  const id = Symbol();
+  eventListeners.set(id, callback);
+
+  return () => {
+    eventListeners.delete(id);
+    if (eventListeners.size === 0 && eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+  };
+}
+
+export async function getFurnitureThumbnail(id) {
+  const url = `${API_BASE}/files/furniture/${id}/thumbnail`;
+  const response = await fetch(url);
+  if (!response.ok) return null;
+  return response.blob();
+}
+

@@ -803,17 +803,32 @@ input[type="date"]:focus {
   bottom: 280px;
 }
 
-/* ============ Thumbnail Hover for Model Preview ============ */
-
-.card-thumbnail {
-  position: relative;
-}
+/* ============ Thumbnail Hover for 3D Model Preview ============ */
 
 .card-thumbnail img {
   transition: opacity 0.2s ease;
 }
 
-.card-thumbnail.has-model-preview::after {
+/* When both 2D image and 3D thumbnail exist: hover to swap */
+.card-thumbnail .hover-image {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+}
+
+.card-thumbnail:hover .hover-image {
+  opacity: 1;
+}
+
+.card-thumbnail:hover .default-image {
+  opacity: 0;
+}
+
+/* 3D badge shown when hoverable 3D thumbnail exists */
+.card-thumbnail.has-3d-thumbnail::after {
   content: '3D';
   position: absolute;
   bottom: 4px;
@@ -824,29 +839,5 @@ input[type="date"]:focus {
   font-weight: 600;
   padding: 2px 4px;
   border-radius: 3px;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-.card-thumbnail.has-model-preview:hover::after {
-  opacity: 1;
-}
-
-.card-thumbnail .model-thumbnail-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0;
-  transition: opacity 0.2s ease;
   pointer-events: none;
-}
-
-.card-thumbnail.showing-model .model-thumbnail-overlay {
-  opacity: 1;
-}
-
-.card-thumbnail.showing-model > img:first-child {
-  opacity: 0;
 }

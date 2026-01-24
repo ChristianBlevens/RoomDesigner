@@ -156,14 +156,31 @@ class ModelProcessor:
         size: Tuple[int, int]
     ) -> Optional[bytes]:
         """
-        Generate a thumbnail image of the scene.
+        Generate a thumbnail image of the scene from an angled view.
 
         Uses trimesh's built-in rendering which requires pyglet.
         Falls back gracefully if rendering is not available.
         """
         try:
+            # Set up camera at a nice angle (isometric-ish view)
+            bounds = scene.bounds
+            center = (bounds[0] + bounds[1]) / 2
+            size_vec = bounds[1] - bounds[0]
+            max_dim = max(size_vec)
+
+            # Position camera at an angle (front-right, slightly above)
+            distance = max_dim * 2.0
+            camera_pos = center + np.array([
+                distance * 0.7,   # right
+                distance * 0.5,   # up
+                distance * 0.7    # front
+            ])
+
+            # Create camera transform looking at center
+            camera_transform = self._look_at_matrix(camera_pos, center, np.array([0, 1, 0]))
+            scene.camera_transform = camera_transform
+
             # Use trimesh's scene rendering
-            # This requires a display or virtual framebuffer
             png_data = scene.save_image(resolution=size, visible=False)
 
             if png_data is not None:
@@ -181,6 +198,26 @@ class ModelProcessor:
             logger.warning(f"pyrender thumbnail generation failed: {e}")
 
         return None
+
+    def _look_at_matrix(self, eye: np.ndarray, target: np.ndarray, up: np.ndarray) -> np.ndarray:
+        """Create a 4x4 camera transform matrix looking at target from eye position."""
+        forward = target - eye
+        forward = forward / np.linalg.norm(forward)
+        right = np.cross(forward, up)
+        right = right / np.linalg.norm(right)
+        actual_up = np.cross(right, forward)
+
+        # Build rotation matrix
+        rotation = np.eye(4)
+        rotation[0, :3] = right
+        rotation[1, :3] = actual_up
+        rotation[2, :3] = -forward
+
+        # Build translation
+        translation = np.eye(4)
+        translation[:3, 3] = eye
+
+        return translation @ rotation.T
 
     def _generate_thumbnail_pyrender(
         self,
@@ -330,6 +367,7 @@ async def generate_thumbnail_async(
     """
     Generate thumbnail asynchronously in background.
     Uses semaphore to limit concurrent renders (protects 2 vCPU server).
+    Publishes SSE event when complete.
 
     Args:
         model_path: Path to the model file (GLB or legacy ZIP)
@@ -357,8 +395,15 @@ async def generate_thumbnail_async(
                 [str(thumbnail_path), furniture_id]
             )
 
+            # Notify connected clients
+            from events import publish
+            publish("thumbnail_ready", {"furniture_id": furniture_id})
+
         except Exception as e:
             logger.error(f"Async thumbnail generation failed: {e}")
+            # Notify clients of failure
+            from events import publish
+            publish("thumbnail_failed", {"furniture_id": furniture_id, "error": str(e)})
 
 
 def _generate_thumbnail_sync(model_path: Path, thumbnail_path: Path):
