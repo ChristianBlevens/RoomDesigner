@@ -63,7 +63,10 @@ def init_databases():
     columns = _furniture_conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'furniture'").fetchall()
     column_names = [col[0] for col in columns]
     if 'thumbnail_path' in column_names and 'preview_3d_path' not in column_names:
-        _furniture_conn.execute("ALTER TABLE furniture RENAME COLUMN thumbnail_path TO preview_3d_path")
+        # Add new column, copy data, drop old column
+        _furniture_conn.execute("ALTER TABLE furniture ADD COLUMN preview_3d_path VARCHAR")
+        _furniture_conn.execute("UPDATE furniture SET preview_3d_path = thumbnail_path")
+        _furniture_conn.execute("ALTER TABLE furniture DROP COLUMN thumbnail_path")
 
 def get_houses_db():
     return _houses_conn
