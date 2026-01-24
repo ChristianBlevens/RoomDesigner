@@ -194,6 +194,8 @@ function showConfirmDialog(message, onConfirm, onCancel = null) {
 
 // Initialize application
 async function init() {
+  console.log('init() called - if you see this twice, there is a double initialization');
+
   // Initialize Three.js scene
   initScene();
 
@@ -219,7 +221,8 @@ async function init() {
   setupLightingControls();
 
   // Subscribe to server events for real-time updates
-  setupServerEvents();
+  // TODO: Re-enable after debugging double-event issue
+  // setupServerEvents();
 
   // Show calendar modal on startup
   await openCalendarModal();
