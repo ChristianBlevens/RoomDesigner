@@ -994,7 +994,7 @@ export function initScene() {
   transformControls.setSpace('world');
   scene.add(transformControls);
 
-  // GLTF Loader
+  // GLB/GLTF Loader (Three.js uses same loader for both formats)
   gltfLoader = new GLTFLoader();
 
   // Handle window resize
@@ -1079,98 +1079,9 @@ async function loadModelFromBlob(blob) {
   }
 }
 
-// Load model from extracted ZIP data (handles GLTF with external assets)
+// Load model from extracted ZIP data (GLB only)
 export async function loadModelFromExtractedZip(extractedData) {
-  const { modelBlob, modelBlobUrl, assets, isGlb } = extractedData;
-
-  // For GLB files, use the simple loader
-  if (isGlb && modelBlob) {
-    return loadModelFromBlob(modelBlob);
-  }
-
-  // For GLTF files with assets, use a custom LoadingManager
-  const loadingManager = new THREE.LoadingManager();
-
-  // Override URL resolution to use our blob URLs
-  loadingManager.setURLModifier((url) => {
-    // Check if it's our main model blob URL - return as-is
-    if (url === modelBlobUrl) {
-      return url;
-    }
-
-    let resourcePath = url;
-
-    // Handle blob URLs that aren't our main model
-    // GLTFLoader resolves relative paths like "scene.bin" to "blob:http://localhost:8000/scene.bin"
-    // We need to extract the path and look it up in our assets map
-    if (url.startsWith('blob:')) {
-      // Extract the path after the origin: blob:http://localhost:8000/scene.bin -> scene.bin
-      const pathMatch = url.match(/^blob:https?:\/\/[^/]+\/(.+)$/);
-      if (pathMatch) {
-        resourcePath = decodeURIComponent(pathMatch[1]);
-      } else {
-        console.warn('Could not parse blob URL:', url);
-        return url;
-      }
-    }
-
-    // Try to find the asset in our map
-    if (assets.has(resourcePath)) {
-      return assets.get(resourcePath);
-    }
-
-    // Try without leading ./
-    if (resourcePath.startsWith('./')) {
-      const withoutDot = resourcePath.substring(2);
-      if (assets.has(withoutDot)) {
-        return assets.get(withoutDot);
-      }
-    }
-
-    // Try just the filename
-    const filename = resourcePath.split('/').pop();
-    if (assets.has(filename)) {
-      return assets.get(filename);
-    }
-
-    // Search for partial match (handles nested paths like textures/foo.png)
-    for (const [key, value] of assets.entries()) {
-      if (key.endsWith(resourcePath) || resourcePath.endsWith(key) || key.endsWith(filename)) {
-        return value;
-      }
-    }
-
-    console.warn('Asset not found in ZIP:', resourcePath, 'Available:', [...assets.keys()]);
-    return url;
-  });
-
-  // Create a new loader with our custom manager
-  const customLoader = new GLTFLoader(loadingManager);
-
-  try {
-    const gltf = await customLoader.loadAsync(modelBlobUrl);
-    const model = gltf.scene;
-
-    // Enable shadows on all meshes
-    model.traverse((child) => {
-      if (child.isMesh) {
-        child.castShadow = true;
-        child.receiveShadow = true;
-      }
-    });
-
-    return model;
-  } finally {
-    // Clean up blob URLs after model is loaded
-    // Note: We delay cleanup slightly to ensure textures are loaded
-    setTimeout(() => {
-      if (assets) {
-        for (const url of assets.values()) {
-          URL.revokeObjectURL(url);
-        }
-      }
-    }, 1000);
-  }
+  return loadModelFromBlob(extractedData.modelBlob);
 }
 
 // Update mouse coordinates from event

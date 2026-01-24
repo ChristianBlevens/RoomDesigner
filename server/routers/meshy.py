@@ -3,9 +3,7 @@ Meshy.ai API router for image-to-3D model generation.
 Handles task creation, status polling, and model download.
 """
 
-import io
 import os
-import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
@@ -188,18 +186,10 @@ async def download_model(
         generate_thumbnail=False
     )
 
-    # Wrap processed GLB in ZIP (matches existing model storage format)
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("model.glb", result['glb'])
-    zip_buffer.seek(0)
-
-    # Save to storage
+    # Save processed GLB directly
     FURNITURE_MODELS.mkdir(parents=True, exist_ok=True)
-    model_path = FURNITURE_MODELS / f"{furniture_id}.zip"
-
-    with open(model_path, 'wb') as f:
-        f.write(zip_buffer.getvalue())
+    model_path = FURNITURE_MODELS / f"{furniture_id}.glb"
+    model_path.write_bytes(result['glb'])
 
     # Update database to set model_path
     from db.connection import get_furniture_db

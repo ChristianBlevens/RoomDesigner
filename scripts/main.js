@@ -1663,24 +1663,17 @@ async function handleEntryModelUpload(event) {
   const file = event.target.files[0];
   if (!file) return;
 
-  if (!file.name.toLowerCase().endsWith('.zip')) {
-    showError('Please upload a ZIP file containing a GLB or GLTF model');
+  if (!file.name.toLowerCase().endsWith('.glb')) {
+    showError('Please upload a GLB model file');
     return;
   }
 
-  try {
-    // Validate the ZIP contains a valid model
-    await extractModelFromZip(file);
+  // Store the GLB file
+  entryModelBlob = file;
 
-    // Store the original ZIP file (preserves all assets)
-    entryModelBlob = file;
-
-    const preview = document.getElementById('model-upload-preview');
-    preview.innerHTML = '<span style="color: #22c55e;">Model loaded</span>';
-    // Note: Thumbnail will be generated server-side during upload
-  } catch (err) {
-    showError(err.message);
-  }
+  const preview = document.getElementById('model-upload-preview');
+  preview.innerHTML = '<span style="color: #22c55e;">Model loaded</span>';
+  // Thumbnail will be generated server-side during upload
 
   event.target.value = '';
 }

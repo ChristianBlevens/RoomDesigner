@@ -1,6 +1,4 @@
-import io
 import sys
-import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File
@@ -84,48 +82,24 @@ async def upload_furniture_model(
     background_tasks: BackgroundTasks = None
 ):
     """
-    Upload a furniture model (ZIP containing GLB/GLTF).
+    Upload a furniture model (GLB file).
     Processes the model to fix bounds and recenter origin.
     Thumbnail generated async in background.
     """
     content = await file.read()
 
-    # Validate ZIP and extract model
-    try:
-        zf = zipfile.ZipFile(io.BytesIO(content))
-    except zipfile.BadZipFile:
-        raise HTTPException(status_code=400, detail="Invalid ZIP file")
-
-    model_name = None
-    for name in zf.namelist():
-        lower_name = name.lower()
-        if lower_name.endswith('.glb') or lower_name.endswith('.gltf'):
-            model_name = name
-            break
-
-    if not model_name:
-        raise HTTPException(status_code=400, detail=f"No GLB or GLTF file found in ZIP. Contents: {zf.namelist()}")
-
-    glb_data = zf.read(model_name)
-    zf.close()
-
     # Process the model
     processor = ModelProcessor()
     result = processor.process_glb(
-        glb_data,
+        content,
         origin_placement='bottom-center',
         generate_thumbnail=False
     )
 
-    # Wrap processed GLB in ZIP
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as out_zf:
-        out_zf.writestr("model.glb", result['glb'])
-
-    # Save model
+    # Save processed GLB
     FURNITURE_MODELS.mkdir(parents=True, exist_ok=True)
-    model_path = FURNITURE_MODELS / f"{furniture_id}.zip"
-    model_path.write_bytes(zip_buffer.getvalue())
+    model_path = FURNITURE_MODELS / f"{furniture_id}.glb"
+    model_path.write_bytes(result['glb'])
 
     db = get_furniture_db()
     db.execute("UPDATE furniture SET model_path = ? WHERE id = ?", [str(model_path), furniture_id])
@@ -144,10 +118,16 @@ async def upload_furniture_model(
 
 @router.get("/furniture/{furniture_id}/model")
 def get_furniture_model(furniture_id: str):
-    path = FURNITURE_MODELS / f"{furniture_id}.zip"
-    if not path.exists():
-        raise HTTPException(404, "Model not found")
-    return FileResponse(path, media_type="application/zip")
+    # Try GLB first (new format), fall back to ZIP (legacy)
+    glb_path = FURNITURE_MODELS / f"{furniture_id}.glb"
+    if glb_path.exists():
+        return FileResponse(glb_path, media_type="model/gltf-binary")
+
+    zip_path = FURNITURE_MODELS / f"{furniture_id}.zip"
+    if zip_path.exists():
+        return FileResponse(zip_path, media_type="application/zip")
+
+    raise HTTPException(404, "Model not found")
 
 # ============ Room Files ============
 

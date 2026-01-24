@@ -34,85 +34,39 @@ export function hideError() {
   popup.classList.add('modal-hidden');
 }
 
-// Extract model and all assets from ZIP file
-// Returns an object with the main model blob and a map of all extracted files
-export async function extractModelFromZip(zipFile) {
-  const zip = await JSZip.loadAsync(zipFile);
+// Extract GLB model from file (handles both direct GLB and legacy ZIP)
+export async function extractModelFromZip(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuffer);
 
-  // Find the main model file (GLB or GLTF)
-  const modelExtensions = ['.glb', '.gltf'];
-  let modelFileName = null;
+  // Check if it's a GLB file (magic bytes: "glTF" = 0x676C5446)
+  const isGlb = bytes[0] === 0x67 && bytes[1] === 0x6C && bytes[2] === 0x54 && bytes[3] === 0x46;
 
+  if (isGlb) {
+    return {
+      modelBlob: new Blob([arrayBuffer], { type: 'model/gltf-binary' })
+    };
+  }
+
+  // Legacy ZIP support
+  const zip = await JSZip.loadAsync(arrayBuffer);
+
+  let glbFileName = null;
   for (const fileName of Object.keys(zip.files)) {
     if (zip.files[fileName].dir) continue;
-    const lowerName = fileName.toLowerCase();
-    if (modelExtensions.some(ext => lowerName.endsWith(ext))) {
-      modelFileName = fileName;
+    if (fileName.toLowerCase().endsWith('.glb')) {
+      glbFileName = fileName;
       break;
     }
   }
 
-  if (!modelFileName) {
-    throw new Error('No GLB or GLTF file found in ZIP archive');
+  if (!glbFileName) {
+    throw new Error('No GLB file found');
   }
 
-  const isGlb = modelFileName.toLowerCase().endsWith('.glb');
-
-  // For GLB files, we only need the single file
-  if (isGlb) {
-    const blob = await zip.files[modelFileName].async('blob');
-    return {
-      modelBlob: new Blob([blob], { type: 'model/gltf-binary' }),
-      assets: null,
-      isGlb: true
-    };
-  }
-
-  // For GLTF files, extract all files and create a map of blob URLs
-  const assets = new Map();
-  const modelDir = modelFileName.includes('/')
-    ? modelFileName.substring(0, modelFileName.lastIndexOf('/') + 1)
-    : '';
-
-  for (const fileName of Object.keys(zip.files)) {
-    if (zip.files[fileName].dir) continue;
-
-    const blob = await zip.files[fileName].async('blob');
-
-    // Get the path relative to the model file's directory
-    let relativePath = fileName;
-    if (modelDir && fileName.startsWith(modelDir)) {
-      relativePath = fileName.substring(modelDir.length);
-    }
-
-    // Determine MIME type
-    let mimeType = 'application/octet-stream';
-    const lowerName = fileName.toLowerCase();
-    if (lowerName.endsWith('.gltf')) mimeType = 'model/gltf+json';
-    else if (lowerName.endsWith('.bin')) mimeType = 'application/octet-stream';
-    else if (lowerName.endsWith('.png')) mimeType = 'image/png';
-    else if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) mimeType = 'image/jpeg';
-    else if (lowerName.endsWith('.webp')) mimeType = 'image/webp';
-
-    const blobWithType = new Blob([blob], { type: mimeType });
-    const blobUrl = URL.createObjectURL(blobWithType);
-
-    assets.set(relativePath, blobUrl);
-    // Also store with original path for fallback
-    if (relativePath !== fileName) {
-      assets.set(fileName, blobUrl);
-    }
-  }
-
-  // Get the model blob
-  const modelRelativePath = modelDir ? modelFileName.substring(modelDir.length) : modelFileName;
-  const modelBlobUrl = assets.get(modelRelativePath) || assets.get(modelFileName);
-
+  const blob = await zip.files[glbFileName].async('blob');
   return {
-    modelBlob: null,
-    modelBlobUrl: modelBlobUrl,
-    assets: assets,
-    isGlb: false
+    modelBlob: new Blob([blob], { type: 'model/gltf-binary' })
   };
 }
 

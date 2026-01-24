@@ -274,7 +274,7 @@ export async function saveFurnitureEntry(entry) {
     await uploadFile(`/files/furniture/${entryId}/thumbnail`, entry.thumbnail, 'thumbnail.jpg');
   }
   if (entry.model instanceof Blob) {
-    await uploadFile(`/files/furniture/${entryId}/model`, entry.model, 'model.zip');
+    await uploadFile(`/files/furniture/${entryId}/model`, entry.model, 'model.glb');
   }
 
   return entryId;

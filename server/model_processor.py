@@ -332,7 +332,7 @@ async def generate_thumbnail_async(
     Uses semaphore to limit concurrent renders (protects 2 vCPU server).
 
     Args:
-        model_path: Path to the model ZIP file
+        model_path: Path to the model file (GLB or legacy ZIP)
         thumbnail_path: Path to save thumbnail PNG
         furniture_id: ID of the furniture entry for database update
     """
@@ -365,20 +365,22 @@ def _generate_thumbnail_sync(model_path: Path, thumbnail_path: Path):
     """Synchronous thumbnail generation (runs in thread pool)."""
     processor = ModelProcessor()
 
-    # Read model from ZIP
-    with zipfile.ZipFile(model_path) as zf:
-        glb_name = None
-        for name in zf.namelist():
-            if name.lower().endswith('.glb'):
-                glb_name = name
-                break
+    # Read model - GLB directly or from legacy ZIP
+    if model_path.suffix.lower() == '.glb':
+        glb_data = model_path.read_bytes()
+    else:
+        # Legacy ZIP support
+        with zipfile.ZipFile(model_path) as zf:
+            glb_name = None
+            for name in zf.namelist():
+                if name.lower().endswith('.glb'):
+                    glb_name = name
+                    break
+            if not glb_name:
+                raise ValueError("No GLB file found in ZIP")
+            glb_data = zf.read(glb_name)
 
-        if not glb_name:
-            raise ValueError("No GLB file found in ZIP")
-
-        glb_data = zf.read(glb_name)
-
-    # Load scene and generate thumbnail only
+    # Load scene and generate thumbnail
     scene = trimesh.load(
         io.BytesIO(glb_data),
         file_type='glb',
