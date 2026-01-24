@@ -1,6 +1,6 @@
 // Calendar module for Room Furniture Planner
 
-import { getAllHouses } from './database.js';
+import { getAllHouses } from './api.js';
 import { formatDateRange } from './houses.js';
 
 // Calendar state

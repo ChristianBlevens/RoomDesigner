@@ -23,7 +23,7 @@ import {
   ScaleFurnitureCommand,
   DeleteFurnitureCommand
 } from './undo.js';
-import { getFurnitureEntry } from './database.js';
+import { getFurnitureEntry } from './api.js';
 import { modalManager } from './modals.js';
 import { extractModelFromZip } from './utils.js';
 import { isLightingDirectionMode } from './main.js';

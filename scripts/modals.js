@@ -27,6 +27,11 @@ class ModalManager {
       if (housePopup && housePopup.contains(event.target)) {
         return;
       }
+      // Don't close if clicking on error popup
+      const errorPopup = document.getElementById('error-popup');
+      if (errorPopup && errorPopup.contains(event.target)) {
+        return;
+      }
 
       // Don't close if clicking on a modal that should stay open
       const modal = this.activeModal;

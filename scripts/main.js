@@ -42,7 +42,6 @@ import {
 } from './scene.js';
 import { MoGe2Client } from '../huggingface-moge2/moge2-client.js';
 import {
-  openDatabase,
   saveFurnitureEntry,
   getFurnitureEntry,
   getAllFurniture,
@@ -56,7 +55,7 @@ import {
   getHouse,
   getRoomsByHouseId,
   getOrphanRooms
-} from './database.js';
+} from './api.js';
 import {
   getCurrentHouse,
   setCurrentHouse,
@@ -134,11 +133,66 @@ let popupEntryId = null;
 const meshyActiveTasks = new Map();
 const MESHY_MAX_CONCURRENT = 10;
 
+// ============ Utility Functions ============
+
+/**
+ * Show a popup at the specified coordinates.
+ */
+function showPopupAt(popupId, x, y) {
+  const popup = document.getElementById(popupId);
+  popup.style.left = `${x}px`;
+  popup.style.top = `${y}px`;
+  popup.classList.remove('modal-hidden');
+}
+
+/**
+ * Hide a popup by ID.
+ */
+function hidePopup(popupId) {
+  const popup = document.getElementById(popupId);
+  popup.classList.add('modal-hidden');
+}
+
+/**
+ * Show a confirmation dialog and execute action on confirm.
+ * @param {string} message - Message to display
+ * @param {Function} onConfirm - Async function to call on confirm
+ * @param {Function} [onCancel] - Optional function to call on cancel
+ */
+function showConfirmDialog(message, onConfirm, onCancel = null) {
+  const messageEl = document.getElementById('confirm-delete-message');
+  const confirmBtn = document.getElementById('confirm-delete-btn');
+  const cancelBtn = document.getElementById('confirm-cancel-btn');
+
+  messageEl.textContent = message;
+
+  const cleanup = () => {
+    confirmBtn.removeEventListener('click', handleConfirm);
+    cancelBtn.removeEventListener('click', handleCancel);
+  };
+
+  const handleConfirm = async () => {
+    cleanup();
+    await onConfirm();
+  };
+
+  const handleCancel = () => {
+    cleanup();
+    if (onCancel) {
+      onCancel();
+    } else {
+      modalManager.closeModal();
+    }
+  };
+
+  confirmBtn.addEventListener('click', handleConfirm);
+  cancelBtn.addEventListener('click', handleCancel);
+
+  modalManager.openModal('confirm-delete-modal');
+}
+
 // Initialize application
 async function init() {
-  // Initialize database
-  await openDatabase();
-
   // Initialize Three.js scene
   initScene();
 
@@ -1123,27 +1177,20 @@ function setupEntryActionPopup() {
 }
 
 async function showEntryActionPopup(entryId, event) {
-  const popup = document.getElementById('entry-action-popup');
-  const placeBtn = document.getElementById('popup-place-btn');
-
   popupEntryId = entryId;
 
-  // Check if entry has a model (required for placing)
   const entry = await getFurnitureEntry(entryId);
   const hasModel = entry && entry.model;
-
-  // Check availability (include count already placed in current scene)
   const placedInScene = getPlacedCountForEntry(entryId);
   const { available } = await getAvailableQuantity(entryId, currentRoomId, placedInScene);
-  const isAvailable = available > 0;
 
-  // Show Place button only if has model AND available
-  if (hasModel && isAvailable) {
+  const placeBtn = document.getElementById('popup-place-btn');
+  if (hasModel && available > 0) {
     placeBtn.style.display = 'block';
     placeBtn.disabled = false;
     placeBtn.classList.remove('disabled');
-  } else if (hasModel && !isAvailable) {
-    // Show but disable the button
+    placeBtn.title = '';
+  } else if (hasModel) {
     placeBtn.style.display = 'block';
     placeBtn.disabled = true;
     placeBtn.classList.add('disabled');
@@ -1152,17 +1199,12 @@ async function showEntryActionPopup(entryId, event) {
     placeBtn.style.display = 'none';
   }
 
-  // Position popup near click
-  popup.style.left = `${event.clientX}px`;
-  popup.style.top = `${event.clientY}px`;
-  popup.classList.remove('modal-hidden');
-
+  showPopupAt('entry-action-popup', event.clientX, event.clientY);
   event.stopPropagation();
 }
 
 function hideEntryActionPopup() {
-  const popup = document.getElementById('entry-action-popup');
-  popup.classList.add('modal-hidden');
+  hidePopup('entry-action-popup');
   popupEntryId = null;
 }
 
@@ -1190,34 +1232,15 @@ async function confirmDeleteEntry(entryId) {
   const entry = await getFurnitureEntry(entryId);
   if (!entry) return;
 
-  const message = document.getElementById('confirm-delete-message');
-  const confirmBtn = document.getElementById('confirm-delete-btn');
-  const cancelBtn = document.getElementById('confirm-cancel-btn');
-
-  message.textContent = `Are you sure you want to delete "${entry.name}"? This will also remove all placed instances.`;
-
-  const handleConfirm = async () => {
-    await deleteFurnitureEntry(entryId);
-    removeAllFurnitureByEntryId(entryId);
-    modalManager.closeModal(); // Close confirm modal (returns to furniture modal)
-    await refreshFurnitureModal();
-    cleanup();
-  };
-
-  const handleCancel = () => {
-    modalManager.closeModal(); // Close confirm modal (returns to furniture modal)
-    cleanup();
-  };
-
-  const cleanup = () => {
-    confirmBtn.removeEventListener('click', handleConfirm);
-    cancelBtn.removeEventListener('click', handleCancel);
-  };
-
-  confirmBtn.addEventListener('click', handleConfirm);
-  cancelBtn.addEventListener('click', handleCancel);
-
-  modalManager.openModal('confirm-delete-modal'); // Open as sub-modal of furniture modal
+  showConfirmDialog(
+    `Are you sure you want to delete "${entry.name}"? This will also remove all placed instances.`,
+    async () => {
+      await deleteFurnitureEntry(entryId);
+      removeAllFurnitureByEntryId(entryId);
+      modalManager.closeModal();
+      await refreshFurnitureModal();
+    }
+  );
 }
 
 // ============ Entry Editor ============
@@ -2124,33 +2147,14 @@ async function handleDeleteHouseFromSession() {
 
   const roomCount = await getHouseRoomCount(currentHouseId);
 
-  const message = document.getElementById('confirm-delete-message');
-  const confirmBtn = document.getElementById('confirm-delete-btn');
-  const cancelBtn = document.getElementById('confirm-cancel-btn');
-
-  message.textContent = `Are you sure you want to delete "${house.name}" and all ${roomCount} room${roomCount !== 1 ? 's' : ''}? This cannot be undone.`;
-
-  const handleConfirm = async () => {
-    await deleteHouseWithRooms(currentHouseId);
-    modalManager.closeAllModals();
-    await closeHouse();
-    cleanup();
-  };
-
-  const handleCancel = () => {
-    modalManager.closeModal(); // Close confirm modal (returns to session modal)
-    cleanup();
-  };
-
-  const cleanup = () => {
-    confirmBtn.removeEventListener('click', handleConfirm);
-    cancelBtn.removeEventListener('click', handleCancel);
-  };
-
-  confirmBtn.addEventListener('click', handleConfirm);
-  cancelBtn.addEventListener('click', handleCancel);
-
-  modalManager.openModal('confirm-delete-modal');
+  showConfirmDialog(
+    `Are you sure you want to delete "${house.name}" and all ${roomCount} room${roomCount !== 1 ? 's' : ''}? This cannot be undone.`,
+    async () => {
+      await deleteHouseWithRooms(currentHouseId);
+      modalManager.closeAllModals();
+      await closeHouse();
+    }
+  );
 }
 
 // ============ Undo/Redo ============
@@ -2377,19 +2381,13 @@ function setupHouseActionPopup() {
 }
 
 function showHouseActionPopup(houseId, event) {
-  const popup = document.getElementById('house-action-popup');
   popupHouseId = houseId;
-
-  popup.style.left = `${event.clientX}px`;
-  popup.style.top = `${event.clientY}px`;
-  popup.classList.remove('modal-hidden');
-
+  showPopupAt('house-action-popup', event.clientX, event.clientY);
   event.stopPropagation();
 }
 
 function hideHouseActionPopup() {
-  const popup = document.getElementById('house-action-popup');
-  popup.classList.add('modal-hidden');
+  hidePopup('house-action-popup');
   popupHouseId = null;
 }
 
@@ -2399,33 +2397,14 @@ async function confirmDeleteHouse(houseId) {
 
   const roomCount = await getHouseRoomCount(houseId);
 
-  const message = document.getElementById('confirm-delete-message');
-  const confirmBtn = document.getElementById('confirm-delete-btn');
-  const cancelBtn = document.getElementById('confirm-cancel-btn');
-
-  message.textContent = `Are you sure you want to delete "${house.name}" and all ${roomCount} room${roomCount !== 1 ? 's' : ''}? This cannot be undone.`;
-
-  const handleConfirm = async () => {
-    await deleteHouseWithRooms(houseId);
-    modalManager.closeModal(); // Close confirm modal (returns to calendar modal)
-    await renderCalendar();
-    cleanup();
-  };
-
-  const handleCancel = () => {
-    modalManager.closeModal(); // Close confirm modal (returns to house modal)
-    cleanup();
-  };
-
-  const cleanup = () => {
-    confirmBtn.removeEventListener('click', handleConfirm);
-    cancelBtn.removeEventListener('click', handleCancel);
-  };
-
-  confirmBtn.addEventListener('click', handleConfirm);
-  cancelBtn.addEventListener('click', handleCancel);
-
-  modalManager.openModal('confirm-delete-modal'); // Open as sub-modal
+  showConfirmDialog(
+    `Are you sure you want to delete "${house.name}" and all ${roomCount} room${roomCount !== 1 ? 's' : ''}? This cannot be undone.`,
+    async () => {
+      await deleteHouseWithRooms(houseId);
+      modalManager.closeModal();
+      await renderCalendar();
+    }
+  );
 }
 
 // ============ Room Name Modal ============
@@ -2578,48 +2557,25 @@ async function confirmDeleteRoomFromTab(roomId) {
   const room = await dbLoadRoom(roomId);
   if (!room) return;
 
-  const confirmModal = document.getElementById('confirm-delete-modal');
-  const message = document.getElementById('confirm-delete-message');
-  const confirmBtn = document.getElementById('confirm-delete-btn');
-  const cancelBtn = document.getElementById('confirm-cancel-btn');
+  showConfirmDialog(
+    `Are you sure you want to delete "${room.name || 'this room'}"? This cannot be undone.`,
+    async () => {
+      modalManager.closeModal();
+      await deleteRoom(roomId);
 
-  message.textContent = `Are you sure you want to delete "${room.name || 'this room'}"? This cannot be undone.`;
-
-  const handleConfirm = async () => {
-    cleanup();
-    confirmModal.classList.add('modal-hidden');
-
-    await deleteRoom(roomId);
-
-    // If this was the current room, load another room or go to house modal
-    if (roomId === currentRoomId) {
-      const remainingRooms = await getRoomsByHouseId(currentHouseId);
-      if (remainingRooms.length > 0) {
-        await loadRoomById(remainingRooms[0].id);
-        await renderTabBar();
+      if (roomId === currentRoomId) {
+        const remainingRooms = await getRoomsByHouseId(currentHouseId);
+        if (remainingRooms.length > 0) {
+          await loadRoomById(remainingRooms[0].id);
+          await renderTabBar();
+        } else {
+          await closeHouse();
+        }
       } else {
-        // No rooms left - go back to house modal (keep the house)
-        await closeHouse();
+        await renderTabBar();
       }
-    } else {
-      await renderTabBar();
     }
-  };
-
-  const handleCancel = () => {
-    cleanup();
-    confirmModal.classList.add('modal-hidden');
-  };
-
-  const cleanup = () => {
-    confirmBtn.removeEventListener('click', handleConfirm);
-    cancelBtn.removeEventListener('click', handleCancel);
-  };
-
-  confirmBtn.addEventListener('click', handleConfirm);
-  cancelBtn.addEventListener('click', handleCancel);
-
-  confirmModal.classList.remove('modal-hidden');
+  );
 }
 
 // ============ House/Room Loading ============

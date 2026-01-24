@@ -10,6 +10,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.connection import get_houses_db
 from models.room import RoomCreate, RoomUpdate, RoomResponse
 from config import ROOM_BACKGROUNDS, ROOM_MESHES
+from utils import cleanup_entity_files
+
+ROOM_SELECT = """
+    SELECT id, house_id, name, background_image_path,
+           placed_furniture, moge_data, lighting_settings
+    FROM rooms
+"""
 
 
 async def download_mesh(room_id: str, mesh_url: str) -> str:
@@ -52,41 +59,25 @@ def row_to_response(row) -> RoomResponse:
 @router.get("/", response_model=List[RoomResponse])
 def get_all_rooms():
     db = get_houses_db()
-    rows = db.execute("""
-        SELECT id, house_id, name, background_image_path,
-               placed_furniture, moge_data, lighting_settings
-        FROM rooms
-    """).fetchall()
+    rows = db.execute(ROOM_SELECT).fetchall()
     return [row_to_response(row) for row in rows]
 
 @router.get("/house/{house_id}", response_model=List[RoomResponse])
 def get_rooms_by_house(house_id: str):
     db = get_houses_db()
-    rows = db.execute("""
-        SELECT id, house_id, name, background_image_path,
-               placed_furniture, moge_data, lighting_settings
-        FROM rooms WHERE house_id = ?
-    """, [house_id]).fetchall()
+    rows = db.execute(f"{ROOM_SELECT} WHERE house_id = ?", [house_id]).fetchall()
     return [row_to_response(row) for row in rows]
 
 @router.get("/orphans", response_model=List[RoomResponse])
 def get_orphan_rooms():
     db = get_houses_db()
-    rows = db.execute("""
-        SELECT id, house_id, name, background_image_path,
-               placed_furniture, moge_data, lighting_settings
-        FROM rooms WHERE house_id IS NULL OR house_id = ''
-    """).fetchall()
+    rows = db.execute(f"{ROOM_SELECT} WHERE house_id IS NULL OR house_id = ''").fetchall()
     return [row_to_response(row) for row in rows]
 
 @router.get("/{room_id}", response_model=RoomResponse)
 def get_room(room_id: str):
     db = get_houses_db()
-    row = db.execute("""
-        SELECT id, house_id, name, background_image_path,
-               placed_furniture, moge_data, lighting_settings
-        FROM rooms WHERE id = ?
-    """, [room_id]).fetchone()
+    row = db.execute(f"{ROOM_SELECT} WHERE id = ?", [room_id]).fetchone()
     if not row:
         raise HTTPException(404, "Room not found")
     return row_to_response(row)
@@ -151,9 +142,10 @@ def delete_room(room_id: str):
     db = get_houses_db()
     db.execute("DELETE FROM rooms WHERE id = ?", [room_id])
 
-    # Clean up files
-    for ext in ['jpg', 'jpeg', 'png', 'webp']:
-        (ROOM_BACKGROUNDS / f"{room_id}.{ext}").unlink(missing_ok=True)
-    (ROOM_MESHES / f"{room_id}.glb").unlink(missing_ok=True)
+    cleanup_entity_files(
+        room_id,
+        image_dirs=[ROOM_BACKGROUNDS],
+        other_files=[ROOM_MESHES / f"{room_id}.glb"]
+    )
 
     return {"status": "deleted"}

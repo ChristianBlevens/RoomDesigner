@@ -920,7 +920,7 @@ function onWindowResize() {
 }
 
 // Load model from Blob (GLB only)
-export async function loadModelFromBlob(blob) {
+async function loadModelFromBlob(blob) {
   const url = URL.createObjectURL(blob);
   try {
     const gltf = await gltfLoader.loadAsync(url);
@@ -1035,22 +1035,10 @@ export async function loadModelFromExtractedZip(extractedData) {
 }
 
 // Update mouse coordinates from event
-export function updateMouse(event) {
+function updateMouse(event) {
   const rect = renderer.domElement.getBoundingClientRect();
   mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-}
-
-// Get click position on floor
-export function getClickPositionOnFloor(event) {
-  updateMouse(event);
-  raycaster.setFromCamera(mouse, camera);
-
-  const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-  const intersectPoint = new THREE.Vector3();
-  raycaster.ray.intersectPlane(floorPlane, intersectPoint);
-
-  return intersectPoint;
 }
 
 // Raycast to find furniture at mouse position

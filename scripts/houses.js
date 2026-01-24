@@ -7,7 +7,7 @@ import {
   deleteHouse as dbDeleteHouse,
   getRoomsByHouseId,
   deleteRoom
-} from './database.js';
+} from './api.js';
 
 // Current house state
 let currentHouse = null;

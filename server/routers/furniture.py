@@ -9,8 +9,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.connection import get_furniture_db
 from models.furniture import FurnitureCreate, FurnitureUpdate, FurnitureResponse
 from config import FURNITURE_IMAGES, FURNITURE_THUMBNAILS, FURNITURE_MODELS
+from utils import cleanup_entity_files
 
 router = APIRouter()
+
+FURNITURE_SELECT = """
+    SELECT id, name, category, tags, quantity,
+           dimension_x, dimension_y, dimension_z,
+           image_path, thumbnail_path, model_path
+    FROM furniture
+"""
 
 def row_to_response(row) -> FurnitureResponse:
     furn_id = row[0]
@@ -37,12 +45,7 @@ def row_to_response(row) -> FurnitureResponse:
 @router.get("/", response_model=List[FurnitureResponse])
 def get_all_furniture():
     db = get_furniture_db()
-    rows = db.execute("""
-        SELECT id, name, category, tags, quantity,
-               dimension_x, dimension_y, dimension_z,
-               image_path, thumbnail_path, model_path
-        FROM furniture
-    """).fetchall()
+    rows = db.execute(FURNITURE_SELECT).fetchall()
     return [row_to_response(row) for row in rows]
 
 @router.get("/categories")
@@ -64,12 +67,7 @@ def get_tags():
 @router.get("/{furniture_id}", response_model=FurnitureResponse)
 def get_furniture(furniture_id: str):
     db = get_furniture_db()
-    row = db.execute("""
-        SELECT id, name, category, tags, quantity,
-               dimension_x, dimension_y, dimension_z,
-               image_path, thumbnail_path, model_path
-        FROM furniture WHERE id = ?
-    """, [furniture_id]).fetchone()
+    row = db.execute(f"{FURNITURE_SELECT} WHERE id = ?", [furniture_id]).fetchone()
     if not row:
         raise HTTPException(404, "Furniture not found")
     return row_to_response(row)
@@ -131,10 +129,10 @@ def delete_furniture(furniture_id: str):
     db = get_furniture_db()
     db.execute("DELETE FROM furniture WHERE id = ?", [furniture_id])
 
-    # Clean up files
-    for ext in ['jpg', 'jpeg', 'png', 'webp']:
-        (FURNITURE_IMAGES / f"{furniture_id}.{ext}").unlink(missing_ok=True)
-        (FURNITURE_THUMBNAILS / f"{furniture_id}.{ext}").unlink(missing_ok=True)
-    (FURNITURE_MODELS / f"{furniture_id}.zip").unlink(missing_ok=True)
+    cleanup_entity_files(
+        furniture_id,
+        image_dirs=[FURNITURE_IMAGES, FURNITURE_THUMBNAILS],
+        other_files=[FURNITURE_MODELS / f"{furniture_id}.zip"]
+    )
 
     return {"status": "deleted"}

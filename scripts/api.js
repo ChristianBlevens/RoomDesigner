@@ -318,8 +318,3 @@ export async function saveMogeMesh(roomId, meshUrl) {
   return response.json();
 }
 
-// ============ Compatibility ============
-
-export async function openDatabase() {
-  return true;
-}
