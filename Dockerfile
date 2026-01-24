@@ -42,8 +42,9 @@ COPY styles/ ./styles/
 COPY huggingface-moge2/ ./huggingface-moge2/
 COPY index.html .
 
-# Create data directories
-RUN mkdir -p /app/server/data /app/server/storage
+# Create data directories and X11 socket directory
+RUN mkdir -p /app/server/data /app/server/storage /tmp/.X11-unix && \
+    chmod 1777 /tmp/.X11-unix
 
 # Non-root user for security
 RUN useradd --create-home --shell /bin/bash appuser && \
