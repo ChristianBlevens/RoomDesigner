@@ -12,14 +12,28 @@ COPY server/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 
-# Stage 2: Final minimal image
+# Stage 2: Final image with Xvfb for thumbnail rendering
 FROM python:3.12-slim
 
 WORKDIR /app
 
+# Install Xvfb and OpenGL dependencies for server-side thumbnail rendering
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    xvfb \
+    libgl1-mesa-glx \
+    libgl1-mesa-dri \
+    libglib2.0-0 \
+    libsm6 \
+    libxrender1 \
+    libxext6 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy virtual environment from builder
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
+
+# Set up virtual display for trimesh rendering
+ENV DISPLAY=:99
 
 # Copy application code
 COPY server/ ./server/
@@ -38,4 +52,7 @@ USER appuser
 
 EXPOSE 8000
 
-CMD ["uvicorn", "server.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Start Xvfb in background, then uvicorn
+CMD Xvfb :99 -screen 0 1024x768x24 -ac +extension GLX +render -noreset & \
+    sleep 1 && \
+    uvicorn server.main:app --host 0.0.0.0 --port 8000

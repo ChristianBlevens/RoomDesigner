@@ -3,15 +3,20 @@ Meshy.ai API router for image-to-3D model generation.
 Handles task creation, status polling, and model download.
 """
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-import httpx
+import io
+import logging
 import os
 import zipfile
-import io
 from pathlib import Path
 
+from fastapi import APIRouter, BackgroundTasks, HTTPException
+from pydantic import BaseModel
+import httpx
+
 from config import FURNITURE_MODELS, FURNITURE_THUMBNAILS
+from model_processor import ModelProcessor, generate_thumbnail_async
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -139,11 +144,15 @@ async def get_task_status(task_id: str):
 
 
 @router.post("/download/{furniture_id}")
-async def download_model(furniture_id: str, request: DownloadRequest):
+async def download_model(
+    furniture_id: str,
+    request: DownloadRequest,
+    background_tasks: BackgroundTasks
+):
     """
     Download the generated GLB model from Meshy's temporary URL,
-    wrap it in a ZIP file (to match existing model storage format),
-    and save to furniture storage.
+    process it (fix bounds, recenter), save to storage.
+    Thumbnail generation happens async in background.
     """
     glb_url = request.glb_url
 
@@ -174,10 +183,28 @@ async def download_model(furniture_id: str, request: DownloadRequest):
                 detail=f"Failed to download model: {str(e)}"
             )
 
-    # Wrap GLB in ZIP (matches existing model storage format)
+    # Process the model (fix bounds, recenter) - NO thumbnail yet
+    bounds_result = None
+    try:
+        processor = ModelProcessor()
+        result = processor.process_glb(
+            glb_content,
+            origin_placement='bottom-center',
+            generate_thumbnail=False  # Thumbnail generated async
+        )
+        processed_glb = result['glb']
+        bounds_result = result['bounds']
+
+        logger.info(f"Model processed: bounds={bounds_result}")
+
+    except Exception as e:
+        logger.error(f"Model processing failed, using original: {e}")
+        processed_glb = glb_content
+
+    # Wrap processed GLB in ZIP (matches existing model storage format)
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("model.glb", glb_content)
+        zf.writestr("model.glb", processed_glb)
     zip_buffer.seek(0)
 
     # Save to storage
@@ -195,7 +222,18 @@ async def download_model(furniture_id: str, request: DownloadRequest):
         [str(model_path), furniture_id]
     )
 
+    # Queue async thumbnail generation (runs in background, limited concurrency)
+    thumbnail_path = FURNITURE_THUMBNAILS / f"{furniture_id}.png"
+    background_tasks.add_task(
+        generate_thumbnail_async,
+        model_path,
+        thumbnail_path,
+        furniture_id
+    )
+
     return {
         "success": True,
-        "model_url": f"/api/files/furniture/{furniture_id}/model"
+        "model_url": f"/api/files/furniture/{furniture_id}/model",
+        "thumbnail_status": "generating",
+        "bounds": bounds_result
     }

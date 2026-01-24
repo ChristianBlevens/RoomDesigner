@@ -1,7 +1,11 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File
-from fastapi.responses import FileResponse
-from pathlib import Path
+import io
+import logging
 import sys
+import zipfile
+from pathlib import Path
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.connection import get_houses_db, get_furniture_db
@@ -9,6 +13,9 @@ from config import (FURNITURE_IMAGES, FURNITURE_THUMBNAILS, FURNITURE_MODELS,
                     ROOM_BACKGROUNDS, ROOM_MESHES)
 from utils import IMAGE_EXTENSIONS
 from routers.rooms import download_mesh
+from model_processor import ModelProcessor, generate_thumbnail_async
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -74,15 +81,71 @@ def get_furniture_thumbnail(furniture_id: str):
     return FileResponse(path)
 
 @router.post("/furniture/{furniture_id}/model")
-async def upload_furniture_model(furniture_id: str, file: UploadFile = File(...)):
-    path = FURNITURE_MODELS / f"{furniture_id}.zip"
+async def upload_furniture_model(
+    furniture_id: str,
+    file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = None
+):
+    """
+    Upload a furniture model (ZIP containing GLB).
+    Processes the model to fix bounds. Thumbnail generated async.
+    """
     content = await file.read()
-    path.write_bytes(content)
+
+    # Extract GLB from ZIP
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as zf:
+            glb_name = None
+            for name in zf.namelist():
+                if name.lower().endswith('.glb'):
+                    glb_name = name
+                    break
+
+            if not glb_name:
+                raise HTTPException(status_code=400, detail="No GLB file found in ZIP")
+
+            glb_data = zf.read(glb_name)
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=400, detail="Invalid ZIP file")
+
+    # Process the model (no thumbnail - done async)
+    try:
+        processor = ModelProcessor()
+        result = processor.process_glb(
+            glb_data,
+            origin_placement='bottom-center',
+            generate_thumbnail=False
+        )
+        processed_glb = result['glb']
+
+    except Exception as e:
+        logger.warning(f"Model processing failed, using original: {e}")
+        processed_glb = glb_data
+
+    # Wrap processed GLB back in ZIP
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("model.glb", processed_glb)
+
+    # Save model
+    FURNITURE_MODELS.mkdir(parents=True, exist_ok=True)
+    model_path = FURNITURE_MODELS / f"{furniture_id}.zip"
+    model_path.write_bytes(zip_buffer.getvalue())
 
     db = get_furniture_db()
-    db.execute("UPDATE furniture SET model_path = ? WHERE id = ?", [str(path), furniture_id])
+    db.execute("UPDATE furniture SET model_path = ? WHERE id = ?", [str(model_path), furniture_id])
 
-    return {"status": "uploaded", "path": str(path)}
+    # Queue async thumbnail generation
+    if background_tasks:
+        thumbnail_path = FURNITURE_THUMBNAILS / f"{furniture_id}.png"
+        background_tasks.add_task(
+            generate_thumbnail_async,
+            model_path,
+            thumbnail_path,
+            furniture_id
+        )
+
+    return {"status": "uploaded", "path": str(model_path), "thumbnail_status": "generating"}
 
 @router.get("/furniture/{furniture_id}/model")
 def get_furniture_model(furniture_id: str):

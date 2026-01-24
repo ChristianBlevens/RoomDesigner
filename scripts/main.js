@@ -1669,25 +1669,15 @@ async function handleEntryModelUpload(event) {
   }
 
   try {
-    // First, validate the ZIP contains a valid model
-    const extractedData = await extractModelFromZip(file);
+    // Validate the ZIP contains a valid model
+    await extractModelFromZip(file);
 
     // Store the original ZIP file (preserves all assets)
     entryModelBlob = file;
 
     const preview = document.getElementById('model-upload-preview');
     preview.innerHTML = '<span style="color: #22c55e;">Model loaded</span>';
-
-    // Generate thumbnail if no image exists
-    if (!entryImageBlob) {
-      try {
-        // Load the model to generate thumbnail
-        const model = await loadModelFromExtractedZip(extractedData);
-        entryThumbnailBlob = await generateThumbnailFromModel(model);
-      } catch (err) {
-        console.warn('Failed to generate thumbnail:', err);
-      }
-    }
+    // Note: Thumbnail will be generated server-side during upload
   } catch (err) {
     showError(err.message);
   }
@@ -1750,16 +1740,8 @@ async function handleEntrySubmit(event) {
   let thumbnail = entryThumbnailBlob;
   if (entryImageBlob) {
     thumbnail = entryImageBlob; // Use image as thumbnail if available
-  } else if (entryModelBlob && !thumbnail) {
-    // Try to generate thumbnail from model (extract from ZIP first)
-    try {
-      const extractedData = await extractModelFromZip(entryModelBlob);
-      const model = await loadModelFromExtractedZip(extractedData);
-      thumbnail = await generateThumbnailFromModel(model);
-    } catch (err) {
-      console.warn('Failed to generate thumbnail:', err);
-    }
   }
+  // Note: If only model exists (no image), server generates thumbnail during upload
 
   // Get dimension values
   const dimXVal = document.getElementById('entry-dimension-x').value.trim();
@@ -1861,21 +1843,8 @@ async function runMeshyGeneration(entryId) {
       throw new Error(error.detail || 'Failed to download model');
     }
 
-    // Step 4: Generate and upload thumbnail
+    // Step 4: Finalize - server already processed model and queued thumbnail generation
     updateMeshyTaskStatus(entryId, 'Finalizing...', 100);
-
-    const modelResponse = await fetch(adjustUrlForProxy(`/api/files/furniture/${entryId}/model`));
-    if (modelResponse.ok) {
-      const modelBlob = await modelResponse.blob();
-      try {
-        const extractedData = await extractModelFromZip(modelBlob);
-        const model = await loadModelFromExtractedZip(extractedData);
-        const thumbnailBlob = await generateThumbnailFromModel(model);
-        await uploadMeshyThumbnail(entryId, thumbnailBlob);
-      } catch (thumbErr) {
-        console.warn('Failed to generate thumbnail:', thumbErr);
-      }
-    }
 
     // Step 5: Success - remove from tracker, show toast
     meshyActiveTasks.delete(entryId);
