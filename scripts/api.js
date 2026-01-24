@@ -207,10 +207,11 @@ export async function getAllFurniture() {
 
   return Promise.all(entries.map(async (entry) => {
     const result = transformFurnitureResponse(entry);
+    if (entry.imageUrl) {
+      result.image = await fetchAsBlob(entry.imageUrl);
+    }
     if (entry.thumbnailUrl) {
       result.thumbnail = await fetchAsBlob(entry.thumbnailUrl);
-    } else if (entry.imageUrl) {
-      result.image = await fetchAsBlob(entry.imageUrl);
     }
     return result;
   }));
