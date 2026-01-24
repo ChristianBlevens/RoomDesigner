@@ -1781,9 +1781,13 @@ async function handleEntrySubmit(event) {
     dimensionZ: dimZVal !== '' ? parseFloat(dimZVal) : null
   };
 
-  await saveFurnitureEntry(entry);
+  // Close modal immediately for responsiveness
   closeEntryEditor();
-  await refreshFurnitureModal();
+
+  // Save in background
+  saveFurnitureEntry(entry)
+    .then(() => refreshFurnitureModal())
+    .catch(err => showError(`Failed to save entry: ${err.message}`));
 }
 
 // ============ Meshy Background Generation ============
