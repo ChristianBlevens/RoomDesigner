@@ -2340,6 +2340,7 @@ function setupHouseActionPopup() {
 
   loadBtn.addEventListener('click', async () => {
     const houseId = popupHouseId;
+    if (!houseId) return;
     hideHouseActionPopup();
     modalManager.closeModal(); // Close house modal
     await loadHouse(houseId);
@@ -2566,6 +2567,8 @@ async function confirmDeleteRoomFromTab(roomId) {
 // ============ House/Room Loading ============
 
 async function loadHouse(houseId) {
+  if (!houseId) return;
+
   const house = await getHouseById(houseId);
   if (!house) {
     showError('House not found');
