@@ -210,8 +210,8 @@ export async function getAllFurniture() {
     if (entry.imageUrl) {
       result.image = await fetchAsBlob(entry.imageUrl);
     }
-    if (entry.thumbnailUrl) {
-      result.thumbnail = await fetchAsBlob(entry.thumbnailUrl);
+    if (entry.preview3dUrl) {
+      result.preview3d = await fetchAsBlob(entry.preview3dUrl);
     }
     return result;
   }));
@@ -226,8 +226,8 @@ export async function getFurnitureEntry(id) {
   if (entry.imageUrl) {
     result.image = await fetchAsBlob(entry.imageUrl);
   }
-  if (entry.thumbnailUrl) {
-    result.thumbnail = await fetchAsBlob(entry.thumbnailUrl);
+  if (entry.preview3dUrl) {
+    result.preview3d = await fetchAsBlob(entry.preview3dUrl);
   }
   if (entry.modelUrl) {
     result.model = await fetchAsBlob(entry.modelUrl);
@@ -271,8 +271,8 @@ export async function saveFurnitureEntry(entry) {
   if (entry.image instanceof Blob) {
     await uploadFile(`/files/furniture/${entryId}/image`, entry.image, 'image.jpg');
   }
-  if (entry.thumbnail instanceof Blob) {
-    await uploadFile(`/files/furniture/${entryId}/thumbnail`, entry.thumbnail, 'thumbnail.jpg');
+  if (entry.preview3d instanceof Blob) {
+    await uploadFile(`/files/furniture/${entryId}/preview3d`, entry.preview3d, 'preview3d.png');
   }
   if (entry.model instanceof Blob) {
     await uploadFile(`/files/furniture/${entryId}/model`, entry.model, 'model.glb');
@@ -328,14 +328,14 @@ export function subscribeToEvents(callback) {
   if (!eventSource) {
     eventSource = new EventSource(`${API_BASE}/events`);
 
-    eventSource.addEventListener('thumbnail_ready', (e) => {
+    eventSource.addEventListener('preview3d_ready', (e) => {
       const data = JSON.parse(e.data);
-      eventListeners.forEach((cb) => cb('thumbnail_ready', data));
+      eventListeners.forEach((cb) => cb('preview3d_ready', data));
     });
 
-    eventSource.addEventListener('thumbnail_failed', (e) => {
+    eventSource.addEventListener('preview3d_failed', (e) => {
       const data = JSON.parse(e.data);
-      eventListeners.forEach((cb) => cb('thumbnail_failed', data));
+      eventListeners.forEach((cb) => cb('preview3d_failed', data));
     });
 
     eventSource.onerror = () => {
@@ -362,8 +362,8 @@ export function subscribeToEvents(callback) {
   };
 }
 
-export async function getFurnitureThumbnail(id) {
-  const url = `${API_BASE}/files/furniture/${id}/thumbnail`;
+export async function getFurniturePreview3d(id) {
+  const url = `${API_BASE}/files/furniture/${id}/preview3d`;
   const response = await fetch(url);
   if (!response.ok) return null;
   return response.blob();

@@ -122,7 +122,6 @@ let editingHouseId = null;
 let editingEntryId = null;
 let entryImageBlob = null;
 let entryModelBlob = null;
-let entryThumbnailBlob = null;
 let entryTags = [];
 
 // Popup state
@@ -1026,24 +1025,28 @@ async function createFurnitureCard(item) {
     card.classList.add('unavailable');
   }
 
-  // Thumbnail container (holds thumbnail and availability badge)
+  // Thumbnail container (holds image/preview and availability badge)
   const thumbnailContainer = document.createElement('div');
   thumbnailContainer.className = 'card-thumbnail';
 
   const has2dImage = item.image !== null && item.image !== undefined;
-  const has3dThumbnail = item.thumbnail !== null && item.thumbnail !== undefined;
+  const has3dPreview = item.preview3d !== null && item.preview3d !== undefined;
+  const has3dModel = item.hasModel === true;
 
-  if (has2dImage && has3dThumbnail) {
-    // Both exist: show 2D image by default, 3D thumbnail on hover
-    thumbnailContainer.classList.add('has-3d-thumbnail');
+  // Add 3D badge class only if entry has a placeable 3D model
+  if (has3dModel) {
+    thumbnailContainer.classList.add('has-3d-model');
+  }
 
+  if (has2dImage && has3dPreview) {
+    // Both exist: show 2D image by default, 3D preview on hover
     const img2d = document.createElement('img');
     img2d.src = URL.createObjectURL(item.image);
     img2d.className = 'default-image';
     thumbnailContainer.appendChild(img2d);
 
     const img3d = document.createElement('img');
-    img3d.src = URL.createObjectURL(item.thumbnail);
+    img3d.src = URL.createObjectURL(item.preview3d);
     img3d.className = 'hover-image';
     thumbnailContainer.appendChild(img3d);
   } else if (has2dImage) {
@@ -1051,12 +1054,10 @@ async function createFurnitureCard(item) {
     const img = document.createElement('img');
     img.src = URL.createObjectURL(item.image);
     thumbnailContainer.appendChild(img);
-  } else if (has3dThumbnail) {
-    // Only 3D thumbnail: show it always
-    thumbnailContainer.classList.add('has-3d-thumbnail');
-
+  } else if (has3dPreview) {
+    // Only 3D preview: show it always
     const img = document.createElement('img');
-    img.src = URL.createObjectURL(item.thumbnail);
+    img.src = URL.createObjectURL(item.preview3d);
     thumbnailContainer.appendChild(img);
   } else {
     // Neither: show placeholder
@@ -1392,7 +1393,6 @@ async function openEntryEditor(entryId) {
   editingEntryId = entryId;
   entryImageBlob = null;
   entryModelBlob = null;
-  entryThumbnailBlob = null;
   entryTags = [];
 
   const title = document.getElementById('entry-editor-title');
@@ -1472,10 +1472,6 @@ async function openEntryEditor(entryId) {
         generateBtn.style.display = 'none';
       }
 
-      if (entry.thumbnail) {
-        entryThumbnailBlob = entry.thumbnail;
-      }
-
       if (entry.tags) {
         entryTags = [...entry.tags];
         renderEntryTags();
@@ -1504,7 +1500,6 @@ function closeEntryEditor() {
   editingEntryId = null;
   entryImageBlob = null;
   entryModelBlob = null;
-  entryThumbnailBlob = null;
   entryTags = [];
 }
 
@@ -1645,7 +1640,7 @@ async function handleEntryModelUpload(event) {
 
   const preview = document.getElementById('model-upload-preview');
   preview.innerHTML = '<span style="color: #22c55e;">Model loaded</span>';
-  // Thumbnail will be generated server-side during upload
+  // 3D preview will be generated server-side during upload
 
   event.target.value = '';
 }
@@ -1701,12 +1696,7 @@ async function handleEntrySubmit(event) {
     return;
   }
 
-  // Determine thumbnail
-  let thumbnail = entryThumbnailBlob;
-  if (entryImageBlob) {
-    thumbnail = entryImageBlob; // Use image as thumbnail if available
-  }
-  // Note: If only model exists (no image), server generates thumbnail during upload
+  // Note: 3D preview is auto-generated server-side when model is uploaded
 
   // Get dimension values
   const dimXVal = document.getElementById('entry-dimension-x').value.trim();
@@ -1723,7 +1713,6 @@ async function handleEntrySubmit(event) {
     tags: entryTags.length > 0 ? entryTags : null,
     image: entryImageBlob,
     model: entryModelBlob,
-    thumbnail: thumbnail,
     quantity: Math.max(1, quantity),
     dimensionX: dimXVal !== '' ? parseFloat(dimXVal) : null,
     dimensionY: dimYVal !== '' ? parseFloat(dimYVal) : null,
@@ -1812,7 +1801,7 @@ async function runMeshyGeneration(entryId) {
       throw new Error(error.detail || 'Failed to download model');
     }
 
-    // Step 4: Finalize - server already processed model and queued thumbnail generation
+    // Step 4: Finalize - server already processed model and generated 3D preview
     updateMeshyTaskStatus(entryId, 'Finalizing...', 100);
 
     // Step 5: Success - remove from tracker, show toast
@@ -1891,20 +1880,6 @@ async function pollMeshyBackground(entryId, taskId) {
   }
 
   throw new Error('Generation timed out after 10 minutes');
-}
-
-async function uploadMeshyThumbnail(entryId, thumbnailBlob) {
-  const formData = new FormData();
-  formData.append('file', thumbnailBlob, 'thumbnail.png');
-
-  const response = await fetch(adjustUrlForProxy(`/api/files/furniture/${entryId}/thumbnail`), {
-    method: 'POST',
-    body: formData
-  });
-
-  if (!response.ok) {
-    throw new Error('Failed to upload thumbnail');
-  }
 }
 
 // ============ Meshy Notification UI ============

@@ -30,5 +30,5 @@ class FurnitureResponse(BaseModel):
     dimensionY: Optional[float] = None
     dimensionZ: Optional[float] = None
     imageUrl: Optional[str] = None
-    thumbnailUrl: Optional[str] = None
+    preview3dUrl: Optional[str] = None
     modelUrl: Optional[str] = None

@@ -1,8 +1,8 @@
 """
-Server-side 3D model processing for bounding box correction and thumbnail generation.
+Server-side 3D model processing for bounding box correction and preview generation.
 Uses trimesh to process GLB files before storage.
 
-Thumbnail generation is designed to run async in background tasks.
+Preview generation is designed to run async in background tasks.
 Concurrency is limited to 1 to avoid overloading a 2 vCPU server.
 """
 
@@ -18,13 +18,13 @@ import trimesh
 
 logger = logging.getLogger(__name__)
 
-# Semaphore to limit concurrent thumbnail renders (1 for 2 vCPU server)
-_thumbnail_semaphore = asyncio.Semaphore(1)
+# Semaphore to limit concurrent preview renders (1 for 2 vCPU server)
+_preview_semaphore = asyncio.Semaphore(1)
 
 
 class ModelProcessor:
     """
-    Process 3D models to fix bounding boxes, recenter origins, and generate thumbnails.
+    Process 3D models to fix bounding boxes, recenter origins, and generate previews.
 
     Designed for compatibility with Three.js:
     - Preserves GLTF/GLB Y-up coordinate system
@@ -36,22 +36,22 @@ class ModelProcessor:
         self,
         glb_data: bytes,
         origin_placement: str = 'bottom-center',
-        generate_thumbnail: bool = True,
-        thumbnail_size: Tuple[int, int] = (256, 256)
+        generate_preview: bool = True,
+        preview_size: Tuple[int, int] = (256, 256)
     ) -> dict:
         """
-        Process a GLB file: fix bounds, recenter origin, generate thumbnail.
+        Process a GLB file: fix bounds, recenter origin, generate 3D preview.
 
         Args:
             glb_data: Raw GLB file bytes
             origin_placement: Where to place origin - 'bottom-center', 'center', or 'original'
-            generate_thumbnail: Whether to generate a thumbnail image
-            thumbnail_size: Thumbnail dimensions (width, height)
+            generate_preview: Whether to generate a 3D preview image
+            preview_size: Preview dimensions (width, height)
 
         Returns:
             dict with:
                 - 'glb': Processed GLB bytes
-                - 'thumbnail': PNG thumbnail bytes (if generate_thumbnail=True)
+                - 'preview': PNG preview bytes (if generate_preview=True)
                 - 'bounds': Dict with min, max, center, size vectors
                 - 'original_bounds': Original bounds before processing
         """
@@ -77,17 +77,17 @@ class ModelProcessor:
         new_bounds = self._compute_bounds(scene)
         logger.info(f"Processed bounds: center={new_bounds['center']}, size={new_bounds['size']}")
 
-        # Generate thumbnail
-        thumbnail_bytes = None
-        if generate_thumbnail:
-            thumbnail_bytes = self._generate_thumbnail(scene, thumbnail_size)
+        # Generate 3D preview
+        preview_bytes = None
+        if generate_preview:
+            preview_bytes = self._generate_preview(scene, preview_size)
 
         # Export processed GLB
         processed_glb = self._export_glb(scene)
 
         return {
             'glb': processed_glb,
-            'thumbnail': thumbnail_bytes,
+            'preview': preview_bytes,
             'bounds': new_bounds,
             'original_bounds': original_bounds
         }
@@ -150,13 +150,13 @@ class ModelProcessor:
 
         logger.info(f"Applied translation offset: {offset.tolist()}")
 
-    def _generate_thumbnail(
+    def _generate_preview(
         self,
         scene: trimesh.Scene,
         size: Tuple[int, int]
     ) -> Optional[bytes]:
         """
-        Generate a thumbnail image of the scene from an angled view.
+        Generate a 3D preview image of the scene from an angled view.
 
         Uses trimesh's built-in rendering which requires pyglet.
         Falls back gracefully if rendering is not available.
@@ -187,15 +187,15 @@ class ModelProcessor:
                 return png_data
 
         except Exception as e:
-            logger.warning(f"Thumbnail generation failed (may need display): {e}")
+            logger.warning(f"Preview generation failed (may need display): {e}")
 
         # Fallback: try with pyrender if available
         try:
-            return self._generate_thumbnail_pyrender(scene, size)
+            return self._generate_preview_pyrender(scene, size)
         except ImportError:
-            logger.warning("pyrender not available for fallback thumbnail generation")
+            logger.warning("pyrender not available for fallback preview generation")
         except Exception as e:
-            logger.warning(f"pyrender thumbnail generation failed: {e}")
+            logger.warning(f"pyrender preview generation failed: {e}")
 
         return None
 
@@ -219,13 +219,13 @@ class ModelProcessor:
 
         return translation @ rotation.T
 
-    def _generate_thumbnail_pyrender(
+    def _generate_preview_pyrender(
         self,
         scene: trimesh.Scene,
         size: Tuple[int, int]
     ) -> bytes:
         """
-        Generate thumbnail using pyrender (works in headless mode with OSMesa).
+        Generate 3D preview using pyrender (works in headless mode with OSMesa).
         """
         import pyrender
         from PIL import Image
@@ -293,7 +293,7 @@ class ModelProcessor:
 def process_model_file(
     input_path: Path,
     output_path: Path,
-    thumbnail_path: Optional[Path] = None,
+    preview_path: Optional[Path] = None,
     origin_placement: str = 'bottom-center'
 ) -> dict:
     """
@@ -302,7 +302,7 @@ def process_model_file(
     Args:
         input_path: Path to input GLB or ZIP containing GLB
         output_path: Path to save processed GLB (or ZIP)
-        thumbnail_path: Optional path to save thumbnail PNG
+        preview_path: Optional path to save 3D preview PNG
         origin_placement: Origin placement mode
 
     Returns:
@@ -335,7 +335,7 @@ def process_model_file(
     result = processor.process_glb(
         glb_data,
         origin_placement=origin_placement,
-        generate_thumbnail=thumbnail_path is not None
+        generate_preview=preview_path is not None
     )
 
     # Save processed model
@@ -348,66 +348,66 @@ def process_model_file(
     else:
         output_path.write_bytes(result['glb'])
 
-    # Save thumbnail
-    if thumbnail_path and result['thumbnail']:
-        thumbnail_path.write_bytes(result['thumbnail'])
+    # Save 3D preview
+    if preview_path and result['preview']:
+        preview_path.write_bytes(result['preview'])
 
     return {
         'bounds': result['bounds'],
         'original_bounds': result['original_bounds'],
-        'thumbnail_generated': result['thumbnail'] is not None
+        'preview_generated': result['preview'] is not None
     }
 
 
-async def generate_thumbnail_async(
+async def generate_preview_async(
     model_path: Path,
-    thumbnail_path: Path,
+    preview_path: Path,
     furniture_id: str
 ):
     """
-    Generate thumbnail asynchronously in background.
+    Generate 3D preview asynchronously in background.
     Uses semaphore to limit concurrent renders (protects 2 vCPU server).
     Publishes SSE event when complete.
 
     Args:
         model_path: Path to the model file (GLB or legacy ZIP)
-        thumbnail_path: Path to save thumbnail PNG
+        preview_path: Path to save 3D preview PNG
         furniture_id: ID of the furniture entry for database update
     """
-    async with _thumbnail_semaphore:
+    async with _preview_semaphore:
         try:
             # Run CPU-intensive work in thread pool
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
                 None,
-                _generate_thumbnail_sync,
+                _generate_preview_sync,
                 model_path,
-                thumbnail_path
+                preview_path
             )
 
-            logger.info(f"Thumbnail generated: {thumbnail_path}")
+            logger.info(f"3D preview generated: {preview_path}")
 
             # Update database
             from db.connection import get_furniture_db
             conn = get_furniture_db()
             conn.execute(
-                "UPDATE furniture SET thumbnail_path = ? WHERE id = ?",
-                [str(thumbnail_path), furniture_id]
+                "UPDATE furniture SET preview_3d_path = ? WHERE id = ?",
+                [str(preview_path), furniture_id]
             )
 
             # Notify connected clients
             from events import publish
-            publish("thumbnail_ready", {"furniture_id": furniture_id})
+            publish("preview3d_ready", {"furniture_id": furniture_id})
 
         except Exception as e:
-            logger.error(f"Async thumbnail generation failed: {e}")
+            logger.error(f"Async 3D preview generation failed: {e}")
             # Notify clients of failure
             from events import publish
-            publish("thumbnail_failed", {"furniture_id": furniture_id, "error": str(e)})
+            publish("preview3d_failed", {"furniture_id": furniture_id, "error": str(e)})
 
 
-def _generate_thumbnail_sync(model_path: Path, thumbnail_path: Path):
-    """Synchronous thumbnail generation (runs in thread pool)."""
+def _generate_preview_sync(model_path: Path, preview_path: Path):
+    """Synchronous 3D preview generation (runs in thread pool)."""
     processor = ModelProcessor()
 
     # Read model - GLB directly or from legacy ZIP
@@ -425,17 +425,17 @@ def _generate_thumbnail_sync(model_path: Path, thumbnail_path: Path):
                 raise ValueError("No GLB file found in ZIP")
             glb_data = zf.read(glb_name)
 
-    # Load scene and generate thumbnail
+    # Load scene and generate 3D preview
     scene = trimesh.load(
         io.BytesIO(glb_data),
         file_type='glb',
         force='scene'
     )
 
-    thumbnail_data = processor._generate_thumbnail(scene, (256, 256))
+    preview_data = processor._generate_preview(scene, (256, 256))
 
-    if thumbnail_data:
-        thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
-        thumbnail_path.write_bytes(thumbnail_data)
+    if preview_data:
+        preview_path.parent.mkdir(parents=True, exist_ok=True)
+        preview_path.write_bytes(preview_data)
     else:
-        raise RuntimeError("Thumbnail generation returned no data")
+        raise RuntimeError("3D preview generation returned no data")

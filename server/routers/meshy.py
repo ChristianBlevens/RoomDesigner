@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import httpx
 
-from config import FURNITURE_MODELS, FURNITURE_THUMBNAILS
+from config import FURNITURE_MODELS, FURNITURE_PREVIEWS_3D
 from model_processor import ModelProcessor
 
 router = APIRouter()
@@ -145,7 +145,7 @@ async def download_model(
 ):
     """
     Download the generated GLB model from Meshy's temporary URL,
-    process it (fix bounds, recenter, generate thumbnail), save to storage.
+    process it (fix bounds, recenter, generate 3D preview), save to storage.
     """
     glb_url = request.glb_url
 
@@ -176,12 +176,12 @@ async def download_model(
                 detail=f"Failed to download model: {str(e)}"
             )
 
-    # Process the model (fix bounds, recenter, generate thumbnail)
+    # Process the model (fix bounds, recenter, generate 3D preview)
     processor = ModelProcessor()
     result = processor.process_glb(
         glb_content,
         origin_placement='bottom-center',
-        generate_thumbnail=True
+        generate_preview=True
     )
 
     # Save processed GLB
@@ -189,20 +189,20 @@ async def download_model(
     model_path = FURNITURE_MODELS / f"{furniture_id}.glb"
     model_path.write_bytes(result['glb'])
 
-    # Save thumbnail
-    thumbnail_path = None
-    if result['thumbnail']:
-        FURNITURE_THUMBNAILS.mkdir(parents=True, exist_ok=True)
-        thumbnail_path = FURNITURE_THUMBNAILS / f"{furniture_id}.png"
-        thumbnail_path.write_bytes(result['thumbnail'])
+    # Save 3D preview
+    preview_3d_path = None
+    if result['preview']:
+        FURNITURE_PREVIEWS_3D.mkdir(parents=True, exist_ok=True)
+        preview_3d_path = FURNITURE_PREVIEWS_3D / f"{furniture_id}.png"
+        preview_3d_path.write_bytes(result['preview'])
 
     # Update database
     from db.connection import get_furniture_db
     conn = get_furniture_db()
-    if thumbnail_path:
+    if preview_3d_path:
         conn.execute(
-            "UPDATE furniture SET model_path = ?, thumbnail_path = ? WHERE id = ?",
-            [str(model_path), str(thumbnail_path), furniture_id]
+            "UPDATE furniture SET model_path = ?, preview_3d_path = ? WHERE id = ?",
+            [str(model_path), str(preview_3d_path), furniture_id]
         )
     else:
         conn.execute(

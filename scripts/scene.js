@@ -1178,8 +1178,8 @@ export function clearAllFurniture() {
   toRemove.forEach(obj => removeFurnitureFromScene(obj));
 }
 
-// Generate thumbnail from an already-loaded Three.js model
-export async function generateThumbnailFromModel(model, width = 256, height = 256) {
+// Generate 3D preview image from an already-loaded Three.js model (client-side, unused - server generates previews)
+export async function generatePreview3dFromModel(model, width = 256, height = 256) {
   // Create offscreen renderer
   const offscreenRenderer = new THREE.WebGLRenderer({
     antialias: true,

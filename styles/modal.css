@@ -803,13 +803,13 @@ input[type="date"]:focus {
   bottom: 280px;
 }
 
-/* ============ Thumbnail Hover for 3D Model Preview ============ */
+/* ============ Card Image Hover for 3D Preview ============ */
 
 .card-thumbnail img {
   transition: opacity 0.2s ease;
 }
 
-/* When both 2D image and 3D thumbnail exist: hover to swap */
+/* When both 2D image and 3D preview exist: hover to swap */
 .card-thumbnail .hover-image {
   position: absolute;
   top: 0;
@@ -827,8 +827,8 @@ input[type="date"]:focus {
   opacity: 0;
 }
 
-/* 3D badge shown when hoverable 3D thumbnail exists */
-.card-thumbnail.has-3d-thumbnail::after {
+/* 3D badge shown when entry has a placeable 3D model */
+.card-thumbnail.has-3d-model::after {
   content: '3D';
   position: absolute;
   bottom: 4px;

@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.connection import get_furniture_db
 from models.furniture import FurnitureCreate, FurnitureUpdate, FurnitureResponse
-from config import FURNITURE_IMAGES, FURNITURE_THUMBNAILS, FURNITURE_MODELS
+from config import FURNITURE_IMAGES, FURNITURE_PREVIEWS_3D, FURNITURE_MODELS
 from utils import cleanup_entity_files
 
 router = APIRouter()
@@ -16,7 +16,7 @@ router = APIRouter()
 FURNITURE_SELECT = """
     SELECT id, name, category, tags, quantity,
            dimension_x, dimension_y, dimension_z,
-           image_path, thumbnail_path, model_path
+           image_path, preview_3d_path, model_path
     FROM furniture
 """
 
@@ -25,7 +25,7 @@ def row_to_response(row) -> FurnitureResponse:
     tags = json.loads(row[3]) if row[3] else None
 
     image_url = f"/api/files/furniture/{furn_id}/image" if row[8] else None
-    thumbnail_url = f"/api/files/furniture/{furn_id}/thumbnail" if row[9] else None
+    preview_3d_url = f"/api/files/furniture/{furn_id}/preview3d" if row[9] else None
     model_url = f"/api/files/furniture/{furn_id}/model" if row[10] else None
 
     return FurnitureResponse(
@@ -38,7 +38,7 @@ def row_to_response(row) -> FurnitureResponse:
         dimensionY=row[6],
         dimensionZ=row[7],
         imageUrl=image_url,
-        thumbnailUrl=thumbnail_url,
+        preview3dUrl=preview_3d_url,
         modelUrl=model_url
     )
 
@@ -131,7 +131,7 @@ def delete_furniture(furniture_id: str):
 
     cleanup_entity_files(
         furniture_id,
-        image_dirs=[FURNITURE_IMAGES, FURNITURE_THUMBNAILS],
+        image_dirs=[FURNITURE_IMAGES, FURNITURE_PREVIEWS_3D],
         other_files=[FURNITURE_MODELS / f"{furniture_id}.zip"]
     )
 

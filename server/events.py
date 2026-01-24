@@ -1,6 +1,6 @@
 """
 Server-Sent Events (SSE) for real-time client notifications.
-Used to notify clients when async operations complete (e.g., thumbnail generation).
+Used to notify clients when async operations complete (e.g., 3D preview generation).
 """
 
 import asyncio

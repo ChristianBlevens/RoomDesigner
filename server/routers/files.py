@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.connection import get_houses_db, get_furniture_db
-from config import (FURNITURE_IMAGES, FURNITURE_THUMBNAILS, FURNITURE_MODELS,
+from config import (FURNITURE_IMAGES, FURNITURE_PREVIEWS_3D, FURNITURE_MODELS,
                     ROOM_BACKGROUNDS, ROOM_MESHES)
 from utils import IMAGE_EXTENSIONS
 from routers.rooms import download_mesh
@@ -63,16 +63,16 @@ def get_furniture_image(furniture_id: str):
         raise HTTPException(404, "Image not found")
     return FileResponse(path)
 
-@router.post("/furniture/{furniture_id}/thumbnail")
-async def upload_furniture_thumbnail(furniture_id: str, file: UploadFile = File(...)):
+@router.post("/furniture/{furniture_id}/preview3d")
+async def upload_furniture_preview3d(furniture_id: str, file: UploadFile = File(...)):
     db = get_furniture_db()
-    return await save_image_file(file, FURNITURE_THUMBNAILS, furniture_id, db, "furniture", "thumbnail_path")
+    return await save_image_file(file, FURNITURE_PREVIEWS_3D, furniture_id, db, "furniture", "preview_3d_path")
 
-@router.get("/furniture/{furniture_id}/thumbnail")
-def get_furniture_thumbnail(furniture_id: str):
-    path = find_file(FURNITURE_THUMBNAILS, furniture_id, IMAGE_EXTENSIONS)
+@router.get("/furniture/{furniture_id}/preview3d")
+def get_furniture_preview3d(furniture_id: str):
+    path = find_file(FURNITURE_PREVIEWS_3D, furniture_id, IMAGE_EXTENSIONS)
     if not path:
-        raise HTTPException(404, "Thumbnail not found")
+        raise HTTPException(404, "3D preview not found")
     return FileResponse(path)
 
 @router.post("/furniture/{furniture_id}/model")
@@ -82,16 +82,16 @@ async def upload_furniture_model(
 ):
     """
     Upload a furniture model (GLB file).
-    Processes the model to fix bounds, recenter origin, and generate thumbnail.
+    Processes the model to fix bounds, recenter origin, and generate 3D preview.
     """
     content = await file.read()
 
-    # Process the model and generate thumbnail
+    # Process the model and generate 3D preview
     processor = ModelProcessor()
     result = processor.process_glb(
         content,
         origin_placement='bottom-center',
-        generate_thumbnail=True
+        generate_preview=True
     )
 
     # Save processed GLB
@@ -99,19 +99,19 @@ async def upload_furniture_model(
     model_path = FURNITURE_MODELS / f"{furniture_id}.glb"
     model_path.write_bytes(result['glb'])
 
-    # Save thumbnail
-    thumbnail_path = None
-    if result['thumbnail']:
-        FURNITURE_THUMBNAILS.mkdir(parents=True, exist_ok=True)
-        thumbnail_path = FURNITURE_THUMBNAILS / f"{furniture_id}.png"
-        thumbnail_path.write_bytes(result['thumbnail'])
+    # Save 3D preview
+    preview_3d_path = None
+    if result['preview']:
+        FURNITURE_PREVIEWS_3D.mkdir(parents=True, exist_ok=True)
+        preview_3d_path = FURNITURE_PREVIEWS_3D / f"{furniture_id}.png"
+        preview_3d_path.write_bytes(result['preview'])
 
     # Update database
     db = get_furniture_db()
-    if thumbnail_path:
+    if preview_3d_path:
         db.execute(
-            "UPDATE furniture SET model_path = ?, thumbnail_path = ? WHERE id = ?",
-            [str(model_path), str(thumbnail_path), furniture_id]
+            "UPDATE furniture SET model_path = ?, preview_3d_path = ? WHERE id = ?",
+            [str(model_path), str(preview_3d_path), furniture_id]
         )
     else:
         db.execute("UPDATE furniture SET model_path = ? WHERE id = ?", [str(model_path), furniture_id])

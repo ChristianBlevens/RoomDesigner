@@ -52,7 +52,7 @@ def init_databases():
             dimension_y DOUBLE,
             dimension_z DOUBLE,
             image_path VARCHAR,
-            thumbnail_path VARCHAR,
+            preview_3d_path VARCHAR,
             model_path VARCHAR,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
