@@ -4,7 +4,6 @@ Handles task creation, status polling, and model download.
 """
 
 import io
-import logging
 import os
 import zipfile
 from pathlib import Path
@@ -15,8 +14,6 @@ import httpx
 
 from config import FURNITURE_MODELS, FURNITURE_THUMBNAILS
 from model_processor import ModelProcessor, generate_thumbnail_async
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -183,28 +180,18 @@ async def download_model(
                 detail=f"Failed to download model: {str(e)}"
             )
 
-    # Process the model (fix bounds, recenter) - NO thumbnail yet
-    bounds_result = None
-    try:
-        processor = ModelProcessor()
-        result = processor.process_glb(
-            glb_content,
-            origin_placement='bottom-center',
-            generate_thumbnail=False  # Thumbnail generated async
-        )
-        processed_glb = result['glb']
-        bounds_result = result['bounds']
-
-        logger.info(f"Model processed: bounds={bounds_result}")
-
-    except Exception as e:
-        logger.error(f"Model processing failed, using original: {e}")
-        processed_glb = glb_content
+    # Process the model (fix bounds, recenter)
+    processor = ModelProcessor()
+    result = processor.process_glb(
+        glb_content,
+        origin_placement='bottom-center',
+        generate_thumbnail=False
+    )
 
     # Wrap processed GLB in ZIP (matches existing model storage format)
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("model.glb", processed_glb)
+        zf.writestr("model.glb", result['glb'])
     zip_buffer.seek(0)
 
     # Save to storage
@@ -233,7 +220,5 @@ async def download_model(
 
     return {
         "success": True,
-        "model_url": f"/api/files/furniture/{furniture_id}/model",
-        "thumbnail_status": "generating",
-        "bounds": bounds_result
+        "model_url": f"/api/files/furniture/{furniture_id}/model"
     }
