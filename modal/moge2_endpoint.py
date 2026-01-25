@@ -45,11 +45,8 @@ image = (
         "einops",
         "timm>=0.9.0",
         "huggingface-hub",
+        "git+https://github.com/EasternJournalist/utils3d.git@3fab839f0be9931dac7c8488eb0e1600c236e183",
         "git+https://github.com/microsoft/MoGe.git",
-    )
-    # Force reinstall utils3d to the version with depth_edge function (same as HF demo)
-    .run_commands(
-        "pip install --force-reinstall git+https://github.com/EasternJournalist/utils3d.git@c5daf6f6c244d251f252102d09e9b7bcef791a38"
     )
     .run_function(download_model)
 )
@@ -160,20 +157,20 @@ class MoGe2Inference:
         fov_v = float(np.degrees(2 * np.arctan(h / (2 * fy))))
         fov_h = float(np.degrees(2 * np.arctan(w / (2 * fx))))
 
-        # Clean mask using depth edges (same as HF demo)
+        # Clean mask using depth edges
         if apply_mask:
             if remove_edges:
-                mask_cleaned = mask & ~utils3d.numpy.depth_edge(depth, rtol=0.04)
+                mask_cleaned = mask & ~utils3d.numpy.depth_map_edge(depth, rtol=0.04)
             else:
                 mask_cleaned = mask
         else:
             mask_cleaned = np.ones_like(mask, dtype=bool)
 
-        # Generate mesh using image_mesh (same as HF demo)
-        faces, vertices, vertex_colors, vertex_uvs = utils3d.numpy.image_mesh(
+        # Generate mesh from point map
+        faces, vertices, vertex_colors, vertex_uvs = utils3d.numpy.build_mesh_from_map(
             points,
             image.astype(np.float32) / 255,
-            utils3d.numpy.image_uv(width=w, height=h),
+            utils3d.numpy.uv_map(h, w),
             mask=mask_cleaned,
             tri=True
         )
