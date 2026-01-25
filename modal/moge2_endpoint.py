@@ -96,8 +96,8 @@ class MoGe2Inference:
         import cv2
         import numpy as np
         import torch
+        import trimesh
         import utils3d
-        from moge.utils.io import save_glb
 
         image_b64 = request.get("image")
         if not image_b64:
@@ -171,16 +171,32 @@ class MoGe2Inference:
         vertices = vertices * np.array([1, -1, -1], dtype=np.float32)
         vertex_uvs = vertex_uvs * np.array([1, -1], dtype=np.float32) + np.array([0, 1], dtype=np.float32)
 
-        glb_buffer = io.BytesIO()
-        save_glb(
-            glb_buffer,
-            vertices,
-            faces,
-            vertex_uvs,
-            image,
-            None
+        # Create trimesh with texture
+        from PIL import Image as PILImage
+        texture_image = PILImage.fromarray(image)
+
+        # Create material with texture
+        material = trimesh.visual.material.PBRMaterial(
+            baseColorTexture=texture_image,
+            metallicFactor=0.0,
+            roughnessFactor=1.0
         )
-        glb_bytes = glb_buffer.getvalue()
+
+        # Create the mesh with UV coordinates
+        mesh = trimesh.Trimesh(
+            vertices=vertices,
+            faces=faces,
+            process=False
+        )
+
+        # Apply UV coordinates and material
+        mesh.visual = trimesh.visual.TextureVisuals(
+            uv=vertex_uvs,
+            material=material
+        )
+
+        # Export to GLB
+        glb_bytes = mesh.export(file_type='glb')
 
         mesh_base64 = base64.b64encode(glb_bytes).decode('ascii')
 
