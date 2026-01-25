@@ -9,7 +9,6 @@ from db.connection import get_houses_db, get_furniture_db
 from config import (FURNITURE_IMAGES, FURNITURE_PREVIEWS_3D, FURNITURE_MODELS,
                     ROOM_BACKGROUNDS, ROOM_MESHES)
 from utils import IMAGE_EXTENSIONS
-from routers.rooms import download_mesh
 from model_processor import ModelProcessor
 
 router = APIRouter()
@@ -144,16 +143,6 @@ def get_room_background(room_id: str):
     if not path:
         raise HTTPException(404, "Background not found")
     return FileResponse(path)
-
-@router.post("/room/{room_id}/mesh")
-async def save_room_mesh(room_id: str, data: dict):
-    """Download MoGe mesh from temporary HuggingFace URL and save locally."""
-    mesh_url = data.get("mesh_url")
-    if not mesh_url:
-        raise HTTPException(400, "mesh_url required")
-
-    local_url = await download_mesh(room_id, mesh_url)
-    return {"local_url": local_url}
 
 @router.get("/room/{room_id}/mesh")
 def get_room_mesh(room_id: str):
