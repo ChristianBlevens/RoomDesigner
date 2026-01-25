@@ -40,7 +40,8 @@ image = (
         "opencv-python-headless",
         "scipy",
         "pillow",
-        "trimesh",
+        "trimesh[easy]",
+        "fast-simplification",
         "einops",
         "timm>=0.9.0",
         "huggingface-hub",
@@ -171,8 +172,33 @@ class MoGe2Inference:
         vertices = vertices * np.array([1, -1, -1], dtype=np.float32)
         vertex_uvs = vertex_uvs * np.array([1, -1], dtype=np.float32) + np.array([0, 1], dtype=np.float32)
 
-        # Create trimesh with texture
+        # Create trimesh
         from PIL import Image as PILImage
+
+        mesh = trimesh.Trimesh(
+            vertices=vertices,
+            faces=faces,
+            process=False
+        )
+
+        original_faces = len(mesh.faces)
+        print(f"Original mesh: {original_faces} faces")
+
+        # Decimate if too many faces (target ~15k for raycasting)
+        TARGET_FACES = 15000
+        if original_faces > TARGET_FACES:
+            # Use quadric decimation
+            mesh = mesh.simplify_quadric_decimation(TARGET_FACES)
+            print(f"Decimated to {len(mesh.faces)} faces")
+
+            # Recompute vertex normals after decimation
+            mesh.fix_normals()
+
+        # Apply Laplacian smoothing to reduce noise (preserves shape)
+        trimesh.smoothing.filter_laplacian(mesh, iterations=2)
+        print(f"Applied smoothing")
+
+        # Create texture from original image
         texture_image = PILImage.fromarray(image)
 
         # Create material with texture
@@ -182,18 +208,20 @@ class MoGe2Inference:
             roughnessFactor=1.0
         )
 
-        # Create the mesh with UV coordinates
-        mesh = trimesh.Trimesh(
-            vertices=vertices,
-            faces=faces,
-            process=False
-        )
-
         # Apply UV coordinates and material
-        mesh.visual = trimesh.visual.TextureVisuals(
-            uv=vertex_uvs,
-            material=material
-        )
+        # Note: decimation may have changed vertex count, need to handle UVs
+        if len(mesh.vertices) == len(vertex_uvs):
+            mesh.visual = trimesh.visual.TextureVisuals(
+                uv=vertex_uvs,
+                material=material
+            )
+        else:
+            # UVs don't match after decimation - use vertex colors instead
+            print(f"UV mismatch after decimation, using vertex colors")
+            mesh.visual = trimesh.visual.ColorVisuals(
+                mesh=mesh,
+                vertex_colors=vertex_colors[:len(mesh.vertices)] if len(vertex_colors) >= len(mesh.vertices) else None
+            )
 
         # Export to GLB
         glb_bytes = mesh.export(file_type='glb')

@@ -55,7 +55,7 @@ async def process_image_with_modal(image_bytes: bytes) -> dict:
                 MOGE2_ENDPOINT,
                 json={
                     "image": image_b64,
-                    "resolution": "High",
+                    "resolution": "Medium",
                     "applyMask": True,
                     "removeEdges": True
                 }
