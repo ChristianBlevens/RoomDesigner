@@ -35,12 +35,8 @@ async def download_mesh(room_id: str, mesh_url: str) -> str:
         raise HTTPException(502, f"Failed to download mesh: {str(e)}")
 
     # Optimize mesh for furniture placement (decimation + normal smoothing)
-    try:
-        optimized_data = optimize_room_mesh(mesh_data)
-        logger.info(f"Optimized room mesh for {room_id}")
-    except Exception as e:
-        logger.warning(f"Mesh optimization failed, using original: {e}")
-        optimized_data = mesh_data
+    optimized_data = optimize_room_mesh(mesh_data)
+    logger.info(f"Optimized room mesh for {room_id}")
 
     path = ROOM_MESHES / f"{room_id}.glb"
     path.write_bytes(optimized_data)
