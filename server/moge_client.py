@@ -18,6 +18,37 @@ class MoGeError(Exception):
     pass
 
 
+MAX_IMAGE_SIZE = 2048  # Max dimension before resize
+
+
+def _resize_if_needed(image_bytes: bytes) -> bytes:
+    """Resize image if larger than MAX_IMAGE_SIZE to reduce memory usage."""
+    from PIL import Image
+    import io
+
+    img = Image.open(io.BytesIO(image_bytes))
+    w, h = img.size
+
+    if max(w, h) <= MAX_IMAGE_SIZE:
+        return image_bytes
+
+    # Calculate new size maintaining aspect ratio
+    if w > h:
+        new_w = MAX_IMAGE_SIZE
+        new_h = int(h * MAX_IMAGE_SIZE / w)
+    else:
+        new_h = MAX_IMAGE_SIZE
+        new_w = int(w * MAX_IMAGE_SIZE / h)
+
+    logger.info(f"Resizing image from {w}x{h} to {new_w}x{new_h}")
+    img = img.resize((new_w, new_h), Image.LANCZOS)
+
+    # Save as JPEG with reasonable quality
+    buffer = io.BytesIO()
+    img.save(buffer, format='JPEG', quality=85)
+    return buffer.getvalue()
+
+
 async def process_image_with_modal(image_bytes: bytes) -> dict:
     """
     Send image to Modal MoGe-2 endpoint and get mesh + camera data.
@@ -44,6 +75,9 @@ async def process_image_with_modal(image_bytes: bytes) -> dict:
     """
     if not MOGE2_ENDPOINT:
         raise MoGeError("MOGE2_MODAL_ENDPOINT not configured")
+
+    # Resize large images to reduce memory usage
+    image_bytes = _resize_if_needed(image_bytes)
 
     image_b64 = base64.b64encode(image_bytes).decode('ascii')
 
