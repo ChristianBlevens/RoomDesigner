@@ -45,7 +45,7 @@ image = (
         "einops",
         "timm>=0.9.0",
         "huggingface-hub",
-        "git+https://github.com/EasternJournalist/utils3d.git@3fab839f0be9931dac7c8488eb0e1600c236e183",
+        "git+https://github.com/EasternJournalist/utils3d.git@c5daf6f6c244d251f252102d09e9b7bcef791a38",
         "git+https://github.com/microsoft/MoGe.git",
     )
     .run_function(download_model)
