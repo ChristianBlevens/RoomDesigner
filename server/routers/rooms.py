@@ -4,6 +4,7 @@ import uuid
 import json
 import sys
 import httpx
+import logging
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -11,6 +12,9 @@ from db.connection import get_houses_db
 from models.room import RoomCreate, RoomUpdate, RoomResponse
 from config import ROOM_BACKGROUNDS, ROOM_MESHES
 from utils import cleanup_entity_files
+from mesh_optimizer import optimize_room_mesh
+
+logger = logging.getLogger(__name__)
 
 ROOM_SELECT = """
     SELECT id, house_id, name, background_image_path,
@@ -20,7 +24,7 @@ ROOM_SELECT = """
 
 
 async def download_mesh(room_id: str, mesh_url: str) -> str:
-    """Download mesh from remote URL and save locally. Returns local URL."""
+    """Download mesh from remote URL, optimize it, and save locally. Returns local URL."""
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.get(mesh_url)
@@ -30,8 +34,16 @@ async def download_mesh(room_id: str, mesh_url: str) -> str:
     except httpx.RequestError as e:
         raise HTTPException(502, f"Failed to download mesh: {str(e)}")
 
+    # Optimize mesh for furniture placement (decimation + normal smoothing)
+    try:
+        optimized_data = optimize_room_mesh(mesh_data)
+        logger.info(f"Optimized room mesh for {room_id}")
+    except Exception as e:
+        logger.warning(f"Mesh optimization failed, using original: {e}")
+        optimized_data = mesh_data
+
     path = ROOM_MESHES / f"{room_id}.glb"
-    path.write_bytes(mesh_data)
+    path.write_bytes(optimized_data)
 
     return f"/api/files/room/{room_id}/mesh"
 

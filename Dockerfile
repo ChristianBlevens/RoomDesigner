@@ -17,7 +17,7 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install Xvfb and OpenGL dependencies for server-side thumbnail rendering
+# Install Xvfb, OpenGL, and PyMeshLab dependencies for server-side rendering
 RUN apt-get update && apt-get install -y --no-install-recommends \
     xvfb \
     libgl1 \
@@ -27,6 +27,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsm6 \
     libxrender1 \
     libxext6 \
+    libxcb-xinerama0 \
+    libxkbcommon0 \
+    libxcb-cursor0 \
+    libxcb-icccm4 \
+    libxcb-keysyms1 \
+    libxcb-shape0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy virtual environment from builder
@@ -35,6 +41,8 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # Set up virtual display for trimesh rendering
 ENV DISPLAY=:99
+# PyMeshLab headless mode
+ENV QT_QPA_PLATFORM=offscreen
 
 # Copy application code
 COPY server/ ./server/

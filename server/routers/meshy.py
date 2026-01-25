@@ -49,7 +49,8 @@ async def generate_model(furniture_id: str, request: GenerateRequest):
     payload = {
         "image_url": request.image_url,
         "should_remesh": True,
-        "enable_pbr": False
+        "enable_pbr": False,
+        "target_polycount": 10000
     }
 
     async with httpx.AsyncClient(timeout=30.0) as client:
