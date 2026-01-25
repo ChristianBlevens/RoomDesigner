@@ -112,6 +112,11 @@ export async function getAllRooms() {
   return rooms.map(transformRoomResponse);
 }
 
+export async function getRoom(roomId) {
+  const response = await apiFetch(`/rooms/${roomId}`);
+  return response.json();
+}
+
 export async function loadRoom(roomId) {
   const response = await apiFetch(`/rooms/${roomId}`);
   const room = await response.json();
@@ -130,47 +135,113 @@ export async function getOrphanRooms() {
   return rooms.map(transformRoomResponse);
 }
 
+/**
+ * Create a new room with image upload.
+ * Returns immediately with status="processing".
+ * Use pollRoomStatus() to wait for completion.
+ */
+export async function createRoom(houseId, name, imageFile) {
+  const formData = new FormData();
+  formData.append('houseId', houseId);
+  formData.append('name', name);
+  formData.append('image', imageFile);
+
+  const response = await fetch(`${API_BASE}/rooms/`, {
+    method: 'POST',
+    body: formData
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Create room failed: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Poll room status until ready or failed.
+ */
+export async function pollRoomStatus(roomId, options = {}) {
+  const {
+    interval = 2000,
+    timeout = 180000,
+    onProgress = null
+  } = options;
+
+  const startTime = Date.now();
+
+  while (true) {
+    const room = await getRoom(roomId);
+
+    if (onProgress) {
+      onProgress(room);
+    }
+
+    if (room.status === 'ready') {
+      return room;
+    }
+
+    if (room.status === 'failed') {
+      throw new Error(room.errorMessage || 'Room processing failed');
+    }
+
+    if (Date.now() - startTime > timeout) {
+      throw new Error('Room processing timed out');
+    }
+
+    await new Promise(resolve => setTimeout(resolve, interval));
+  }
+}
+
+/**
+ * Retry processing for a failed room.
+ */
+export async function retryRoomProcessing(roomId) {
+  const response = await fetch(`${API_BASE}/rooms/${roomId}/retry`, {
+    method: 'POST'
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `Retry failed: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Update an existing room.
+ */
+export async function updateRoom(roomId, updates) {
+  const response = await apiFetch(`/rooms/${roomId}`, {
+    method: 'PUT',
+    body: JSON.stringify(updates)
+  });
+  return response.json();
+}
+
+/**
+ * Save room state (for existing rooms only - updating furniture/lighting).
+ */
 export async function saveRoom(roomState) {
+  if (!roomState.id) {
+    throw new Error('Use createRoom() for new rooms');
+  }
+
   const payload = {
-    id: roomState.id || null,
-    houseId: roomState.houseId,
     name: roomState.name,
     placedFurniture: roomState.placedFurniture || [],
     mogeData: roomState.mogeData || null,
     lightingSettings: roomState.lightingSettings || null
   };
 
-  let roomId;
+  await apiFetch(`/rooms/${roomState.id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  });
 
-  if (roomState.id) {
-    // Existing room - upload background first, then update
-    if (roomState.backgroundImage instanceof Blob) {
-      await uploadFile(`/files/room/${roomState.id}/background`, roomState.backgroundImage, 'background.jpg');
-    }
-    await apiFetch(`/rooms/${roomState.id}`, {
-      method: 'PUT',
-      body: JSON.stringify(payload)
-    });
-    roomId = roomState.id;
-  } else {
-    // New room - include remoteMeshUrl for atomic mesh download
-    if (roomState.remoteMeshUrl) {
-      payload.remoteMeshUrl = roomState.remoteMeshUrl;
-    }
-    const response = await apiFetch('/rooms/', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
-    const created = await response.json();
-    roomId = created.id;
-
-    // Upload background after room created (now we have the ID)
-    if (roomState.backgroundImage instanceof Blob) {
-      await uploadFile(`/files/room/${roomId}/background`, roomState.backgroundImage, 'background.jpg');
-    }
-  }
-
-  return roomId;
+  return roomState.id;
 }
 
 export async function deleteRoom(roomId) {
@@ -182,6 +253,8 @@ function transformRoomResponse(room) {
     id: room.id,
     houseId: room.houseId,
     name: room.name,
+    status: room.status || 'ready',
+    errorMessage: room.errorMessage,
     backgroundImageUrl: room.backgroundImageUrl,
     placedFurniture: room.placedFurniture || [],
     mogeData: room.mogeData,
@@ -307,16 +380,6 @@ function transformFurnitureResponse(entry) {
     dimensionZ: entry.dimensionZ,
     hasModel: !!entry.modelUrl
   };
-}
-
-// ============ MoGe Mesh ============
-
-export async function saveMogeMesh(roomId, meshUrl) {
-  const response = await apiFetch(`/files/room/${roomId}/mesh`, {
-    method: 'POST',
-    body: JSON.stringify({ mesh_url: meshUrl })
-  });
-  return response.json();
 }
 
 // ============ Server-Sent Events ============

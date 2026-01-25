@@ -48,7 +48,6 @@ ENV QT_QPA_PLATFORM=offscreen
 COPY server/ ./server/
 COPY scripts/ ./scripts/
 COPY styles/ ./styles/
-COPY huggingface-moge2/ ./huggingface-moge2/
 COPY index.html .
 
 # Create data directories and X11 socket directory

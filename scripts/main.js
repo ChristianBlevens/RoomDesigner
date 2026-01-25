@@ -39,7 +39,6 @@ import {
   applyLightingSettings,
   isLightingGizmoVisible
 } from './scene.js';
-import { MoGe2Client } from '../huggingface-moge2/moge2-client.js';
 import {
   saveFurnitureEntry,
   getFurnitureEntry,
@@ -54,7 +53,10 @@ import {
   getHouse,
   getRoomsByHouseId,
   getOrphanRooms,
-  subscribeToEvents
+  subscribeToEvents,
+  createRoom,
+  pollRoomStatus,
+  retryRoomProcessing
 } from './api.js';
 import {
   getCurrentHouse,
@@ -102,9 +104,6 @@ let tagsDropdown = null;
 // Pending state for multi-step room creation flow
 let pendingRoomImage = null;
 let pendingRoomName = null;
-
-// MoGe-2 client for room geometry extraction
-const moge2Client = new MoGe2Client();
 
 // Helper: count how many of a specific entry are placed in the current scene
 function getPlacedCountForEntry(entryId) {
@@ -607,10 +606,6 @@ function hideTabBar() {
 
 // ============ Orientation Modal ============
 
-// State for MoGe-2 processing
-let moge2Result = null;
-let moge2Processing = false;
-
 // Flag to track if room processing is in progress (prevents cancel during processing)
 let roomProcessingInProgress = false;
 
@@ -625,82 +620,8 @@ function setupOrientationModal() {
   });
 }
 
-// Process pending room image with MoGe-2
-async function processWithMoGe2() {
-  if (!pendingRoomImage || moge2Processing) return;
-
-  moge2Processing = true;
-  moge2Result = null;
-
-  const applyBtn = document.getElementById('apply-orientation-btn');
-  const defaultInfo = document.getElementById('orientation-default-info');
-  const loadingEl = document.getElementById('orientation-loading');
-  const loadingText = document.getElementById('orientation-loading-text');
-  const resultEl = document.getElementById('orientation-result');
-  const fovInfo = document.getElementById('orientation-fov-info');
-  const errorEl = document.getElementById('orientation-error');
-  const errorText = document.getElementById('orientation-error-text');
-
-  // Show loading state
-  defaultInfo.classList.add('hidden');
-  resultEl.classList.add('hidden');
-  errorEl.classList.add('hidden');
-  loadingEl.classList.remove('hidden');
-  applyBtn.disabled = true;
-
-  try {
-    loadingText.textContent = 'Connecting to MoGe-2...';
-    await moge2Client.connect();
-
-    loadingText.textContent = 'Analyzing room geometry (30-60 seconds)...';
-    const result = await moge2Client.processImageForRoom(pendingRoomImage);
-
-    moge2Result = result;
-    console.log('MoGe-2 result:', result);
-
-    // Show success state
-    loadingEl.classList.add('hidden');
-    resultEl.classList.remove('hidden');
-
-    // Display FOV info
-    if (result.camera) {
-      const hFov = result.camera.fovHorizontal;
-      const vFov = result.camera.fovVertical;
-      if (hFov && vFov) {
-        fovInfo.textContent = `Horizontal FOV: ${hFov.toFixed(1)}° | Vertical FOV: ${vFov.toFixed(1)}°`;
-      } else if (vFov) {
-        fovInfo.textContent = `Vertical FOV: ${vFov.toFixed(1)}°`;
-      } else {
-        fovInfo.textContent = 'FOV: Using default (60°)';
-      }
-    }
-
-    applyBtn.textContent = 'Continue';
-    applyBtn.disabled = false;
-
-  } catch (err) {
-    console.error('MoGe-2 processing failed:', err);
-
-    // Show error state
-    loadingEl.classList.add('hidden');
-    errorEl.classList.remove('hidden');
-    errorText.textContent = `Analysis failed: ${err.message}`;
-
-    // Allow user to continue with defaults
-    applyBtn.textContent = 'Continue with Defaults';
-    applyBtn.disabled = false;
-    moge2Result = null;
-
-  } finally {
-    moge2Processing = false;
-  }
-}
-
 // Reset orientation modal state when opening
 function resetOrientationModal() {
-  moge2Result = null;
-  moge2Processing = false;
-
   const applyBtn = document.getElementById('apply-orientation-btn');
   const defaultInfo = document.getElementById('orientation-default-info');
   const loadingEl = document.getElementById('orientation-loading');
@@ -716,9 +637,8 @@ function resetOrientationModal() {
 }
 
 /**
- * Automatic room processing flow - no user interaction required.
- * Shows progress, processes with MoGe-2, creates room, and shows scene.
- * If MoGe-2 fails, room creation is cancelled entirely (no fallback).
+ * Automatic room processing flow - server handles MoGe-2 via Modal.
+ * Shows progress, polls for completion, loads room into scene.
  */
 async function processRoomAutomatically() {
   if (!pendingRoomImage || !pendingRoomName || !currentHouseId) {
@@ -744,103 +664,74 @@ async function processRoomAutomatically() {
   errorEl.classList.add('hidden');
   loadingEl.classList.remove('hidden');
   applyBtn.classList.add('hidden');
-  loadingText.textContent = 'Connecting to MoGe-2...';
+  loadingText.textContent = 'Creating room...';
 
   modalManager.openModal('orientation-modal');
 
-  let processingResult = null;
-
   try {
-    // Connect and process with MoGe-2
-    await moge2Client.connect();
+    // Create room - server handles Modal processing in background
+    const room = await createRoom(currentHouseId, pendingRoomName, pendingRoomImage);
+    console.log('Room created:', room);
+
+    // Update UI to show processing
     loadingText.textContent = 'Analyzing room geometry (30-60 seconds)...';
 
-    processingResult = await moge2Client.processImageForRoom(pendingRoomImage);
-    console.log('MoGe-2 result:', processingResult);
-
-    // Verify we got a valid mesh URL
-    const geometryUrl = processingResult?.meshUrl || processingResult?.modelUrl;
-    if (!geometryUrl) {
-      throw new Error('MoGe-2 did not return a valid mesh');
-    }
-
-    // Show success briefly
-    loadingEl.classList.add('hidden');
-    resultEl.classList.remove('hidden');
-
-    if (processingResult.camera) {
-      const hFov = processingResult.camera.fovHorizontal;
-      const vFov = processingResult.camera.fovVertical;
-      if (hFov && vFov) {
-        fovInfo.textContent = `Horizontal FOV: ${hFov.toFixed(1)}° | Vertical FOV: ${vFov.toFixed(1)}°`;
-      } else if (vFov) {
-        fovInfo.textContent = `Vertical FOV: ${vFov.toFixed(1)}°`;
-      } else {
-        fovInfo.textContent = 'FOV: Using default (60°)';
+    // Poll until ready
+    const readyRoom = await pollRoomStatus(room.id, {
+      interval: 2000,
+      timeout: 180000,
+      onProgress: (r) => {
+        console.log(`Room ${r.id} status: ${r.status}`);
       }
-    }
+    });
 
-    // Load geometry
-    loadingEl.classList.remove('hidden');
-    resultEl.classList.add('hidden');
+    console.log('Room ready:', readyRoom);
+
+    // Load mesh into scene
     loadingText.textContent = 'Loading room mesh...';
 
-    await loadRoomGeometry(geometryUrl, {
+    const meshUrl = adjustUrlForProxy(readyRoom.mogeData.meshUrl);
+    await loadRoomGeometry(meshUrl, {
       wireframeColor: 0x00ff00,
       wireframeOpacity: 0.5
     });
 
-    // Get image dimensions for aspect ratio
-    const imageAspect = await getImageAspectRatio(pendingRoomImage);
-
-    // Align camera to match MoGe output
-    const fov = processingResult?.camera?.fov || 60;
+    // Set camera alignment
+    const fov = readyRoom.mogeData.cameraFov || 60;
+    const imageAspect = readyRoom.mogeData.imageAspect;
     setCameraForMoGeAlignment(fov, imageAspect);
 
     // Set up background plane
     loadingText.textContent = 'Setting up background...';
     const bounds = getRoomBounds();
     const backgroundDepth = Math.abs(bounds.min.z) + 1;
-    await setBackgroundImagePlane(pendingRoomImage, backgroundDepth);
+    const backgroundUrl = adjustUrlForProxy(readyRoom.backgroundImageUrl);
+    await setBackgroundImagePlane(backgroundUrl, backgroundDepth);
 
     // Clear CSS background since we use 3D plane
     document.getElementById('background-container').style.backgroundImage = '';
 
-    // Store MoGe data for room persistence (meshUrl is placeholder - server will set local URL)
-    const mogeDataForSave = {
-      meshUrl: null,  // Will be set by server after download
-      cameraFov: fov,
-      imageAspect: imageAspect
-    };
-
     console.log('Room geometry loaded and camera aligned');
 
-    // Show final success
+    // Show success
     loadingEl.classList.add('hidden');
     resultEl.classList.remove('hidden');
-    fovInfo.textContent = 'Room ready! Saving...';
-
-    // Brief pause to show success
-    await new Promise(resolve => setTimeout(resolve, 800));
-
-    // Create the room - server downloads mesh atomically
-    loadingText.textContent = 'Saving room and mesh...';
-    loadingEl.classList.remove('hidden');
-    resultEl.classList.add('hidden');
-    const room = await createRoomInCurrentHouse(pendingRoomImage, pendingRoomName, mogeDataForSave, geometryUrl);
+    fovInfo.textContent = `FOV: ${fov.toFixed(1)}°`;
 
     // Set as current room
-    currentRoomId = room.id;
+    currentRoomId = readyRoom.id;
     currentBackgroundImage = pendingRoomImage;
 
     // Clear pending state
     pendingRoomImage = null;
     pendingRoomName = null;
-    moge2Result = null;
 
     // Clear any existing furniture
     clearAllFurniture();
     undoManager.clear();
+
+    // Brief pause to show success
+    await new Promise(resolve => setTimeout(resolve, 800));
 
     // Show scene and close modal
     showScene();
@@ -876,8 +767,6 @@ async function cancelRoomCreationFlow() {
   // Clear pending state
   pendingRoomImage = null;
   pendingRoomName = null;
-  moge2Result = null;
-  moge2Processing = false;
 
   modalManager.closeAllModals();
 
@@ -2676,28 +2565,6 @@ async function saveCurrentRoom() {
   };
 
   await saveRoom(roomState);
-}
-
-async function createRoomInCurrentHouse(image, name, mogeData = null, remoteMeshUrl = null) {
-  const room = {
-    id: null,  // Server generates ID
-    houseId: currentHouseId,
-    name: name,
-    backgroundImage: image,
-    cameraOrientation: null,
-    placedFurniture: [],
-    // MoGe-2 data for mesh reconstruction on load
-    mogeData: mogeData ? {
-      meshUrl: mogeData.meshUrl,
-      cameraFov: mogeData.cameraFov,
-      imageAspect: mogeData.imageAspect
-    } : null,
-    // Remote mesh URL for server to download atomically
-    remoteMeshUrl: remoteMeshUrl
-  };
-
-  const roomId = await saveRoom(room);
-  return { ...room, id: roomId };
 }
 
 async function closeHouse() {

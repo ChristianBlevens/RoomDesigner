@@ -6,6 +6,9 @@ services:
       - "8000"
     env_file:
       - .env
+    environment:
+      - MESHY_API_KEY=${MESHY_API_KEY}
+      - MOGE2_MODAL_ENDPOINT=${MOGE2_MODAL_ENDPOINT}
     volumes:
       - roomdesigner_data:/app/server/data
       - roomdesigner_storage:/app/server/storage

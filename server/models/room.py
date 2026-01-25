@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List, Any
+from typing import Optional, List, Literal
 
 class Position(BaseModel):
     x: float
@@ -13,9 +13,9 @@ class PlacedFurniture(BaseModel):
     scale: Position
 
 class MogeData(BaseModel):
-    meshUrl: Optional[str] = None  # Set by server after downloading from remoteMeshUrl
-    cameraFov: float
-    imageAspect: float
+    meshUrl: Optional[str] = None
+    cameraFov: Optional[float] = None
+    imageAspect: Optional[float] = None
 
 class LightingSettings(BaseModel):
     intensity: float
@@ -24,13 +24,8 @@ class LightingSettings(BaseModel):
     temperature: float
 
 class RoomCreate(BaseModel):
-    id: Optional[str] = None
     houseId: str
     name: str
-    placedFurniture: Optional[List[PlacedFurniture]] = []
-    mogeData: Optional[MogeData] = None
-    lightingSettings: Optional[LightingSettings] = None
-    remoteMeshUrl: Optional[str] = None  # HuggingFace temp URL - server downloads and stores locally
 
 class RoomUpdate(BaseModel):
     name: Optional[str] = None
@@ -42,6 +37,8 @@ class RoomResponse(BaseModel):
     id: str
     houseId: str
     name: str
+    status: Literal["processing", "ready", "failed"] = "ready"
+    errorMessage: Optional[str] = None
     backgroundImageUrl: Optional[str] = None
     placedFurniture: List[dict] = []
     mogeData: Optional[dict] = None

@@ -30,6 +30,8 @@ def init_databases():
             id VARCHAR PRIMARY KEY,
             house_id VARCHAR NOT NULL,
             name VARCHAR NOT NULL,
+            status VARCHAR DEFAULT 'ready',
+            error_message VARCHAR,
             background_image_path VARCHAR,
             placed_furniture JSON,
             moge_data JSON,
@@ -37,6 +39,13 @@ def init_databases():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # Migration: add status column if it doesn't exist (for existing databases)
+    try:
+        _houses_conn.execute("SELECT status FROM rooms LIMIT 1")
+    except Exception:
+        _houses_conn.execute("ALTER TABLE rooms ADD COLUMN status VARCHAR DEFAULT 'ready'")
+        _houses_conn.execute("ALTER TABLE rooms ADD COLUMN error_message VARCHAR")
     _houses_conn.execute("CREATE INDEX IF NOT EXISTS idx_rooms_house_id ON rooms(house_id)")
 
     # Furniture database
