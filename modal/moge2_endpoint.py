@@ -185,7 +185,9 @@ class MoGe2Inference:
         # Decimate to target face count for raycasting
         TARGET_FACES = 10000
         if original_faces > TARGET_FACES:
-            mesh = mesh.simplify_quadric_decimation(TARGET_FACES)
+            # Calculate reduction ratio (0-1 where 0.1 keeps 10% of faces)
+            target_ratio = TARGET_FACES / original_faces
+            mesh = mesh.simplify_quadric_decimation(target_ratio)
             print(f"Decimated to {len(mesh.faces)} faces")
 
         # Fix normals and apply smoothing
