@@ -109,18 +109,14 @@ async def create_room(
         logger.error(f"Room {room_id} mesh generation failed: {e}")
         raise HTTPException(status_code=502, detail=f"Mesh generation failed: {str(e)}")
 
-    # Optimize mesh
-    logger.info(f"Optimizing mesh for room {room_id}...")
-    try:
-        optimized_mesh = optimize_room_mesh(result["mesh_bytes"])
-    except Exception as e:
-        logger.error(f"Room {room_id} mesh optimization failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Mesh optimization failed: {str(e)}")
+    # Skip optimization for now (causes OOM on small containers)
+    # TODO: Move optimization to Modal where there's more memory
+    logger.info(f"Skipping mesh optimization for room {room_id} (disabled)")
 
     # Save mesh
     ROOM_MESHES.mkdir(parents=True, exist_ok=True)
     mesh_path = ROOM_MESHES / f"{room_id}.glb"
-    mesh_path.write_bytes(optimized_mesh)
+    mesh_path.write_bytes(result["mesh_bytes"])
 
     # Save background image
     ROOM_BACKGROUNDS.mkdir(parents=True, exist_ok=True)
