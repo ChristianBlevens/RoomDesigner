@@ -118,7 +118,6 @@ class MoGe2Inference:
 
         apply_mask = request.get("applyMask", True)
         remove_edges = request.get("removeEdges", True)
-        edge_threshold = 0.01
 
         nparr = np.frombuffer(image_bytes, np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -149,6 +148,7 @@ class MoGe2Inference:
             )
 
         points = output["points"].cpu().numpy()
+        depth = output["depth"].cpu().numpy()
         mask = output["mask"].cpu().numpy()
         intrinsics = output["intrinsics"].cpu().numpy()
 
@@ -157,40 +157,33 @@ class MoGe2Inference:
         fov_v = float(np.degrees(2 * np.arctan(h / (2 * fy))))
         fov_h = float(np.degrees(2 * np.arctan(w / (2 * fx))))
 
+        # Clean mask using depth edges (same as HF demo)
         if apply_mask:
-            valid_mask = mask > 0.5
+            if remove_edges:
+                mask_cleaned = mask & ~utils3d.numpy.depth_edge(depth, rtol=0.04)
+            else:
+                mask_cleaned = mask
         else:
-            valid_mask = np.ones_like(mask, dtype=bool)
+            mask_cleaned = np.ones_like(mask, dtype=bool)
 
-        if remove_edges:
-            kernel_size = max(1, int(min(h, w) * edge_threshold))
-            kernel = np.ones((kernel_size, kernel_size), np.uint8)
-            valid_mask = cv2.erode(valid_mask.astype(np.uint8), kernel).astype(bool)
-
-        uv = utils3d.np.uv_map(h, w)
-
-        faces, vertices, vertex_colors, vertex_uvs = utils3d.np.build_mesh_from_map(
+        # Generate mesh using image_mesh (same as HF demo)
+        faces, vertices, vertex_colors, vertex_uvs = utils3d.numpy.image_mesh(
             points,
-            image / 255.0,
-            uv,
-            mask=valid_mask,
+            image.astype(np.float32) / 255,
+            utils3d.numpy.image_uv(width=w, height=h),
+            mask=mask_cleaned,
             tri=True
         )
 
+        # Coordinate transforms (same as HF demo)
         vertices = vertices * np.array([1, -1, -1], dtype=np.float32)
         vertex_uvs = vertex_uvs * np.array([1, -1], dtype=np.float32) + np.array([0, 1], dtype=np.float32)
 
         print(f"Original mesh: {len(faces)} faces, {len(vertices)} vertices")
 
-        # Decimate to target face count using pyfqmr
-        TARGET_FACES = 10000
-        if len(faces) > TARGET_FACES:
-            import pyfqmr
-            simplifier = pyfqmr.Simplify()
-            simplifier.setMesh(vertices, faces)
-            simplifier.simplify_mesh(target_count=TARGET_FACES, aggressiveness=7, preserve_border=True)
-            vertices, faces, _ = simplifier.getMesh()
-            print(f"Decimated to {len(faces)} faces, {len(vertices)} vertices")
+        # TODO: Re-enable decimation once mesh generation is verified working
+        # Decimation temporarily disabled to debug mesh corruption
+        # TARGET_FACES = 10000
 
         # Create trimesh (geometry only, no texture - used for invisible raycasting)
         mesh = trimesh.Trimesh(
@@ -198,6 +191,15 @@ class MoGe2Inference:
             faces=faces,
             process=False
         )
+
+        # Validate mesh has actual depth
+        bounds = mesh.bounds
+        mesh_size = bounds[1] - bounds[0]
+        print(f"Mesh bounds: min={bounds[0]}, max={bounds[1]}")
+        print(f"Mesh size: {mesh_size}")
+
+        if np.allclose(mesh_size, 0, atol=1e-6):
+            return {"error": "Mesh generation failed - all vertices collapsed to single point"}
 
         # Fix normals and apply smoothing
         mesh.fix_normals()
