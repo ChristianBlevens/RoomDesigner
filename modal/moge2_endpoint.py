@@ -160,11 +160,10 @@ class MoGe2Inference:
 
         uv = utils3d.np.uv_map(h, w)
 
-        faces, vertices, vertex_colors, vertex_uvs, vertex_normals = utils3d.np.build_mesh_from_map(
+        faces, vertices, vertex_colors, vertex_uvs = utils3d.np.build_mesh_from_map(
             points,
             image / 255.0,
             uv,
-            None,
             mask=valid_mask,
             tri=True
         )
@@ -179,7 +178,7 @@ class MoGe2Inference:
             faces,
             vertex_uvs,
             image,
-            vertex_normals
+            None
         )
         glb_bytes = glb_buffer.getvalue()
 
