@@ -44,7 +44,7 @@ let transformStartScale = null;
 const DRAG_THRESHOLD_PIXELS = 5;
 
 // Running normal average for smooth dragging (stores last N normals)
-const NORMAL_HISTORY_SIZE = 5;
+const NORMAL_HISTORY_SIZE = 10;
 let normalHistory = [];
 
 // Cardinal axes for contact face detection
@@ -466,26 +466,38 @@ function onMouseMove(event) {
         previousNormal.dot(smoothedNormal) < SURFACE_CHANGE_THRESHOLD;
 
       if (surfaceChanged) {
+        // Clear normal history to prevent old surface normals from contaminating the new surface
+        clearNormalHistory();
+        // Start fresh history with current normal
+        const freshNormal = addNormalToHistory(surfaceHit.normal);
+
         // Detect which face is now facing the new surface
-        const newContactAxis = detectContactAxis(hoveredObject, smoothedNormal);
+        const newContactAxis = detectContactAxis(hoveredObject, freshNormal);
 
         console.log('Surface transition detected:', {
           contactAxis: newContactAxis.toArray(),
           previousNormal: previousNormal ? previousNormal.toArray() : 'none',
-          newNormal: smoothedNormal.toArray()
+          newNormal: freshNormal.toArray()
         });
 
         // Store the new contact axis and surface normal
         hoveredObject.userData.contactAxis = newContactAxis;
-        hoveredObject.userData.previousSurfaceNormal = smoothedNormal.clone();
+        hoveredObject.userData.previousSurfaceNormal = freshNormal.clone();
+        hoveredObject.userData.surfaceNormal = freshNormal.clone();
+
+        // Align contact face to the new surface
+        alignToSurface(hoveredObject, freshNormal, newContactAxis);
+      } else {
+        // Same surface type - update normal
         hoveredObject.userData.surfaceNormal = smoothedNormal.clone();
 
-        // ONLY align when surface actually changes - this preserves gizmo rotation
-        alignToSurface(hoveredObject, smoothedNormal, newContactAxis);
-      } else {
-        // Same surface type - just update the normal, DON'T change orientation
-        // This preserves any rotation applied by the gizmo
-        hoveredObject.userData.surfaceNormal = smoothedNormal.clone();
+        // Keep contact axis aligned (handles minor normal variations)
+        const contactAxis = hoveredObject.userData.contactAxis || DEFAULT_CONTACT_AXIS;
+        alignContactAxisToSurface(hoveredObject, smoothedNormal, contactAxis);
+
+        // Continuously apply upright correction for non-horizontal surfaces
+        // This stabilizes the model despite bumpy normals
+        applyUprightCorrection(hoveredObject, smoothedNormal);
       }
     }
   }
