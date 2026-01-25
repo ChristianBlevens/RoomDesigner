@@ -41,7 +41,7 @@ image = (
         "scipy",
         "pillow",
         "trimesh[easy]",
-        "fast-simplification",
+        "pyfqmr",
         "einops",
         "timm>=0.9.0",
         "huggingface-hub",
@@ -126,7 +126,15 @@ class MoGe2Inference:
             return {"error": "Failed to decode image"}
 
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        # Resize to max 800px (same as HuggingFace demo) to control mesh density
+        MAX_SIZE = 800
         h, w = image.shape[:2]
+        if max(h, w) > MAX_SIZE:
+            scale = MAX_SIZE / max(h, w)
+            image = cv2.resize(image, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+            h, w = image.shape[:2]
+            print(f"Resized image to {w}x{h}")
 
         input_tensor = torch.tensor(
             image / 255.0,
@@ -172,23 +180,24 @@ class MoGe2Inference:
         vertices = vertices * np.array([1, -1, -1], dtype=np.float32)
         vertex_uvs = vertex_uvs * np.array([1, -1], dtype=np.float32) + np.array([0, 1], dtype=np.float32)
 
+        print(f"Original mesh: {len(faces)} faces, {len(vertices)} vertices")
+
+        # Decimate to target face count using pyfqmr
+        TARGET_FACES = 10000
+        if len(faces) > TARGET_FACES:
+            import pyfqmr
+            simplifier = pyfqmr.Simplify()
+            simplifier.setMesh(vertices, faces)
+            simplifier.simplify_mesh(target_count=TARGET_FACES, aggressiveness=7, preserve_border=True)
+            vertices, faces, _ = simplifier.getMesh()
+            print(f"Decimated to {len(faces)} faces, {len(vertices)} vertices")
+
         # Create trimesh (geometry only, no texture - used for invisible raycasting)
         mesh = trimesh.Trimesh(
             vertices=vertices,
             faces=faces,
             process=False
         )
-
-        original_faces = len(mesh.faces)
-        print(f"Original mesh: {original_faces} faces")
-
-        # Decimate to target face count for raycasting
-        TARGET_FACES = 10000
-        if original_faces > TARGET_FACES:
-            # Calculate reduction ratio (0-1 where 0.1 keeps 10% of faces)
-            target_ratio = TARGET_FACES / original_faces
-            mesh = mesh.simplify_quadric_decimation(target_ratio)
-            print(f"Decimated to {len(mesh.faces)} faces")
 
         # Fix normals and apply smoothing
         mesh.fix_normals()
