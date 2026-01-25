@@ -1,19 +1,37 @@
 import duckdb
 import sys
+import logging
 from pathlib import Path
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import HOUSES_DB, FURNITURE_DB
 
+logger = logging.getLogger(__name__)
+
 _houses_conn = None
 _furniture_conn = None
+
+
+def _safe_connect(db_path: Path):
+    """Connect to DuckDB, cleaning up corrupted WAL file if needed."""
+    try:
+        return duckdb.connect(str(db_path))
+    except duckdb.InternalException as e:
+        if "WAL file" in str(e):
+            wal_path = Path(str(db_path) + ".wal")
+            if wal_path.exists():
+                logger.warning(f"Removing corrupted WAL file: {wal_path}")
+                wal_path.unlink()
+                return duckdb.connect(str(db_path))
+        raise
+
 
 def init_databases():
     global _houses_conn, _furniture_conn
 
     # Houses database
-    _houses_conn = duckdb.connect(str(HOUSES_DB))
+    _houses_conn = _safe_connect(HOUSES_DB)
     _houses_conn.execute("""
         CREATE TABLE IF NOT EXISTS houses (
             id VARCHAR PRIMARY KEY,
@@ -49,7 +67,7 @@ def init_databases():
     _houses_conn.execute("CREATE INDEX IF NOT EXISTS idx_rooms_house_id ON rooms(house_id)")
 
     # Furniture database
-    _furniture_conn = duckdb.connect(str(FURNITURE_DB))
+    _furniture_conn = _safe_connect(FURNITURE_DB)
     _furniture_conn.execute("""
         CREATE TABLE IF NOT EXISTS furniture (
             id VARCHAR PRIMARY KEY,
