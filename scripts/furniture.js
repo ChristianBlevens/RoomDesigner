@@ -174,60 +174,98 @@ function calculateUprightRotation(surfaceNormal, contactAxis) {
 }
 
 /**
- * Align furniture to surface with proper contact face and upright orientation.
+ * Align furniture to surface by rotating the contact face to be flat against the surface.
+ * This is an INCREMENTAL rotation that preserves the model's other orientation aspects.
  *
  * @param {THREE.Object3D} model - The furniture model
  * @param {THREE.Vector3} surfaceNormal - Surface normal (world space)
- * @param {THREE.Vector3} contactAxis - Local axis to align with normal
- * @param {number} uprightRotation - Auto-calculated upright adjustment (radians)
- * @param {number} userRotation - User's manual rotation around normal (radians)
+ * @param {THREE.Vector3} contactAxis - Local axis that should point away from surface
  */
-function alignToSurfaceWithOrientation(model, surfaceNormal, contactAxis, uprightRotation, userRotation) {
+function alignContactAxisToSurface(model, surfaceNormal, contactAxis) {
   const normalizedNormal = surfaceNormal.clone().normalize();
   const normalizedAxis = contactAxis.clone().normalize();
 
-  // Step 1: Base alignment - rotate contact axis to surface normal
-  const baseQuat = new THREE.Quaternion();
-  baseQuat.setFromUnitVectors(normalizedAxis, normalizedNormal);
+  // Where is the contact axis currently pointing in WORLD space?
+  const currentWorldContactDir = normalizedAxis.clone().applyQuaternion(model.quaternion).normalize();
 
-  // Step 2: Upright rotation around surface normal
-  const uprightQuat = new THREE.Quaternion();
-  uprightQuat.setFromAxisAngle(normalizedNormal, uprightRotation);
+  // Calculate the rotation needed to align current direction with surface normal
+  const correctionQuat = new THREE.Quaternion();
+  correctionQuat.setFromUnitVectors(currentWorldContactDir, normalizedNormal);
 
-  // Step 3: User rotation around surface normal
-  const userQuat = new THREE.Quaternion();
-  userQuat.setFromAxisAngle(normalizedNormal, userRotation);
+  // Apply correction to the model's CURRENT orientation (preserves other rotation aspects)
+  model.quaternion.premultiply(correctionQuat);
+}
 
-  // Combine: start with base, then apply upright, then apply user rotation
-  // Order matters: each rotation is applied in world space via premultiply
-  model.quaternion.copy(baseQuat);
-  model.quaternion.premultiply(uprightQuat);
-  model.quaternion.premultiply(userQuat);
+/**
+ * Apply upright correction so model's Y axis is as close to world up as possible.
+ * Call this AFTER alignContactAxisToSurface.
+ *
+ * @param {THREE.Object3D} model - The furniture model
+ * @param {THREE.Vector3} surfaceNormal - Surface normal (world space)
+ */
+function applyUprightCorrection(model, surfaceNormal) {
+  const normalizedNormal = surfaceNormal.clone().normalize();
+
+  // For horizontal surfaces (floor/ceiling), skip upright correction
+  // User rotation around Y handles orientation
+  if (Math.abs(normalizedNormal.y) > 0.9) {
+    return;
+  }
+
+  // Get model's current Y axis in world space
+  const modelY = new THREE.Vector3(0, 1, 0).applyQuaternion(model.quaternion).normalize();
+
+  // Project both model Y and world up onto the plane perpendicular to surface normal
+  const worldUp = new THREE.Vector3(0, 1, 0);
+
+  const projectedWorldUp = worldUp.clone().sub(
+    normalizedNormal.clone().multiplyScalar(worldUp.dot(normalizedNormal))
+  );
+  if (projectedWorldUp.length() < 0.001) return;
+  projectedWorldUp.normalize();
+
+  const projectedModelY = modelY.clone().sub(
+    normalizedNormal.clone().multiplyScalar(modelY.dot(normalizedNormal))
+  );
+  if (projectedModelY.length() < 0.001) return;
+  projectedModelY.normalize();
+
+  // Calculate angle between them
+  let angle = Math.acos(Math.max(-1, Math.min(1, projectedModelY.dot(projectedWorldUp))));
+
+  // Determine sign
+  const cross = new THREE.Vector3().crossVectors(projectedModelY, projectedWorldUp);
+  if (cross.dot(normalizedNormal) < 0) {
+    angle = -angle;
+  }
+
+  // Apply upright rotation around surface normal
+  if (Math.abs(angle) > 0.001) {
+    const uprightQuat = new THREE.Quaternion();
+    uprightQuat.setFromAxisAngle(normalizedNormal, angle);
+    model.quaternion.premultiply(uprightQuat);
+  }
 }
 
 // Gizmo menu element
 let gizmoMenu = null;
 
 /**
- * Align furniture to surface.
- * This is the main entry point that handles the orientation system.
+ * Align furniture to a new surface. Called when surface type changes during drag.
+ * Uses incremental rotation to preserve the model's orientation as much as possible.
  *
  * @param {THREE.Object3D} model - The furniture model
- * @param {THREE.Vector3} surfaceNormal - The surface normal vector
- * @param {THREE.Vector3|null} contactAxis - Local axis to align (null = use stored or default)
- * @param {number} userRotation - User rotation around normal (radians)
+ * @param {THREE.Vector3} surfaceNormal - The new surface normal vector
+ * @param {THREE.Vector3} contactAxis - Local axis that should align with normal
  */
-function alignToSurface(model, surfaceNormal, contactAxis = null, userRotation = 0) {
-  // Use provided, stored, or default contact axis
+function alignToSurface(model, surfaceNormal, contactAxis) {
   const axis = contactAxis || model.userData.contactAxis || DEFAULT_CONTACT_AXIS;
 
-  // Use stored or calculate upright rotation
-  let uprightRot = model.userData.uprightRotation;
-  if (uprightRot === undefined) {
-    uprightRot = calculateUprightRotation(surfaceNormal, axis);
-  }
+  // Step 1: Rotate so the contact axis points along surface normal
+  alignContactAxisToSurface(model, surfaceNormal, axis);
 
-  alignToSurfaceWithOrientation(model, surfaceNormal, axis, uprightRot, userRotation);
+  // Step 2: Apply upright correction (keep model's Y close to world up)
+  applyUprightCorrection(model, surfaceNormal);
 }
 
 /**
@@ -242,16 +280,11 @@ function rotateFurnitureOnSurface(model, deltaAngle) {
     return;
   }
 
-  // Update stored rotation
-  model.userData.rotationAroundNormal = (model.userData.rotationAroundNormal || 0) + deltaAngle;
-
-  // Recompute orientation with contact axis preservation
-  alignToSurface(
-    model,
-    model.userData.surfaceNormal,
-    model.userData.contactAxis,
-    model.userData.rotationAroundNormal
-  );
+  // Rotate around the surface normal
+  const normal = model.userData.surfaceNormal.clone().normalize();
+  const rotQuat = new THREE.Quaternion();
+  rotQuat.setFromAxisAngle(normal, deltaAngle);
+  model.quaternion.premultiply(rotQuat);
 }
 
 /**
@@ -369,14 +402,17 @@ function onMouseDown(event) {
     hoveredObject = hit.object;
     dragStartPosition = hit.object.position.clone();
 
-    // Extract and store current rotation around normal BEFORE drag starts
-    // This preserves any rotation applied by the 3D gizmo
+    // Capture orientation state BEFORE drag starts
     if (hit.object.userData.surfaceNormal) {
-      const currentRotation = extractRotationAroundNormal(hit.object);
-      hit.object.userData.rotationAroundNormal = currentRotation;
+      // Re-detect contact axis based on CURRENT orientation
+      // This captures any rotation applied by the 3D gizmo
+      const currentContactAxis = detectContactAxis(hit.object, hit.object.userData.surfaceNormal);
+      hit.object.userData.contactAxis = currentContactAxis;
 
-      // Store the previous surface normal for change detection during drag
+      // Store the surface normal for surface-change detection during drag
       hit.object.userData.previousSurfaceNormal = hit.object.userData.surfaceNormal.clone();
+
+      console.log('Drag start - contact axis:', currentContactAxis.toArray());
     }
   } else {
     // Store click position and surface info for potential furniture placement
@@ -432,28 +468,25 @@ function onMouseMove(event) {
       if (surfaceChanged) {
         // Detect which face is now facing the new surface
         const newContactAxis = detectContactAxis(hoveredObject, smoothedNormal);
-        const newUprightRotation = calculateUprightRotation(smoothedNormal, newContactAxis);
-
-        hoveredObject.userData.contactAxis = newContactAxis;
-        hoveredObject.userData.uprightRotation = newUprightRotation;
-        hoveredObject.userData.previousSurfaceNormal = smoothedNormal.clone();
 
         console.log('Surface transition detected:', {
           contactAxis: newContactAxis.toArray(),
-          uprightRotation: (newUprightRotation * 180 / Math.PI).toFixed(1) + '°'
+          previousNormal: previousNormal ? previousNormal.toArray() : 'none',
+          newNormal: smoothedNormal.toArray()
         });
+
+        // Store the new contact axis and surface normal
+        hoveredObject.userData.contactAxis = newContactAxis;
+        hoveredObject.userData.previousSurfaceNormal = smoothedNormal.clone();
+        hoveredObject.userData.surfaceNormal = smoothedNormal.clone();
+
+        // ONLY align when surface actually changes - this preserves gizmo rotation
+        alignToSurface(hoveredObject, smoothedNormal, newContactAxis);
+      } else {
+        // Same surface type - just update the normal, DON'T change orientation
+        // This preserves any rotation applied by the gizmo
+        hoveredObject.userData.surfaceNormal = smoothedNormal.clone();
       }
-
-      // Update current surface normal
-      hoveredObject.userData.surfaceNormal = smoothedNormal.clone();
-
-      // Apply alignment with all components
-      alignToSurface(
-        hoveredObject,
-        smoothedNormal,
-        hoveredObject.userData.contactAxis,
-        hoveredObject.userData.rotationAroundNormal || 0
-      );
     }
   }
 }
@@ -783,16 +816,13 @@ export async function placeFurniture(entryId, position, surfaceNormal = null) {
   // For initial placement, use default contact axis (bottom of model)
   // This gives natural "standing" behavior for floor placement
   const contactAxis = DEFAULT_CONTACT_AXIS.clone();
-  const uprightRotation = calculateUprightRotation(normal, contactAxis);
 
   // Store surface info in userData for later rotation/dragging
   model.userData.surfaceNormal = normal.clone();
   model.userData.contactAxis = contactAxis;
-  model.userData.uprightRotation = uprightRotation;
-  model.userData.rotationAroundNormal = 0;
 
-  // Align furniture to surface with proper orientation
-  alignToSurface(model, normal, contactAxis, 0);
+  // Align furniture to surface (bottom against surface, upright)
+  alignToSurface(model, normal, contactAxis);
 
   // Add to scene
   addFurnitureToScene(model, entryId, position);
