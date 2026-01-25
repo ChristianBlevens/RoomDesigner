@@ -2614,6 +2614,31 @@ async function loadRoomById(roomId) {
           model.scale.set(furniture.scale.x, furniture.scale.y, furniture.scale.z);
         }
 
+        // Restore surface orientation data
+        if (furniture.surfaceNormal) {
+          model.userData.surfaceNormal = new THREE.Vector3(
+            furniture.surfaceNormal.x,
+            furniture.surfaceNormal.y,
+            furniture.surfaceNormal.z
+          );
+        }
+
+        if (furniture.contactAxis) {
+          model.userData.contactAxis = new THREE.Vector3(
+            furniture.contactAxis.x,
+            furniture.contactAxis.y,
+            furniture.contactAxis.z
+          );
+        }
+
+        if (typeof furniture.uprightRotation === 'number') {
+          model.userData.uprightRotation = furniture.uprightRotation;
+        }
+
+        if (typeof furniture.rotationAroundNormal === 'number') {
+          model.userData.rotationAroundNormal = furniture.rotationAroundNormal;
+        }
+
         addFurnitureToScene(model, furniture.entryId);
       } catch (err) {
         console.warn(`Failed to load furniture ${furniture.entryId}:`, err);

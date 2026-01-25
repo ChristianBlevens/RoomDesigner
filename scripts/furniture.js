@@ -47,6 +47,22 @@ const DRAG_THRESHOLD_PIXELS = 5;
 const NORMAL_HISTORY_SIZE = 5;
 let normalHistory = [];
 
+// Cardinal axes for contact face detection
+const CARDINAL_AXES = [
+  new THREE.Vector3(1, 0, 0),   // +X (right face contact)
+  new THREE.Vector3(-1, 0, 0),  // -X (left face contact)
+  new THREE.Vector3(0, 1, 0),   // +Y (bottom face contact) - DEFAULT
+  new THREE.Vector3(0, -1, 0),  // -Y (top face contact)
+  new THREE.Vector3(0, 0, 1),   // +Z (back face contact)
+  new THREE.Vector3(0, 0, -1),  // -Z (front face contact)
+];
+
+// Default contact axis (model bottom against surface - for floor placement)
+const DEFAULT_CONTACT_AXIS = new THREE.Vector3(0, 1, 0);
+
+// Threshold for detecting surface change (cosine of ~45°)
+const SURFACE_CHANGE_THRESHOLD = 0.7;
+
 /**
  * Add a normal to the history and return the averaged normal.
  * @param {THREE.Vector3} normal - The new normal to add
@@ -73,33 +89,145 @@ function clearNormalHistory() {
   normalHistory = [];
 }
 
+/**
+ * Detect which face of the model is currently facing the surface.
+ * Returns the local axis that should point AWAY from the surface.
+ *
+ * @param {THREE.Object3D} model - The furniture model
+ * @param {THREE.Vector3} surfaceNormal - Surface normal in world space
+ * @returns {THREE.Vector3} Local axis that aligns with surface normal
+ */
+function detectContactAxis(model, surfaceNormal) {
+  let bestAxis = DEFAULT_CONTACT_AXIS.clone();
+  let bestDot = -2;
+
+  for (const localAxis of CARDINAL_AXES) {
+    // Transform local axis to world space using model's current rotation
+    const worldAxis = localAxis.clone().applyQuaternion(model.quaternion);
+
+    // Find which axis is most aligned with surface normal
+    // (pointing away from surface = pointing along normal)
+    const dot = worldAxis.dot(surfaceNormal);
+
+    if (dot > bestDot) {
+      bestDot = dot;
+      bestAxis = localAxis.clone();
+    }
+  }
+
+  return bestAxis;
+}
+
+/**
+ * Calculate rotation around surface normal to keep model upright.
+ * "Upright" means model's local Y points as close to world +Y as possible.
+ *
+ * @param {THREE.Vector3} surfaceNormal - Surface normal
+ * @param {THREE.Vector3} contactAxis - Local axis aligned to normal
+ * @returns {number} Rotation in radians around surface normal
+ */
+function calculateUprightRotation(surfaceNormal, contactAxis) {
+  const worldUp = new THREE.Vector3(0, 1, 0);
+
+  // For horizontal surfaces (floor/ceiling), no upright adjustment needed
+  // User rotation handles the orientation
+  if (Math.abs(surfaceNormal.y) > 0.9) {
+    return 0;
+  }
+
+  // Project world up onto plane perpendicular to surface normal
+  const projectedWorldUp = worldUp.clone().sub(
+    surfaceNormal.clone().multiplyScalar(worldUp.dot(surfaceNormal))
+  );
+
+  if (projectedWorldUp.length() < 0.001) {
+    return 0;
+  }
+  projectedWorldUp.normalize();
+
+  // Calculate where model's Y ends up after base alignment
+  const baseQuat = new THREE.Quaternion();
+  baseQuat.setFromUnitVectors(contactAxis.clone().normalize(), surfaceNormal.clone().normalize());
+
+  const modelYAfterBase = new THREE.Vector3(0, 1, 0).applyQuaternion(baseQuat);
+
+  // Project model's Y onto same plane
+  const projectedModelY = modelYAfterBase.clone().sub(
+    surfaceNormal.clone().multiplyScalar(modelYAfterBase.dot(surfaceNormal))
+  );
+
+  if (projectedModelY.length() < 0.001) {
+    return 0;
+  }
+  projectedModelY.normalize();
+
+  // Calculate angle between projected vectors
+  let angle = Math.acos(Math.max(-1, Math.min(1, projectedModelY.dot(projectedWorldUp))));
+
+  // Determine sign using cross product
+  const cross = new THREE.Vector3().crossVectors(projectedModelY, projectedWorldUp);
+  if (cross.dot(surfaceNormal) < 0) {
+    angle = -angle;
+  }
+
+  return angle;
+}
+
+/**
+ * Align furniture to surface with proper contact face and upright orientation.
+ *
+ * @param {THREE.Object3D} model - The furniture model
+ * @param {THREE.Vector3} surfaceNormal - Surface normal (world space)
+ * @param {THREE.Vector3} contactAxis - Local axis to align with normal
+ * @param {number} uprightRotation - Auto-calculated upright adjustment (radians)
+ * @param {number} userRotation - User's manual rotation around normal (radians)
+ */
+function alignToSurfaceWithOrientation(model, surfaceNormal, contactAxis, uprightRotation, userRotation) {
+  const normalizedNormal = surfaceNormal.clone().normalize();
+  const normalizedAxis = contactAxis.clone().normalize();
+
+  // Step 1: Base alignment - rotate contact axis to surface normal
+  const baseQuat = new THREE.Quaternion();
+  baseQuat.setFromUnitVectors(normalizedAxis, normalizedNormal);
+
+  // Step 2: Upright rotation around surface normal
+  const uprightQuat = new THREE.Quaternion();
+  uprightQuat.setFromAxisAngle(normalizedNormal, uprightRotation);
+
+  // Step 3: User rotation around surface normal
+  const userQuat = new THREE.Quaternion();
+  userQuat.setFromAxisAngle(normalizedNormal, userRotation);
+
+  // Combine: start with base, then apply upright, then apply user rotation
+  // Order matters: each rotation is applied in world space via premultiply
+  model.quaternion.copy(baseQuat);
+  model.quaternion.premultiply(uprightQuat);
+  model.quaternion.premultiply(userQuat);
+}
+
 // Gizmo menu element
 let gizmoMenu = null;
 
 /**
- * Align furniture to lay flat against a surface.
- * The furniture's local Y-axis (up) will align with the surface normal.
+ * Align furniture to surface.
+ * This is the main entry point that handles the orientation system.
+ *
  * @param {THREE.Object3D} model - The furniture model
  * @param {THREE.Vector3} surfaceNormal - The surface normal vector
- * @param {number} rotationAroundNormal - Optional rotation around the normal (radians)
+ * @param {THREE.Vector3|null} contactAxis - Local axis to align (null = use stored or default)
+ * @param {number} userRotation - User rotation around normal (radians)
  */
-function alignToSurface(model, surfaceNormal, rotationAroundNormal = 0) {
-  // Default up vector for furniture (Y-up)
-  const defaultUp = new THREE.Vector3(0, 1, 0);
+function alignToSurface(model, surfaceNormal, contactAxis = null, userRotation = 0) {
+  // Use provided, stored, or default contact axis
+  const axis = contactAxis || model.userData.contactAxis || DEFAULT_CONTACT_AXIS;
 
-  // Create quaternion to rotate from default up to surface normal
-  const alignmentQuat = new THREE.Quaternion();
-  alignmentQuat.setFromUnitVectors(defaultUp, surfaceNormal.clone().normalize());
-
-  // Apply the alignment rotation
-  model.quaternion.copy(alignmentQuat);
-
-  // Apply additional rotation around the surface normal (for user adjustment)
-  if (rotationAroundNormal !== 0) {
-    const normalRotation = new THREE.Quaternion();
-    normalRotation.setFromAxisAngle(surfaceNormal.clone().normalize(), rotationAroundNormal);
-    model.quaternion.premultiply(normalRotation);
+  // Use stored or calculate upright rotation
+  let uprightRot = model.userData.uprightRotation;
+  if (uprightRot === undefined) {
+    uprightRot = calculateUprightRotation(surfaceNormal, axis);
   }
+
+  alignToSurfaceWithOrientation(model, surfaceNormal, axis, uprightRot, userRotation);
 }
 
 /**
@@ -117,67 +245,67 @@ function rotateFurnitureOnSurface(model, deltaAngle) {
   // Update stored rotation
   model.userData.rotationAroundNormal = (model.userData.rotationAroundNormal || 0) + deltaAngle;
 
-  // Recompute orientation
+  // Recompute orientation with contact axis preservation
   alignToSurface(
     model,
     model.userData.surfaceNormal,
+    model.userData.contactAxis,
     model.userData.rotationAroundNormal
   );
 }
 
 /**
- * Extract the rotation around the surface normal from an object's current quaternion.
- * This is used to preserve user rotation when starting a drag.
+ * Extract user rotation around surface normal from model's current orientation.
+ * Used to preserve rotation when starting a new drag.
+ *
  * @param {THREE.Object3D} model - The furniture model
- * @returns {number} - Rotation around normal in radians
+ * @returns {number} User rotation in radians
  */
 function extractRotationAroundNormal(model) {
   const surfaceNormal = model.userData.surfaceNormal;
+  const contactAxis = model.userData.contactAxis || DEFAULT_CONTACT_AXIS;
+  const uprightRotation = model.userData.uprightRotation || 0;
+
   if (!surfaceNormal) {
-    // Fallback: extract Y rotation for floor-placed objects
-    return model.rotation.y;
+    return model.rotation.y; // Fallback
   }
 
-  // Get the "base" alignment quaternion (just surface alignment, no around-normal rotation)
-  const defaultUp = new THREE.Vector3(0, 1, 0);
+  const normalizedNormal = surfaceNormal.clone().normalize();
+  const normalizedAxis = contactAxis.clone().normalize();
+
+  // Reconstruct the "expected" quaternion without user rotation
   const baseQuat = new THREE.Quaternion();
-  baseQuat.setFromUnitVectors(defaultUp, surfaceNormal.clone().normalize());
+  baseQuat.setFromUnitVectors(normalizedAxis, normalizedNormal);
 
-  // Get the current quaternion
-  const currentQuat = model.quaternion.clone();
+  const uprightQuat = new THREE.Quaternion();
+  uprightQuat.setFromAxisAngle(normalizedNormal, uprightRotation);
 
-  // Calculate the "difference" quaternion: diffQuat = baseQuat.inverse() * currentQuat
-  // This represents the rotation that was applied AFTER the base alignment
-  const baseQuatInverse = baseQuat.clone().invert();
-  const diffQuat = baseQuatInverse.multiply(currentQuat);
+  const expectedQuat = baseQuat.clone().premultiply(uprightQuat);
 
-  // Extract the angle around the surface normal axis
-  // The diffQuat should be a rotation around the Y axis (in local space, which aligns with surfaceNormal)
-  // We can extract this by converting to axis-angle
-  const axis = new THREE.Vector3();
-  const angle = 2 * Math.acos(Math.min(1, Math.abs(diffQuat.w)));
+  // The difference between expected and actual is the user rotation
+  const expectedInverse = expectedQuat.clone().invert();
+  const diffQuat = model.quaternion.clone().premultiply(expectedInverse);
 
-  if (angle > 0.001) {
-    // Get the rotation axis
-    const sinHalfAngle = Math.sqrt(1 - diffQuat.w * diffQuat.w);
-    if (sinHalfAngle > 0.001) {
-      axis.set(
-        diffQuat.x / sinHalfAngle,
-        diffQuat.y / sinHalfAngle,
-        diffQuat.z / sinHalfAngle
-      );
+  // Extract angle from difference quaternion
+  const angle = 2 * Math.acos(Math.max(-1, Math.min(1, Math.abs(diffQuat.w))));
 
-      // Check if the axis is aligned with the surface normal (they should be parallel)
-      // If axis is opposite to normal, negate the angle
-      const dot = axis.dot(surfaceNormal.clone().normalize());
-      if (dot < 0) {
-        return -angle;
-      }
-      return angle;
-    }
+  if (angle < 0.001) {
+    return 0;
   }
 
-  return 0;
+  // Determine sign
+  const sinHalfAngle = Math.sqrt(1 - diffQuat.w * diffQuat.w);
+  if (sinHalfAngle < 0.001) {
+    return 0;
+  }
+
+  const axis = new THREE.Vector3(
+    diffQuat.x / sinHalfAngle,
+    diffQuat.y / sinHalfAngle,
+    diffQuat.z / sinHalfAngle
+  );
+
+  return axis.dot(normalizedNormal) < 0 ? -angle : angle;
 }
 
 // Callback for opening furniture modal
@@ -246,6 +374,9 @@ function onMouseDown(event) {
     if (hit.object.userData.surfaceNormal) {
       const currentRotation = extractRotationAroundNormal(hit.object);
       hit.object.userData.rotationAroundNormal = currentRotation;
+
+      // Store the previous surface normal for change detection during drag
+      hit.object.userData.previousSurfaceNormal = hit.object.userData.surfaceNormal.clone();
     }
   } else {
     // Store click position and surface info for potential furniture placement
@@ -287,19 +418,40 @@ function onMouseMove(event) {
     const surfaceHit = raycastRoomSurface(event, { sampleCount: 0 });
 
     if (surfaceHit) {
-      // Move to new position on surface
+      // Update position
       hoveredObject.position.copy(surfaceHit.point);
 
-      // Use running average of normals for smooth alignment during drag
+      // Smooth the normal
       const smoothedNormal = addNormalToHistory(surfaceHit.normal);
 
-      // Update surface normal with smoothed value
+      // Check if surface changed significantly (e.g., floor to wall transition)
+      const previousNormal = hoveredObject.userData.previousSurfaceNormal;
+      const surfaceChanged = !previousNormal ||
+        previousNormal.dot(smoothedNormal) < SURFACE_CHANGE_THRESHOLD;
+
+      if (surfaceChanged) {
+        // Detect which face is now facing the new surface
+        const newContactAxis = detectContactAxis(hoveredObject, smoothedNormal);
+        const newUprightRotation = calculateUprightRotation(smoothedNormal, newContactAxis);
+
+        hoveredObject.userData.contactAxis = newContactAxis;
+        hoveredObject.userData.uprightRotation = newUprightRotation;
+        hoveredObject.userData.previousSurfaceNormal = smoothedNormal.clone();
+
+        console.log('Surface transition detected:', {
+          contactAxis: newContactAxis.toArray(),
+          uprightRotation: (newUprightRotation * 180 / Math.PI).toFixed(1) + '°'
+        });
+      }
+
+      // Update current surface normal
       hoveredObject.userData.surfaceNormal = smoothedNormal.clone();
 
-      // Re-align to new surface while preserving user rotation
+      // Apply alignment with all components
       alignToSurface(
         hoveredObject,
         smoothedNormal,
+        hoveredObject.userData.contactAxis,
         hoveredObject.userData.rotationAroundNormal || 0
       );
     }
@@ -357,10 +509,15 @@ function onMouseUp(event) {
 
 function resetMouseState() {
   isDragging = false;
-  hoveredObject = null;
   mouseDownPosition = null;
   dragStartPosition = null;
   clearNormalHistory();
+
+  // Clear the previous surface normal tracking
+  if (hoveredObject) {
+    delete hoveredObject.userData.previousSurfaceNormal;
+  }
+  hoveredObject = null;
 }
 
 function selectFurniture(object, event) {
@@ -623,12 +780,19 @@ export async function placeFurniture(entryId, position, surfaceNormal = null) {
   // Use provided surface normal or the last clicked surface normal
   const normal = surfaceNormal || lastClickSurfaceNormal || new THREE.Vector3(0, 1, 0);
 
+  // For initial placement, use default contact axis (bottom of model)
+  // This gives natural "standing" behavior for floor placement
+  const contactAxis = DEFAULT_CONTACT_AXIS.clone();
+  const uprightRotation = calculateUprightRotation(normal, contactAxis);
+
   // Store surface info in userData for later rotation/dragging
   model.userData.surfaceNormal = normal.clone();
+  model.userData.contactAxis = contactAxis;
+  model.userData.uprightRotation = uprightRotation;
   model.userData.rotationAroundNormal = 0;
 
-  // Align furniture to lay flat against the surface
-  alignToSurface(model, normal, 0);
+  // Align furniture to surface with proper orientation
+  alignToSurface(model, normal, contactAxis, 0);
 
   // Add to scene
   addFurnitureToScene(model, entryId, position);

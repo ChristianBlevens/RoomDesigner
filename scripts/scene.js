@@ -1288,7 +1288,7 @@ export function collectPlacedFurniture() {
 
   selectableObjects.forEach((object) => {
     if (object.userData.isFurniture && object.userData.entryId) {
-      placedFurniture.push({
+      const data = {
         entryId: object.userData.entryId,
         position: {
           x: object.position.x,
@@ -1305,7 +1305,34 @@ export function collectPlacedFurniture() {
           y: object.scale.y,
           z: object.scale.z
         }
-      });
+      };
+
+      // Save surface orientation data
+      if (object.userData.surfaceNormal) {
+        data.surfaceNormal = {
+          x: object.userData.surfaceNormal.x,
+          y: object.userData.surfaceNormal.y,
+          z: object.userData.surfaceNormal.z
+        };
+      }
+
+      if (object.userData.contactAxis) {
+        data.contactAxis = {
+          x: object.userData.contactAxis.x,
+          y: object.userData.contactAxis.y,
+          z: object.userData.contactAxis.z
+        };
+      }
+
+      if (typeof object.userData.uprightRotation === 'number') {
+        data.uprightRotation = object.userData.uprightRotation;
+      }
+
+      if (typeof object.userData.rotationAroundNormal === 'number') {
+        data.rotationAroundNormal = object.userData.rotationAroundNormal;
+      }
+
+      placedFurniture.push(data);
     }
   });
 
