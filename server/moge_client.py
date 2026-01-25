@@ -68,11 +68,13 @@ async def process_image_with_modal(image_bytes: bytes) -> dict:
         except httpx.RequestError as e:
             raise MoGeError(f"Modal request error: {str(e)}")
 
+    logger.info(f"Response received, parsing JSON ({len(response.content) / 1024:.1f} KB)...")
     result = response.json()
 
     if "error" in result:
         raise MoGeError(f"Modal processing error: {result['error']}")
 
+    logger.info(f"Decoding mesh from base64...")
     mesh_bytes = base64.b64decode(result["mesh"])
 
     logger.info(f"Received mesh from Modal ({len(mesh_bytes) / 1024:.1f} KB)")
