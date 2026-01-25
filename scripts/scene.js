@@ -445,11 +445,11 @@ export function setCameraForMoGeAlignment(fov, imageAspect) {
  * Set the background image as a 3D plane in the scene.
  * The plane is sized to fill the viewport exactly at the given depth.
  * This ensures pixel-perfect alignment between the image and point cloud.
- * @param {Blob} imageBlob - The room image as a Blob
+ * @param {Blob|string} imageSource - The room image as a Blob or URL string
  * @param {number} depth - Distance from camera (positive value, will be placed at -depth Z)
  * @returns {Promise<THREE.Mesh>} The background plane mesh
  */
-export async function setBackgroundImagePlane(imageBlob, depth = 10) {
+export async function setBackgroundImagePlane(imageSource, depth = 10) {
   if (!scene || !camera) {
     throw new Error('Scene not initialized');
   }
@@ -464,8 +464,17 @@ export async function setBackgroundImagePlane(imageBlob, depth = 10) {
     backgroundImageTexture = null;
   }
 
-  // Create object URL for the image
-  const imageUrl = URL.createObjectURL(imageBlob);
+  // Handle both Blob and URL string inputs
+  let imageUrl;
+  let shouldRevokeUrl = false;
+  if (imageSource instanceof Blob) {
+    imageUrl = URL.createObjectURL(imageSource);
+    shouldRevokeUrl = true;
+  } else if (typeof imageSource === 'string') {
+    imageUrl = imageSource;
+  } else {
+    throw new Error('imageSource must be a Blob or URL string');
+  }
 
   return new Promise((resolve, reject) => {
     // Load the image to get its dimensions
@@ -478,7 +487,7 @@ export async function setBackgroundImagePlane(imageBlob, depth = 10) {
       textureLoader.load(
         imageUrl,
         (texture) => {
-          URL.revokeObjectURL(imageUrl);
+          if (shouldRevokeUrl) URL.revokeObjectURL(imageUrl);
           backgroundImageTexture = texture;
 
           // Ensure texture is not repeated and uses linear filtering for quality
@@ -548,13 +557,13 @@ export async function setBackgroundImagePlane(imageBlob, depth = 10) {
         },
         undefined,
         (error) => {
-          URL.revokeObjectURL(imageUrl);
+          if (shouldRevokeUrl) URL.revokeObjectURL(imageUrl);
           reject(error);
         }
       );
     };
     img.onerror = () => {
-      URL.revokeObjectURL(imageUrl);
+      if (shouldRevokeUrl) URL.revokeObjectURL(imageUrl);
       reject(new Error('Failed to load image'));
     };
     img.src = imageUrl;
