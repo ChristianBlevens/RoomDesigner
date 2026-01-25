@@ -54,9 +54,7 @@ import {
   getRoomsByHouseId,
   getOrphanRooms,
   subscribeToEvents,
-  createRoom,
-  pollRoomStatus,
-  retryRoomProcessing
+  createRoom
 } from './api.js';
 import {
   getCurrentHouse,
@@ -638,7 +636,7 @@ function resetOrientationModal() {
 
 /**
  * Automatic room processing flow - server handles MoGe-2 via Modal.
- * Shows progress, polls for completion, loads room into scene.
+ * Waits for server to complete mesh generation (30-60 seconds).
  */
 async function processRoomAutomatically() {
   if (!pendingRoomImage || !pendingRoomName || !currentHouseId) {
@@ -664,48 +662,34 @@ async function processRoomAutomatically() {
   errorEl.classList.add('hidden');
   loadingEl.classList.remove('hidden');
   applyBtn.classList.add('hidden');
-  loadingText.textContent = 'Creating room...';
+  loadingText.textContent = 'Creating room and analyzing geometry (30-60 seconds)...';
 
   modalManager.openModal('orientation-modal');
 
   try {
-    // Create room - server handles Modal processing in background
+    // Create room - server waits for Modal mesh generation
     const room = await createRoom(currentHouseId, pendingRoomName, pendingRoomImage);
     console.log('Room created:', room);
-
-    // Update UI to show processing
-    loadingText.textContent = 'Analyzing room geometry (30-60 seconds)...';
-
-    // Poll until ready
-    const readyRoom = await pollRoomStatus(room.id, {
-      interval: 2000,
-      timeout: 180000,
-      onProgress: (r) => {
-        console.log(`Room ${r.id} status: ${r.status}`);
-      }
-    });
-
-    console.log('Room ready:', readyRoom);
 
     // Load mesh into scene
     loadingText.textContent = 'Loading room mesh...';
 
-    const meshUrl = adjustUrlForProxy(readyRoom.mogeData.meshUrl);
+    const meshUrl = adjustUrlForProxy(room.mogeData.meshUrl);
     await loadRoomGeometry(meshUrl, {
       wireframeColor: 0x00ff00,
       wireframeOpacity: 0.5
     });
 
     // Set camera alignment
-    const fov = readyRoom.mogeData.cameraFov || 60;
-    const imageAspect = readyRoom.mogeData.imageAspect;
+    const fov = room.mogeData.cameraFov || 60;
+    const imageAspect = room.mogeData.imageAspect;
     setCameraForMoGeAlignment(fov, imageAspect);
 
     // Set up background plane
     loadingText.textContent = 'Setting up background...';
     const bounds = getRoomBounds();
     const backgroundDepth = Math.abs(bounds.min.z) + 1;
-    const backgroundUrl = adjustUrlForProxy(readyRoom.backgroundImageUrl);
+    const backgroundUrl = adjustUrlForProxy(room.backgroundImageUrl);
     await setBackgroundImagePlane(backgroundUrl, backgroundDepth);
 
     // Clear CSS background since we use 3D plane
@@ -719,7 +703,7 @@ async function processRoomAutomatically() {
     fovInfo.textContent = `FOV: ${fov.toFixed(1)}°`;
 
     // Set as current room
-    currentRoomId = readyRoom.id;
+    currentRoomId = room.id;
     currentBackgroundImage = pendingRoomImage;
 
     // Clear pending state

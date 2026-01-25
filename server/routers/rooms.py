@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from typing import List
 import uuid
 import json
@@ -8,9 +8,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.connection import get_houses_db
-from models.room import RoomCreate, RoomUpdate, RoomResponse
+from models.room import RoomUpdate, RoomResponse
 from config import ROOM_BACKGROUNDS, ROOM_MESHES
-from utils import cleanup_entity_files, IMAGE_EXTENSIONS
+from utils import cleanup_entity_files
 from mesh_optimizer import optimize_room_mesh
 from moge_client import process_image_with_modal, MoGeError
 
@@ -23,55 +23,6 @@ ROOM_SELECT = """
 """
 
 router = APIRouter()
-
-
-async def process_room_geometry(room_id: str, image_bytes: bytes):
-    """
-    Background task: Call Modal, optimize mesh, update room status.
-    """
-    db = get_houses_db()
-
-    try:
-        logger.info(f"Processing room {room_id} with Modal...")
-        result = await process_image_with_modal(image_bytes)
-
-        logger.info(f"Optimizing mesh for room {room_id}...")
-        optimized_mesh = optimize_room_mesh(result["mesh_bytes"])
-
-        ROOM_MESHES.mkdir(parents=True, exist_ok=True)
-        mesh_path = ROOM_MESHES / f"{room_id}.glb"
-        mesh_path.write_bytes(optimized_mesh)
-
-        mesh_url = f"/api/files/room/{room_id}/mesh"
-
-        image_size = result["imageSize"]
-        image_aspect = image_size["width"] / image_size["height"]
-
-        moge_data = {
-            "meshUrl": mesh_url,
-            "cameraFov": result["camera"]["fov"],
-            "imageAspect": image_aspect
-        }
-
-        db.execute(
-            "UPDATE rooms SET status = ?, moge_data = ?, error_message = NULL WHERE id = ?",
-            ["ready", json.dumps(moge_data), room_id]
-        )
-
-        logger.info(f"Room {room_id} ready")
-
-    except MoGeError as e:
-        logger.error(f"Room {room_id} failed: {e}")
-        db.execute(
-            "UPDATE rooms SET status = ?, error_message = ? WHERE id = ?",
-            ["failed", str(e), room_id]
-        )
-    except Exception as e:
-        logger.error(f"Room {room_id} failed unexpectedly: {e}")
-        db.execute(
-            "UPDATE rooms SET status = ?, error_message = ? WHERE id = ?",
-            ["failed", f"Unexpected error: {str(e)}", room_id]
-        )
 
 
 def row_to_response(row) -> RoomResponse:
@@ -130,7 +81,6 @@ def get_room(room_id: str):
 
 @router.post("/", response_model=RoomResponse)
 async def create_room(
-    background_tasks: BackgroundTasks,
     houseId: str = Form(...),
     name: str = Form(...),
     image: UploadFile = File(...)
@@ -138,9 +88,9 @@ async def create_room(
     """
     Create a new room with background image.
 
-    Room is created immediately with status="processing".
-    Mesh generation happens in background via Modal.
-    Poll GET /rooms/{id} to check when status="ready".
+    Synchronous: waits for Modal mesh generation (30-60 seconds).
+    Room is only created if mesh generation succeeds.
+    Returns error if mesh generation fails (no room created).
     """
     db = get_houses_db()
 
@@ -149,81 +99,70 @@ async def create_room(
         raise HTTPException(status_code=404, detail="House not found")
 
     room_id = str(uuid.uuid4())
-
     image_bytes = await image.read()
-    ROOM_BACKGROUNDS.mkdir(parents=True, exist_ok=True)
 
+    # Process mesh with Modal FIRST (before creating room)
+    logger.info(f"Processing room {room_id} with Modal...")
+    try:
+        result = await process_image_with_modal(image_bytes)
+    except MoGeError as e:
+        logger.error(f"Room {room_id} mesh generation failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Mesh generation failed: {str(e)}")
+
+    # Optimize mesh
+    logger.info(f"Optimizing mesh for room {room_id}...")
+    try:
+        optimized_mesh = optimize_room_mesh(result["mesh_bytes"])
+    except Exception as e:
+        logger.error(f"Room {room_id} mesh optimization failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Mesh optimization failed: {str(e)}")
+
+    # Save mesh
+    ROOM_MESHES.mkdir(parents=True, exist_ok=True)
+    mesh_path = ROOM_MESHES / f"{room_id}.glb"
+    mesh_path.write_bytes(optimized_mesh)
+
+    # Save background image
+    ROOM_BACKGROUNDS.mkdir(parents=True, exist_ok=True)
     ext = "jpg"
     if image.content_type == "image/png":
         ext = "png"
     elif image.content_type == "image/webp":
         ext = "webp"
-
     image_path = ROOM_BACKGROUNDS / f"{room_id}.{ext}"
     image_path.write_bytes(image_bytes)
 
-    background_url = f"/api/files/room/{room_id}/background"
+    # Build moge data
+    mesh_url = f"/api/files/room/{room_id}/mesh"
+    image_size = result["imageSize"]
+    image_aspect = image_size["width"] / image_size["height"]
+    moge_data = {
+        "meshUrl": mesh_url,
+        "cameraFov": result["camera"]["fov"],
+        "imageAspect": image_aspect
+    }
 
+    # NOW create the room (mesh succeeded)
     db.execute(
         """
         INSERT INTO rooms (id, house_id, name, status, background_image_path, placed_furniture, moge_data, lighting_settings)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        [room_id, houseId, name, "processing", str(image_path), "[]", None, None]
+        [room_id, houseId, name, "ready", str(image_path), "[]", json.dumps(moge_data), None]
     )
 
-    background_tasks.add_task(process_room_geometry, room_id, image_bytes)
+    logger.info(f"Room {room_id} created successfully")
 
     return RoomResponse(
         id=room_id,
         houseId=houseId,
         name=name,
-        status="processing",
-        backgroundImageUrl=background_url,
+        status="ready",
+        backgroundImageUrl=f"/api/files/room/{room_id}/background",
         placedFurniture=[],
-        mogeData=None,
+        mogeData=moge_data,
         lightingSettings=None
     )
-
-
-@router.post("/{room_id}/retry", response_model=dict)
-async def retry_room_processing(room_id: str, background_tasks: BackgroundTasks):
-    """
-    Retry mesh generation for a failed room.
-    """
-    db = get_houses_db()
-
-    row = db.execute(
-        "SELECT status, background_image_path FROM rooms WHERE id = ?",
-        [room_id]
-    ).fetchone()
-
-    if not row:
-        raise HTTPException(status_code=404, detail="Room not found")
-
-    if row[0] != "failed":
-        raise HTTPException(status_code=400, detail="Room is not in failed state")
-
-    image_path = None
-    for ext in IMAGE_EXTENSIONS:
-        candidate = ROOM_BACKGROUNDS / f"{room_id}.{ext}"
-        if candidate.exists():
-            image_path = candidate
-            break
-
-    if not image_path:
-        raise HTTPException(status_code=500, detail="Background image not found")
-
-    image_bytes = image_path.read_bytes()
-
-    db.execute(
-        "UPDATE rooms SET status = ?, error_message = NULL WHERE id = ?",
-        ["processing", room_id]
-    )
-
-    background_tasks.add_task(process_room_geometry, room_id, image_bytes)
-
-    return {"status": "processing", "message": "Retry started"}
 
 
 @router.put("/{room_id}", response_model=RoomResponse)

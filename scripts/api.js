@@ -137,8 +137,8 @@ export async function getOrphanRooms() {
 
 /**
  * Create a new room with image upload.
- * Returns immediately with status="processing".
- * Use pollRoomStatus() to wait for completion.
+ * Synchronous: waits for mesh generation (30-60 seconds).
+ * Returns the completed room or throws error.
  */
 export async function createRoom(houseId, name, imageFile) {
   const formData = new FormData();
@@ -154,57 +154,6 @@ export async function createRoom(houseId, name, imageFile) {
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
     throw new Error(error.detail || `Create room failed: ${response.status}`);
-  }
-
-  return response.json();
-}
-
-/**
- * Poll room status until ready or failed.
- */
-export async function pollRoomStatus(roomId, options = {}) {
-  const {
-    interval = 2000,
-    timeout = 180000,
-    onProgress = null
-  } = options;
-
-  const startTime = Date.now();
-
-  while (true) {
-    const room = await getRoom(roomId);
-
-    if (onProgress) {
-      onProgress(room);
-    }
-
-    if (room.status === 'ready') {
-      return room;
-    }
-
-    if (room.status === 'failed') {
-      throw new Error(room.errorMessage || 'Room processing failed');
-    }
-
-    if (Date.now() - startTime > timeout) {
-      throw new Error('Room processing timed out');
-    }
-
-    await new Promise(resolve => setTimeout(resolve, interval));
-  }
-}
-
-/**
- * Retry processing for a failed room.
- */
-export async function retryRoomProcessing(roomId) {
-  const response = await fetch(`${API_BASE}/rooms/${roomId}/retry`, {
-    method: 'POST'
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
-    throw new Error(error.detail || `Retry failed: ${response.status}`);
   }
 
   return response.json();
