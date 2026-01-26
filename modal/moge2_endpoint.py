@@ -9,19 +9,25 @@ Test locally:
 
 Environment:
     MODAL_TOKEN_ID and MODAL_TOKEN_SECRET must be set
+
+Note:
+    This implementation copies the moge code directly from the HuggingFace Space
+    (same approach as the official demo) to avoid dependency conflicts with utils3d.
 """
 
 import modal
-import io
 import base64
-from typing import Optional
 
 
 def download_model():
     """Download MoGe-2 model during image build (cached)."""
-    import torch
-    from moge.model.v2 import MoGeModel
+    import sys
+    sys.path.insert(0, '/root')
 
+    import torch
+    from moge.model import import_model_class_by_version
+
+    MoGeModel = import_model_class_by_version('v2')
     model = MoGeModel.from_pretrained("Ruicheng/moge-2-vitl")
     print(f"Model downloaded: {type(model)}")
 
@@ -45,8 +51,15 @@ image = (
         "einops",
         "timm>=0.9.0",
         "huggingface-hub",
-        "git+https://github.com/EasternJournalist/utils3d.git@3fab839f0be9931dac7c8488eb0e1600c236e183",
-        "git+https://github.com/microsoft/MoGe.git",
+        # Use the SAME utils3d version as HuggingFace demo (has image_mesh, image_uv, depth_edge)
+        "git+https://github.com/EasternJournalist/utils3d.git@c5daf6f6c244d251f252102d09e9b7bcef791a38",
+    )
+    # Clone moge code from HuggingFace Space (same approach as official demo)
+    # This avoids the dependency conflict between MoGe pip package and utils3d
+    .run_commands(
+        "git clone --depth 1 https://huggingface.co/spaces/Ruicheng/MoGe-2 /tmp/moge-repo",
+        "cp -r /tmp/moge-repo/moge /root/moge",
+        "rm -rf /tmp/moge-repo",
     )
     .run_function(download_model)
 )
@@ -66,10 +79,14 @@ class MoGe2Inference:
     @modal.enter()
     def load_model(self):
         """Load model when container starts (runs once)."""
+        import sys
+        sys.path.insert(0, '/root')
+
         import torch
-        from moge.model.v2 import MoGeModel
+        from moge.model import import_model_class_by_version
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        MoGeModel = import_model_class_by_version('v2')
         self.model = MoGeModel.from_pretrained("Ruicheng/moge-2-vitl").to(self.device)
         self.model.eval()
         print(f"MoGe-2 loaded on {self.device}")
@@ -112,9 +129,10 @@ class MoGe2Inference:
         except Exception as e:
             return {"error": f"Failed to decode image: {str(e)}"}
 
-        resolution_map = {"Low": 3, "Medium": 5, "High": 7, "Ultra": 9}
+        # Resolution levels (same as HF demo)
+        resolution_map = {"Low": 0, "Medium": 5, "High": 9, "Ultra": 30}
         resolution = request.get("resolution", "High")
-        resolution_level = resolution_map.get(resolution, 7)
+        resolution_level = resolution_map.get(resolution, 9)
 
         apply_mask = request.get("applyMask", True)
         remove_edges = request.get("removeEdges", True)
@@ -157,20 +175,20 @@ class MoGe2Inference:
         fov_v = float(np.degrees(2 * np.arctan(h / (2 * fy))))
         fov_h = float(np.degrees(2 * np.arctan(w / (2 * fx))))
 
-        # Clean mask using depth edges
+        # Clean mask using depth edges (same as HF demo)
         if apply_mask:
             if remove_edges:
-                mask_cleaned = mask & ~utils3d.numpy.depth_map_edge(depth, rtol=0.04)
+                mask_cleaned = mask & ~utils3d.numpy.depth_edge(depth, rtol=0.04)
             else:
                 mask_cleaned = mask
         else:
             mask_cleaned = np.ones_like(mask, dtype=bool)
 
-        # Generate mesh from point map
-        faces, vertices, vertex_colors, vertex_uvs = utils3d.numpy.build_mesh_from_map(
+        # Generate mesh using image_mesh (same as HF demo)
+        faces, vertices, vertex_colors, vertex_uvs = utils3d.numpy.image_mesh(
             points,
             image.astype(np.float32) / 255,
-            utils3d.numpy.uv_map(h, w),
+            utils3d.numpy.image_uv(width=w, height=h),
             mask=mask_cleaned,
             tri=True
         )
@@ -181,9 +199,19 @@ class MoGe2Inference:
 
         print(f"Original mesh: {len(faces)} faces, {len(vertices)} vertices")
 
-        # TODO: Re-enable decimation once mesh generation is verified working
-        # Decimation temporarily disabled to debug mesh corruption
-        # TARGET_FACES = 10000
+        # Decimate to target face count using pyfqmr
+        TARGET_FACES = 10000
+        if len(faces) > TARGET_FACES:
+            import pyfqmr
+            simplifier = pyfqmr.Simplify()
+            verts_for_simplify = np.ascontiguousarray(vertices, dtype=np.float64)
+            faces_for_simplify = np.ascontiguousarray(faces, dtype=np.int32)
+            simplifier.setMesh(verts_for_simplify, faces_for_simplify)
+            simplifier.simplify_mesh(target_count=TARGET_FACES, aggressiveness=7, preserve_border=True)
+            vertices, faces, _ = simplifier.getMesh()
+            vertices = vertices.astype(np.float32)
+            faces = np.asarray(faces, dtype=np.int32)
+            print(f"Decimated to {len(faces)} faces, {len(vertices)} vertices")
 
         # Create trimesh (geometry only, no texture - used for invisible raycasting)
         mesh = trimesh.Trimesh(
