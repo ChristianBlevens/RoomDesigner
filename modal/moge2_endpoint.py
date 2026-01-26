@@ -174,10 +174,10 @@ class MoGe2Inference:
         mask = output["mask"].cpu().numpy()
         intrinsics = output["intrinsics"].cpu().numpy()
 
-        fy = float(intrinsics[1, 1])
-        fx = float(intrinsics[0, 0])
-        fov_v = float(np.degrees(2 * np.arctan(h / (2 * fy))))
-        fov_h = float(np.degrees(2 * np.arctan(w / (2 * fx))))
+        # Use utils3d function for FOV calculation (same as HF demo)
+        fov_h, fov_v = utils3d.numpy.intrinsics_to_fov(intrinsics)
+        fov_h = float(np.rad2deg(fov_h))
+        fov_v = float(np.rad2deg(fov_v))
 
         # Clean mask using depth edges (same as HF demo)
         if apply_mask:
