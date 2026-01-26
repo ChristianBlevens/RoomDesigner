@@ -205,30 +205,29 @@ class MoGe2Inference:
 
         # Adaptive decimation using MeshLib
         # Uses error-based stopping and preserves sharp edges (floor-wall transitions)
-        import meshlib.mrmeshpy as mr
+        import meshlib.mrmeshpy as mrmeshpy
+        import meshlib.mrmeshnumpy as mrmeshnumpy
 
         # Create MeshLib mesh from numpy arrays
-        mr_verts = mr.pointsFromNumpyArray(vertices.astype(np.float32).flatten())
-        mr_faces = mr.facesFromNumpyArray(faces.astype(np.int32).flatten())
-        mr_mesh = mr.Mesh()
-        mr_mesh.points = mr_verts
-        mr_mesh.topology.buildFromTriangles(mr_faces)
+        mr_mesh = mrmeshnumpy.meshFromFacesVerts(
+            faces.astype(np.int32),
+            vertices.astype(np.float32)
+        )
+        mr_mesh.packOptimally()
 
         # Configure decimation settings
-        settings = mr.DecimateSettings()
+        settings = mrmeshpy.DecimateSettings()
         settings.maxError = 0.005  # Max geometric deviation - adaptive stopping
         settings.maxDeletedFaces = len(faces) - 5000  # Keep at least 5000 faces
-        settings.maxTriangleAspectRatio = 20.0  # Prevent overly stretched triangles
-        settings.stabilizer = 0.001  # Small stabilization factor
         settings.maxAngleChange = np.pi / 6  # 30 degrees - preserve sharp edges like floor-wall transitions
 
         # Run decimation
-        result = mr.decimateMesh(mr_mesh, settings)
+        result = mrmeshpy.decimateMesh(mr_mesh, settings)
         print(f"Decimation removed {result.facesDeleted} faces, {result.vertsDeleted} vertices")
 
         # Extract decimated mesh back to numpy
-        vertices = mr.getNumpyArrayFromPoints(mr_mesh.points).reshape(-1, 3).astype(np.float32)
-        faces = mr.getNumpyArrayFromFaces(mr_mesh.topology.getTriangulation()).reshape(-1, 3).astype(np.int32)
+        vertices = mrmeshnumpy.getNumpyVerts(mr_mesh).astype(np.float32)
+        faces = mrmeshnumpy.getNumpyFaces(mr_mesh.topology).astype(np.int32)
         print(f"Decimated to {len(faces)} faces, {len(vertices)} vertices")
 
         # Create trimesh (geometry only, no texture - used for invisible raycasting)
