@@ -90,7 +90,8 @@ class MoGe2Inference:
         MoGeModel = import_model_class_by_version('v2')
         self.model = MoGeModel.from_pretrained("Ruicheng/moge-2-vitl").to(self.device)
         self.model.eval()
-        print(f"MoGe-2 loaded on {self.device}")
+        self.model.half()  # Use FP16 like HF demo
+        print(f"MoGe-2 loaded on {self.device} (FP16)")
 
     @modal.fastapi_endpoint(method="POST")
     def process_image(self, request: dict):
@@ -156,14 +157,16 @@ class MoGe2Inference:
 
         input_tensor = torch.tensor(
             image / 255.0,
-            dtype=torch.float32,
+            dtype=torch.float16,  # FP16 like HF demo
             device=self.device
         ).permute(2, 0, 1)
 
         with torch.no_grad():
             output = self.model.infer(
                 input_tensor,
-                resolution_level=resolution_level
+                resolution_level=resolution_level,
+                apply_mask=apply_mask,
+                use_fp16=True  # Same as HF demo
             )
 
         points = output["points"].cpu().numpy()
@@ -200,19 +203,20 @@ class MoGe2Inference:
 
         print(f"Original mesh: {len(faces)} faces, {len(vertices)} vertices")
 
-        # Decimate to target face count using pyfqmr
-        TARGET_FACES = 10000
-        if len(faces) > TARGET_FACES:
-            import pyfqmr
-            simplifier = pyfqmr.Simplify()
-            verts_for_simplify = np.ascontiguousarray(vertices, dtype=np.float64)
-            faces_for_simplify = np.ascontiguousarray(faces, dtype=np.int32)
-            simplifier.setMesh(verts_for_simplify, faces_for_simplify)
-            simplifier.simplify_mesh(target_count=TARGET_FACES, aggressiveness=7, preserve_border=True)
-            vertices, faces, _ = simplifier.getMesh()
-            vertices = vertices.astype(np.float32)
-            faces = np.asarray(faces, dtype=np.int32)
-            print(f"Decimated to {len(faces)} faces, {len(vertices)} vertices")
+        # TODO: Re-enable decimation after verifying mesh generation works correctly
+        # Decimation temporarily disabled to debug geometry issues
+        # TARGET_FACES = 10000
+        # if len(faces) > TARGET_FACES:
+        #     import pyfqmr
+        #     simplifier = pyfqmr.Simplify()
+        #     verts_for_simplify = np.ascontiguousarray(vertices, dtype=np.float64)
+        #     faces_for_simplify = np.ascontiguousarray(faces, dtype=np.int32)
+        #     simplifier.setMesh(verts_for_simplify, faces_for_simplify)
+        #     simplifier.simplify_mesh(target_count=TARGET_FACES, aggressiveness=7, preserve_border=True)
+        #     vertices, faces, _ = simplifier.getMesh()
+        #     vertices = vertices.astype(np.float32)
+        #     faces = np.asarray(faces, dtype=np.int32)
+        #     print(f"Decimated to {len(faces)} faces, {len(vertices)} vertices")
 
         # Create trimesh (geometry only, no texture - used for invisible raycasting)
         mesh = trimesh.Trimesh(
