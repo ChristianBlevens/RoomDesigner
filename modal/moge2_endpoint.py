@@ -51,6 +51,7 @@ image = (
         "einops",
         "timm>=0.9.0",
         "huggingface-hub",
+        "fastapi[standard]",
         # Use the SAME utils3d version as HuggingFace demo (has image_mesh, image_uv, depth_edge)
         "git+https://github.com/EasternJournalist/utils3d.git@c5daf6f6c244d251f252102d09e9b7bcef791a38",
     )
