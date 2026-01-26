@@ -203,20 +203,19 @@ class MoGe2Inference:
 
         print(f"Original mesh: {len(faces)} faces, {len(vertices)} vertices")
 
-        # TODO: Re-enable decimation after verifying mesh generation works correctly
-        # Decimation temporarily disabled to debug geometry issues
-        # TARGET_FACES = 10000
-        # if len(faces) > TARGET_FACES:
-        #     import pyfqmr
-        #     simplifier = pyfqmr.Simplify()
-        #     verts_for_simplify = np.ascontiguousarray(vertices, dtype=np.float64)
-        #     faces_for_simplify = np.ascontiguousarray(faces, dtype=np.int32)
-        #     simplifier.setMesh(verts_for_simplify, faces_for_simplify)
-        #     simplifier.simplify_mesh(target_count=TARGET_FACES, aggressiveness=7, preserve_border=True)
-        #     vertices, faces, _ = simplifier.getMesh()
-        #     vertices = vertices.astype(np.float32)
-        #     faces = np.asarray(faces, dtype=np.int32)
-        #     print(f"Decimated to {len(faces)} faces, {len(vertices)} vertices")
+        # Decimate to target face count using pyfqmr
+        TARGET_FACES = 10000
+        if len(faces) > TARGET_FACES:
+            import pyfqmr
+            simplifier = pyfqmr.Simplify()
+            verts_for_simplify = np.ascontiguousarray(vertices, dtype=np.float64)
+            faces_for_simplify = np.ascontiguousarray(faces, dtype=np.int32)
+            simplifier.setMesh(verts_for_simplify, faces_for_simplify)
+            simplifier.simplify_mesh(target_count=TARGET_FACES, aggressiveness=7, preserve_border=True)
+            vertices, faces, _ = simplifier.getMesh()
+            vertices = vertices.astype(np.float32)
+            faces = np.asarray(faces, dtype=np.int32)
+            print(f"Decimated to {len(faces)} faces, {len(vertices)} vertices")
 
         # Create trimesh (geometry only, no texture - used for invisible raycasting)
         mesh = trimesh.Trimesh(
