@@ -47,7 +47,7 @@ image = (
         "scipy",
         "pillow",
         "trimesh[easy]",
-        "pyfqmr",
+        "meshlib",
         "einops",
         "timm>=0.9.0",
         "huggingface-hub",
@@ -203,19 +203,33 @@ class MoGe2Inference:
 
         print(f"Original mesh: {len(faces)} faces, {len(vertices)} vertices")
 
-        # Decimate to target face count using pyfqmr
-        TARGET_FACES = 10000
-        if len(faces) > TARGET_FACES:
-            import pyfqmr
-            simplifier = pyfqmr.Simplify()
-            verts_for_simplify = np.ascontiguousarray(vertices, dtype=np.float64)
-            faces_for_simplify = np.ascontiguousarray(faces, dtype=np.int32)
-            simplifier.setMesh(verts_for_simplify, faces_for_simplify)
-            simplifier.simplify_mesh(target_count=TARGET_FACES, aggressiveness=7, preserve_border=True)
-            vertices, faces, _ = simplifier.getMesh()
-            vertices = vertices.astype(np.float32)
-            faces = np.asarray(faces, dtype=np.int32)
-            print(f"Decimated to {len(faces)} faces, {len(vertices)} vertices")
+        # Adaptive decimation using MeshLib
+        # Uses error-based stopping and preserves sharp edges (floor-wall transitions)
+        import meshlib.mrmeshpy as mr
+
+        # Create MeshLib mesh from numpy arrays
+        mr_verts = mr.pointsFromNumpyArray(vertices.astype(np.float32).flatten())
+        mr_faces = mr.facesFromNumpyArray(faces.astype(np.int32).flatten())
+        mr_mesh = mr.Mesh()
+        mr_mesh.points = mr_verts
+        mr_mesh.topology.buildFromTriangles(mr_faces)
+
+        # Configure decimation settings
+        settings = mr.DecimateSettings()
+        settings.maxError = 0.005  # Max geometric deviation - adaptive stopping
+        settings.maxDeletedFaces = len(faces) - 5000  # Keep at least 5000 faces
+        settings.maxTriangleAspectRatio = 20.0  # Prevent overly stretched triangles
+        settings.stabilizer = 0.001  # Small stabilization factor
+        settings.maxAngleChange = np.pi / 6  # 30 degrees - preserve sharp edges like floor-wall transitions
+
+        # Run decimation
+        result = mr.decimateMesh(mr_mesh, settings)
+        print(f"Decimation removed {result.facesDeleted} faces, {result.vertsDeleted} vertices")
+
+        # Extract decimated mesh back to numpy
+        vertices = mr.getNumpyArrayFromPoints(mr_mesh.points).reshape(-1, 3).astype(np.float32)
+        faces = mr.getNumpyArrayFromFaces(mr_mesh.topology.getTriangulation()).reshape(-1, 3).astype(np.int32)
+        print(f"Decimated to {len(faces)} faces, {len(vertices)} vertices")
 
         # Create trimesh (geometry only, no texture - used for invisible raycasting)
         mesh = trimesh.Trimesh(
