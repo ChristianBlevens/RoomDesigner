@@ -333,11 +333,11 @@ export async function loadRoomMesh(meshUrl) {
         // Calculate bounds before making invisible
         const bounds = new THREE.Box3().setFromObject(mesh);
 
-        // Use ShadowMaterial for shadow receiving (transparent but shows shadows)
+        // ShadowMaterial is invisible except where shadows fall
         mesh.traverse((child) => {
           if (child.isMesh) {
             child.material = new THREE.ShadowMaterial({
-              opacity: 0.5,
+              opacity: 0.4,
               side: THREE.DoubleSide
             });
             child.receiveShadow = true;

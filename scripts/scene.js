@@ -807,14 +807,12 @@ export async function loadRoomGeometry(meshUrl, options = {}) {
         if (floor) floor.visible = false;
 
         // Create mesh for raycasting and shadow receiving
-        // ShadowMaterial is transparent but shows shadows from furniture
+        // ShadowMaterial is invisible except where shadows fall
         roomMesh = model.clone();
         roomMesh.traverse((child) => {
           if (child.isMesh) {
-            // ShadowMaterial: transparent but receives and displays shadows
-            // DoubleSide needed for interior room meshes where normals may face outward
             child.material = new THREE.ShadowMaterial({
-              opacity: 0.5,
+              opacity: 0.4,
               side: THREE.DoubleSide
             });
             child.receiveShadow = true;
@@ -1381,8 +1379,9 @@ function updateShadowCamera(bounds) {
   if (!directionalLight || !bounds) return;
 
   const size = bounds.getSize(new THREE.Vector3());
-  const maxDim = Math.max(size.x, size.y, size.z) * 1.5; // Add margin
+  const maxDim = Math.max(size.x, size.y, size.z) * 1.5;
 
+  // Expand shadow camera frustum to cover room bounds
   directionalLight.shadow.camera.left = -maxDim;
   directionalLight.shadow.camera.right = maxDim;
   directionalLight.shadow.camera.top = maxDim;
@@ -1390,7 +1389,7 @@ function updateShadowCamera(bounds) {
   directionalLight.shadow.camera.far = maxDim * 3;
   directionalLight.shadow.camera.updateProjectionMatrix();
 
-  console.log('Shadow camera updated for room bounds:', maxDim.toFixed(2));
+  console.log('Shadow camera frustum expanded:', maxDim.toFixed(2));
 }
 
 /**
