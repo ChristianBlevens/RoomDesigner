@@ -808,25 +808,16 @@ export async function loadRoomGeometry(meshUrl, options = {}) {
 
         // Create mesh for raycasting and shadow receiving
         // ShadowMaterial is invisible except where shadows fall
-        // Flip normals so shadows render on the interior surface
+        // renderOrder = -1 ensures shadow-receiving mesh renders before casters
         roomMesh = model.clone();
         roomMesh.traverse((child) => {
           if (child.isMesh) {
-            // Flip normals for shadow receiving on interior
-            const normalAttr = child.geometry.getAttribute('normal');
-            if (normalAttr) {
-              for (let i = 0; i < normalAttr.count; i++) {
-                normalAttr.setX(i, -normalAttr.getX(i));
-                normalAttr.setY(i, -normalAttr.getY(i));
-                normalAttr.setZ(i, -normalAttr.getZ(i));
-              }
-              normalAttr.needsUpdate = true;
-            }
             child.material = new THREE.ShadowMaterial({
-              opacity: 0.4,
+              opacity: 0.5,
               side: THREE.FrontSide
             });
             child.receiveShadow = true;
+            child.renderOrder = -1;
           }
         });
         scene.add(roomMesh);
