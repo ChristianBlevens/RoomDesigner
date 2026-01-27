@@ -39,6 +39,7 @@ image = (
         "libglib2.0-0",
         "git",
     )
+    .run_commands("echo 'cache-bust-v2'")  # Force image rebuild
     .pip_install(
         "torch>=2.0.0",
         "torchvision",
