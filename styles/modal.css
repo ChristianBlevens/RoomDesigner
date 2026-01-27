@@ -1,4 +1,8 @@
-/* Modal Overlay */
+/* ============ Modal CSS with Responsive Variables ============ */
+/* Inherits CSS custom properties from main.css */
+
+/* ============ Modal Overlay ============ */
+
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -12,55 +16,59 @@
   z-index: 500;
   opacity: 1;
   transition: opacity 0.2s;
+  padding: var(--edge-margin);
 }
 
 .modal-overlay.modal-hidden {
   display: none;
 }
 
-/* Modal Content */
+/* ============ Modal Content ============ */
+
 .modal-content {
   background: #fff;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
   position: relative;
-  max-height: 90vh;
+  max-height: calc(100vh - var(--edge-margin) * 2);
+  max-width: calc(100vw - var(--edge-margin) * 2);
   overflow: auto;
 }
 
+/* ============ Orientation Modal ============ */
 
-/* Orientation Modal */
 .orientation-modal-content {
-  padding: 40px 48px;
+  padding: var(--spacing-lg) var(--spacing-lg);
   text-align: center;
-  max-width: 450px;
+  width: min(450px, 95vw);
 }
 
 .orientation-modal-content h2 {
-  font-size: 24px;
+  font-size: var(--font-lg);
   color: #111827;
-  margin-bottom: 12px;
+  margin-bottom: var(--spacing-md);
 }
 
 .orientation-modal-content > p {
   color: #6b7280;
-  margin-bottom: 24px;
+  margin-bottom: var(--spacing-lg);
   line-height: 1.5;
+  font-size: var(--font-md);
 }
 
 .orientation-info {
   background: #f9fafb;
-  border-radius: 8px;
-  padding: 16px;
-  margin-bottom: 24px;
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
   text-align: left;
 }
 
 .orientation-info p {
   color: #4b5563;
-  font-size: 14px;
+  font-size: var(--font-md);
   line-height: 1.5;
-  margin-bottom: 8px;
+  margin-bottom: var(--spacing-sm);
 }
 
 .orientation-info p:last-child {
@@ -78,69 +86,88 @@
 }
 
 .orientation-actions button {
-  padding: 12px 32px;
+  padding: var(--btn-padding) var(--spacing-lg);
+  min-height: var(--btn-size);
   border: none;
-  border-radius: 8px;
-  font-size: 15px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-md);
   font-weight: 500;
   cursor: pointer;
 }
 
-/* Furniture Modal */
+/* ============ Furniture Modal ============ */
+
 .furniture-modal-content {
-  width: 90vw;
-  max-width: 900px;
-  height: 80vh;
-  max-height: 700px;
-  padding: 24px;
+  width: min(900px, 95vw);
+  height: min(700px, 90vh);
+  padding: var(--spacing-lg);
   display: flex;
   flex-direction: column;
 }
 
 .furniture-modal-header {
   display: flex;
-  gap: 12px;
+  gap: var(--spacing-sm);
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: var(--spacing-lg);
   flex-wrap: wrap;
 }
 
 .furniture-modal-header input[type="text"] {
   flex: 1;
-  min-width: 200px;
+  min-width: clamp(120px, 30vw, 200px);
 }
 
 .furniture-modal-header select {
-  min-width: 150px;
+  min-width: clamp(100px, 20vw, 150px);
 }
 
 .furniture-modal-header button {
-  padding: 10px 16px;
+  padding: var(--btn-padding) var(--spacing-md);
+  min-height: var(--btn-size);
   border: none;
-  border-radius: 6px;
-  font-size: 14px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-md);
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
 }
 
-/* Furniture Grid */
+/* ============ Furniture Grid ============ */
+
+:root {
+  --card-size: clamp(100px, 28vw, 150px);
+}
+
+@media (min-width: 768px) {
+  :root {
+    --card-size: clamp(120px, 15vw, 150px);
+  }
+}
+
+@media (min-width: 1200px) {
+  :root {
+    --card-size: clamp(130px, 10vw, 160px);
+  }
+}
+
 .furniture-grid {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 140px));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-size), var(--card-size)));
+  gap: var(--spacing-md);
   overflow-y: auto;
-  padding: 4px;
+  padding: var(--spacing-xs);
   justify-content: center;
+  align-content: start;
 }
 
 .furniture-card {
-  width: 140px;
-  height: 140px;
+  width: var(--card-size);
+  aspect-ratio: 1;
   border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  padding: 8px;
+  border-radius: var(--radius-md);
+  padding: var(--spacing-sm);
   cursor: pointer;
   transition: all 0.2s;
   background: #fff;
@@ -160,12 +187,12 @@
   flex: 1;
   min-height: 0;
   background: #f3f4f6;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 6px;
+  margin-bottom: var(--spacing-xs);
 }
 
 .card-thumbnail img,
@@ -177,7 +204,7 @@
 
 .card-thumbnail .placeholder {
   color: #9ca3af;
-  font-size: 12px;
+  font-size: var(--font-xs);
 }
 
 /* Availability badge */
@@ -187,7 +214,7 @@
   right: 4px;
   background: rgba(34, 197, 94, 0.9);
   color: #fff;
-  font-size: 10px;
+  font-size: var(--font-xs);
   font-weight: 600;
   padding: 2px 5px;
   border-radius: 3px;
@@ -209,10 +236,10 @@
 }
 
 .card-name {
-  font-size: 12px;
+  font-size: var(--font-xs);
   font-weight: 500;
   color: #111827;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -222,17 +249,17 @@
 .card-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 3px;
+  gap: 2px;
   justify-content: center;
   max-height: 18px;
   overflow: hidden;
 }
 
 .card-meta .tag {
-  padding: 1px 5px;
+  padding: 1px 4px;
   background: #e5e7eb;
   border-radius: 3px;
-  font-size: 10px;
+  font-size: clamp(8px, 2vw, 10px);
   color: #4b5563;
 }
 
@@ -245,47 +272,49 @@
   grid-column: 1 / -1;
   text-align: center;
   color: #6b7280;
-  padding: 40px;
+  padding: var(--spacing-lg);
+  font-size: var(--font-md);
 }
 
-/* Entry Editor Modal */
+/* ============ Entry Editor Modal ============ */
+
 #entry-editor-modal {
   z-index: 550;
 }
 
 .entry-editor-content {
-  width: 90vw;
-  max-width: 500px;
-  padding: 24px;
+  width: min(500px, 95vw);
+  padding: var(--spacing-lg);
 }
 
 .entry-editor-content h3 {
-  font-size: 18px;
+  font-size: var(--font-lg);
   color: #111827;
-  margin-bottom: 20px;
+  margin-bottom: var(--spacing-lg);
 }
 
-/* Session Modal */
+/* ============ Session Modal ============ */
+
 .session-modal-content {
-  padding: 24px;
-  min-width: 300px;
+  padding: var(--spacing-lg);
+  width: min(320px, 90vw);
 }
 
 .session-house-info {
   text-align: center;
-  padding-bottom: 16px;
-  margin-bottom: 16px;
+  padding-bottom: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
   border-bottom: 1px solid #e5e7eb;
 }
 
 .session-house-info h3 {
-  font-size: 18px;
+  font-size: var(--font-lg);
   color: #111827;
-  margin: 0 0 4px 0;
+  margin: 0 0 var(--spacing-xs) 0;
 }
 
 .session-dates {
-  font-size: 14px;
+  font-size: var(--font-md);
   color: #6b7280;
   margin: 0;
 }
@@ -293,72 +322,84 @@
 .session-buttons {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--spacing-sm);
 }
 
 .session-buttons button {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  padding: 12px 20px;
+  gap: var(--spacing-sm);
+  padding: var(--btn-padding) var(--spacing-lg);
+  min-height: var(--btn-size);
   border: none;
-  border-radius: 8px;
-  font-size: 14px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-md);
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
 }
 
-/* Confirm Modal */
+.session-buttons button svg {
+  width: var(--icon-size);
+  height: var(--icon-size);
+}
+
+/* ============ Confirm Modal ============ */
+
 .confirm-modal-content {
-  padding: 24px;
+  padding: var(--spacing-lg);
   text-align: center;
-  max-width: 350px;
+  width: min(350px, 90vw);
 }
 
 .confirm-modal-content h3 {
-  font-size: 18px;
+  font-size: var(--font-lg);
   color: #111827;
-  margin-bottom: 12px;
+  margin-bottom: var(--spacing-md);
 }
 
 .confirm-modal-content p {
   color: #6b7280;
-  margin-bottom: 24px;
+  margin-bottom: var(--spacing-lg);
+  font-size: var(--font-md);
 }
 
 .confirm-buttons {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
-  gap: 12px;
+  gap: var(--spacing-sm);
 }
 
 .confirm-buttons button {
-  padding: 10px 24px;
+  padding: var(--btn-padding) var(--spacing-lg);
+  min-height: var(--btn-size);
   border: none;
-  border-radius: 6px;
-  font-size: 14px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-md);
   font-weight: 500;
   cursor: pointer;
 }
 
-/* Multi-select dropdown */
+/* ============ Multi-select Dropdown ============ */
+
 .multi-select-wrapper {
   position: relative;
-  min-width: 150px;
+  min-width: clamp(100px, 20vw, 150px);
 }
 
 .multi-select-display {
   border: 1px solid #d1d5db;
-  padding: 10px 12px;
-  border-radius: 6px;
+  padding: var(--spacing-sm) var(--spacing-md);
+  min-height: var(--btn-size);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   display: flex;
   justify-content: space-between;
   align-items: center;
   background: white;
-  font-size: 14px;
+  font-size: var(--font-md);
 }
 
 .ms-placeholder {
@@ -370,9 +411,9 @@
 }
 
 .ms-arrow {
-  font-size: 10px;
+  font-size: var(--font-xs);
   color: #6b7280;
-  margin-left: 8px;
+  margin-left: var(--spacing-sm);
 }
 
 .multi-select-dropdown {
@@ -382,13 +423,13 @@
   right: 0;
   background: white;
   border: 1px solid #d1d5db;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   display: none;
   flex-direction: column;
   z-index: 600;
   max-height: 250px;
-  margin-top: 4px;
+  margin-top: var(--spacing-xs);
 }
 
 .multi-select-dropdown.open {
@@ -396,16 +437,16 @@
 }
 
 .ms-search {
-  padding: 8px;
+  padding: var(--spacing-sm);
   border-bottom: 1px solid #e5e7eb;
 }
 
 .ms-search input {
   width: 100%;
-  padding: 8px;
+  padding: var(--spacing-sm);
   border: 1px solid #e5e7eb;
-  border-radius: 4px;
-  font-size: 13px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-sm);
 }
 
 .ms-options {
@@ -416,9 +457,10 @@
 .ms-option {
   display: flex;
   align-items: center;
-  padding: 10px 12px;
+  padding: var(--spacing-sm) var(--spacing-md);
+  min-height: var(--btn-size);
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--font-md);
 }
 
 .ms-option:hover {
@@ -426,11 +468,11 @@
 }
 
 .ms-option input {
-  margin-right: 10px;
+  margin-right: var(--spacing-sm);
 }
 
 .ms-actions {
-  padding: 8px;
+  padding: var(--spacing-sm);
   border-top: 1px solid #e5e7eb;
   text-align: right;
 }
@@ -440,55 +482,49 @@
   border: none;
   color: #6b7280;
   cursor: pointer;
-  font-size: 12px;
-  padding: 4px 8px;
+  font-size: var(--font-xs);
+  padding: var(--spacing-xs) var(--spacing-sm);
 }
 
 .ms-clear:hover {
   color: #374151;
 }
 
-/* Modal sizes */
+/* ============ Modal Sizes ============ */
+
 .modal-small {
-  max-width: 400px;
-  padding: 24px;
+  width: min(400px, 90vw);
+  padding: var(--spacing-lg);
 }
 
 .modal-small h2 {
-  font-size: 18px;
+  font-size: var(--font-lg);
   color: #111827;
-  margin-bottom: 20px;
+  margin-bottom: var(--spacing-lg);
 }
 
-/* House editor modal z-index */
-#house-editor-modal {
-  z-index: 550;
-}
+/* Z-index overrides */
+#house-editor-modal { z-index: 550; }
+#room-name-modal { z-index: 560; }
+#confirm-delete-modal { z-index: 600; }
 
-/* Room name modal z-index */
-#room-name-modal {
-  z-index: 560;
-}
+/* ============ Form Error ============ */
 
-/* Confirm delete modal z-index (used as sub-modal) */
-#confirm-delete-modal {
-  z-index: 600;
-}
-
-/* Form error */
 .form-error {
   color: #ef4444;
-  font-size: 13px;
-  margin-top: -8px;
-  margin-bottom: 16px;
+  font-size: var(--font-sm);
+  margin-top: calc(var(--spacing-sm) * -1);
+  margin-bottom: var(--spacing-md);
 }
 
-/* Date inputs */
+/* ============ Date Inputs ============ */
+
 input[type="date"] {
-  padding: 10px 12px;
+  padding: var(--spacing-sm) var(--spacing-md);
+  min-height: var(--btn-size);
   border: 1px solid #d1d5db;
-  border-radius: 6px;
-  font-size: 14px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-md);
   outline: none;
   width: 100%;
   font-family: inherit;
@@ -498,7 +534,8 @@ input[type="date"]:focus {
   border-color: #4f46e5;
 }
 
-/* Orientation Modal - Loading states */
+/* ============ Orientation Modal - Loading States ============ */
+
 .orientation-info.hidden {
   display: none;
 }
@@ -507,8 +544,8 @@ input[type="date"]:focus {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
-  padding: 24px;
+  gap: var(--spacing-md);
+  padding: var(--spacing-lg);
 }
 
 #orientation-loading.hidden {
@@ -516,8 +553,8 @@ input[type="date"]:focus {
 }
 
 .loading-spinner {
-  width: 40px;
-  height: 40px;
+  width: clamp(32px, 10vw, 44px);
+  height: clamp(32px, 10vw, 44px);
   border: 3px solid #e5e7eb;
   border-top-color: #4f46e5;
   border-radius: 50%;
@@ -530,7 +567,7 @@ input[type="date"]:focus {
 
 #orientation-loading-text {
   color: #6b7280;
-  font-size: 14px;
+  font-size: var(--font-md);
   margin: 0;
 }
 
@@ -546,6 +583,7 @@ input[type="date"]:focus {
 #orientation-fov-info {
   color: #4b5563;
   font-family: monospace;
+  font-size: var(--font-sm);
 }
 
 #orientation-error {
@@ -562,18 +600,19 @@ input[type="date"]:focus {
   cursor: not-allowed;
 }
 
-/* Debug Panel */
+/* ============ Debug Panel ============ */
+
 .debug-panel {
   position: fixed;
-  top: 10px;
-  left: 10px;
+  top: var(--edge-margin);
+  left: var(--edge-margin);
   background: rgba(0, 0, 0, 0.85);
   color: #0f0;
-  padding: 12px;
-  border-radius: 8px;
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
   font-family: monospace;
   font-size: 11px;
-  max-width: 400px;
+  max-width: min(400px, 90vw);
   max-height: 80vh;
   overflow: auto;
   z-index: 9999;
@@ -584,9 +623,9 @@ input[type="date"]:focus {
 }
 
 .debug-panel h4 {
-  margin: 0 0 8px 0;
+  margin: 0 0 var(--spacing-sm) 0;
   color: #fff;
-  font-size: 12px;
+  font-size: var(--font-xs);
 }
 
 .debug-panel pre {
@@ -596,28 +635,26 @@ input[type="date"]:focus {
 }
 
 .debug-panel button {
-  margin-top: 8px;
-  padding: 4px 8px;
+  margin-top: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
   background: #333;
   color: #fff;
   border: 1px solid #666;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 10px;
 }
 
 /* ============ Meshy Generation Notifications ============ */
 
-/* Task Tracker Panel */
 .meshy-task-tracker {
   position: fixed;
-  bottom: 60px;
-  right: 16px;
+  bottom: calc(var(--tab-height) + var(--spacing-md));
+  right: var(--edge-margin);
   background: #fff;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-  min-width: 260px;
-  max-width: 300px;
+  width: clamp(240px, 40vw, 300px);
   z-index: 1000;
   overflow: hidden;
 }
@@ -630,18 +667,18 @@ input[type="date"]:focus {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 14px;
+  padding: var(--spacing-md);
   background: #4f46e5;
   color: #fff;
 }
 
 .meshy-tracker-title {
-  font-size: 13px;
+  font-size: var(--font-sm);
   font-weight: 600;
 }
 
 .meshy-tracker-count {
-  font-size: 12px;
+  font-size: var(--font-xs);
   opacity: 0.9;
 }
 
@@ -651,11 +688,11 @@ input[type="date"]:focus {
 }
 
 .meshy-tracker-item {
-  padding: 10px 14px;
+  padding: var(--spacing-sm) var(--spacing-md);
   border-bottom: 1px solid #f3f4f6;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--spacing-xs);
 }
 
 .meshy-tracker-item:last-child {
@@ -669,7 +706,7 @@ input[type="date"]:focus {
 }
 
 .meshy-tracker-item-name {
-  font-size: 12px;
+  font-size: var(--font-xs);
   font-weight: 500;
   color: #374151;
   white-space: nowrap;
@@ -679,7 +716,7 @@ input[type="date"]:focus {
 }
 
 .meshy-tracker-item-status {
-  font-size: 11px;
+  font-size: var(--font-xs);
   color: #6b7280;
   font-family: ui-monospace, monospace;
 }
@@ -698,25 +735,25 @@ input[type="date"]:focus {
   transition: width 0.3s ease;
 }
 
-/* Completion Toasts */
+/* ============ Completion Toasts ============ */
+
 .meshy-toasts {
   position: fixed;
-  bottom: 60px;
-  right: 16px;
+  bottom: calc(var(--tab-height) + var(--spacing-md));
+  right: var(--edge-margin);
   display: flex;
   flex-direction: column-reverse;
-  gap: 8px;
+  gap: var(--spacing-sm);
   z-index: 1001;
   pointer-events: none;
 }
 
 .meshy-toast {
   background: #fff;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  padding: 12px 16px;
-  min-width: 240px;
-  max-width: 300px;
+  padding: var(--spacing-md);
+  width: clamp(220px, 35vw, 280px);
   pointer-events: auto;
   display: flex;
   justify-content: space-between;
@@ -765,13 +802,13 @@ input[type="date"]:focus {
 }
 
 .meshy-toast-title {
-  font-size: 13px;
+  font-size: var(--font-sm);
   font-weight: 600;
   color: #111827;
 }
 
 .meshy-toast-message {
-  font-size: 11px;
+  font-size: var(--font-xs);
   color: #6b7280;
 }
 
@@ -788,10 +825,10 @@ input[type="date"]:focus {
   border: none;
   color: #9ca3af;
   cursor: pointer;
-  padding: 4px;
-  font-size: 18px;
+  padding: var(--spacing-xs);
+  font-size: var(--font-lg);
   line-height: 1;
-  margin-left: 8px;
+  margin-left: var(--spacing-sm);
 }
 
 .meshy-toast-close:hover {
@@ -800,7 +837,7 @@ input[type="date"]:focus {
 
 /* Adjust toast position when tracker is visible */
 .meshy-toasts.with-tracker {
-  bottom: 280px;
+  bottom: calc(var(--tab-height) + 240px);
 }
 
 /* ============ Card Image Hover for 3D Preview ============ */
@@ -809,7 +846,6 @@ input[type="date"]:focus {
   transition: opacity 0.2s ease;
 }
 
-/* When both 2D image and 3D preview exist: hover to swap */
 .card-thumbnail .hover-image {
   position: absolute;
   top: 0;
@@ -827,7 +863,7 @@ input[type="date"]:focus {
   opacity: 0;
 }
 
-/* 3D badge shown when entry has a placeable 3D model */
+/* 3D badge */
 .card-thumbnail.has-3d-model::after {
   content: '3D';
   position: absolute;
@@ -835,93 +871,9 @@ input[type="date"]:focus {
   left: 4px;
   background: rgba(79, 70, 229, 0.9);
   color: #fff;
-  font-size: 9px;
+  font-size: clamp(8px, 2vw, 10px);
   font-weight: 600;
   padding: 2px 4px;
   border-radius: 3px;
   pointer-events: none;
-}
-
-/* ============ Responsive Modal Design ============ */
-
-@media (max-width: 768px) {
-  /* Furniture modal - allow more height */
-  .furniture-modal-content {
-    width: 95vw;
-    height: 85vh;
-    max-height: none;
-    padding: 16px;
-  }
-
-  .furniture-modal-header {
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .furniture-modal-header input[type="text"] {
-    min-width: 150px;
-  }
-
-  .furniture-modal-header select {
-    min-width: 120px;
-  }
-
-  /* Furniture grid - smaller cards on mobile */
-  .furniture-grid {
-    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
-    gap: 10px;
-  }
-
-  .furniture-card {
-    width: auto;
-    height: auto;
-    min-height: 130px;
-  }
-
-  /* Entry editor - full width */
-  .entry-editor-content {
-    width: 95vw;
-    max-width: none;
-    padding: 16px;
-  }
-
-  /* Calendar modal */
-  .calendar-modal-content {
-    width: 95vw;
-    height: 90vh;
-    max-height: none;
-    padding: 16px;
-  }
-}
-
-@media (max-width: 480px) {
-  /* Form buttons - full width */
-  .form-actions {
-    flex-direction: column-reverse;
-  }
-
-  .form-actions button {
-    width: 100%;
-  }
-
-  /* Confirm modal buttons */
-  .confirm-buttons {
-    flex-direction: column-reverse;
-    gap: 8px;
-  }
-
-  .confirm-buttons button {
-    width: 100%;
-  }
-}
-
-/* Ensure touch targets in modals */
-.ms-option {
-  min-height: 44px;
-}
-
-.tag-dropdown-item {
-  min-height: 44px;
-  display: flex;
-  align-items: center;
 }
