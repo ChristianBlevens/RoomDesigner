@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
-from typing import List
+from typing import List, Dict, Optional
+from pydantic import BaseModel
 import uuid
 import json
 import sys
@@ -136,3 +137,114 @@ def delete_furniture(furniture_id: str):
     )
 
     return {"status": "deleted"}
+
+
+# Batch availability models and endpoint
+
+class AvailabilityRequest(BaseModel):
+    entryIds: List[str]
+    currentHouseId: Optional[str] = None
+    currentRoomId: Optional[str] = None
+
+class AvailabilityEntry(BaseModel):
+    available: int
+    total: int
+
+@router.post("/availability", response_model=Dict[str, AvailabilityEntry])
+def get_batch_availability(request: AvailabilityRequest):
+    """
+    Calculate availability for multiple furniture entries in a single request.
+
+    Availability = total quantity - used in overlapping houses (excluding current room).
+    """
+    from db.connection import get_houses_db
+
+    furniture_db = get_furniture_db()
+    houses_db = get_houses_db()
+
+    result = {}
+
+    # Get quantities for all requested entries
+    if not request.entryIds:
+        return result
+
+    placeholders = ','.join(['?' for _ in request.entryIds])
+    rows = furniture_db.execute(
+        f"SELECT id, quantity FROM furniture WHERE id IN ({placeholders})",
+        request.entryIds
+    ).fetchall()
+
+    quantities = {row[0]: row[1] or 1 for row in rows}
+
+    # If no house context, all furniture is available
+    if not request.currentHouseId:
+        for entry_id in request.entryIds:
+            total = quantities.get(entry_id, 0)
+            result[entry_id] = AvailabilityEntry(available=total, total=total)
+        return result
+
+    # Get current house dates
+    current_house = houses_db.execute(
+        "SELECT start_date, end_date FROM houses WHERE id = ?",
+        [request.currentHouseId]
+    ).fetchone()
+
+    if not current_house:
+        for entry_id in request.entryIds:
+            total = quantities.get(entry_id, 0)
+            result[entry_id] = AvailabilityEntry(available=total, total=total)
+        return result
+
+    house_start, house_end = current_house
+
+    # Get all overlapping houses
+    overlapping_houses = houses_db.execute(
+        """
+        SELECT id FROM houses
+        WHERE start_date <= ? AND end_date >= ?
+        """,
+        [house_end, house_start]
+    ).fetchall()
+
+    overlapping_house_ids = [h[0] for h in overlapping_houses]
+
+    if not overlapping_house_ids:
+        for entry_id in request.entryIds:
+            total = quantities.get(entry_id, 0)
+            result[entry_id] = AvailabilityEntry(available=total, total=total)
+        return result
+
+    # Get all rooms in overlapping houses (excluding current room)
+    house_placeholders = ','.join(['?' for _ in overlapping_house_ids])
+    rooms_query = f"""
+        SELECT id, placed_furniture FROM rooms
+        WHERE house_id IN ({house_placeholders})
+    """
+    rooms_params = list(overlapping_house_ids)
+
+    if request.currentRoomId:
+        rooms_query += " AND id != ?"
+        rooms_params.append(request.currentRoomId)
+
+    rooms = houses_db.execute(rooms_query, rooms_params).fetchall()
+
+    # Count placed furniture across all rooms
+    placed_counts = {entry_id: 0 for entry_id in request.entryIds}
+
+    for room_row in rooms:
+        placed_furniture_json = room_row[1]
+        if placed_furniture_json:
+            placed_furniture = json.loads(placed_furniture_json)
+            for furniture in placed_furniture:
+                entry_id = furniture.get('entryId')
+                if entry_id in placed_counts:
+                    placed_counts[entry_id] += 1
+
+    # Calculate availability
+    for entry_id in request.entryIds:
+        total = quantities.get(entry_id, 0)
+        used = placed_counts.get(entry_id, 0)
+        available = max(0, total - used)
+        result[entry_id] = AvailabilityEntry(available=available, total=total)
+
+    return result

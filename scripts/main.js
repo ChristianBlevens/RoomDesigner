@@ -54,7 +54,8 @@ import {
   getRoomsByHouseId,
   getOrphanRooms,
   subscribeToEvents,
-  createRoom
+  createRoom,
+  getBatchAvailability
 } from './api.js';
 import {
   getCurrentHouse,
@@ -65,8 +66,7 @@ import {
   getHouseById,
   getHouseRoomCount,
   formatDateRange,
-  validateHouseDates,
-  getAvailableQuantity
+  validateHouseDates
 } from './houses.js';
 import {
   initCalendar,
@@ -98,6 +98,9 @@ let currentHouseId = null;
 let currentRoomId = null;
 let currentBackgroundImage = null;
 let tagsDropdown = null;
+
+// Previous room state for selective saves (only save changed fields)
+let previousRoomState = null;
 
 // Pending state for multi-step room creation flow
 let pendingRoomImage = null;
@@ -856,7 +859,9 @@ function onTagsFilterChange(selectedTags) {
 
 async function renderFurnitureGrid() {
   const grid = document.getElementById('furniture-grid');
-  const furniture = await getAllFurniture();
+
+  // Get furniture metadata only (no blob downloads yet)
+  const furniture = await getAllFurniture({ includeImages: false, includePreview3d: false });
 
   grid.innerHTML = '';
 
@@ -865,8 +870,28 @@ async function renderFurnitureGrid() {
     return;
   }
 
+  // Get all entry IDs for batch availability
+  const entryIds = furniture.map(item => item.id);
+
+  // Get placed counts for current scene
+  const placedCounts = {};
+  for (const id of entryIds) {
+    placedCounts[id] = getPlacedCountForEntry(id);
+  }
+
+  // Batch fetch availability (single API call instead of N calls)
+  const currentHouse = getCurrentHouse();
+  const availabilityMap = await getBatchAvailability(
+    entryIds,
+    currentHouse?.id || null,
+    currentRoomId,
+    placedCounts
+  );
+
+  // Render cards with availability from batch result
   for (const item of furniture) {
-    const card = await createFurnitureCard(item);
+    const availability = availabilityMap[item.id] || { available: 0, total: item.quantity || 1 };
+    const card = await createFurnitureCard(item, availability);
     grid.appendChild(card);
   }
 }
@@ -876,9 +901,10 @@ async function filterFurnitureGrid() {
   const category = document.getElementById('category-select').value;
   const selectedTags = tagsDropdown.getSelectedTags();
 
-  let furniture = await getAllFurniture();
+  // Use cached furniture list (no new fetch if cache is valid)
+  let furniture = await getAllFurniture({ includeImages: false, includePreview3d: false });
 
-  // Filter by search term
+  // Client-side filtering
   if (searchTerm) {
     furniture = furniture.filter(item => {
       if (item.name.toLowerCase().includes(searchTerm)) return true;
@@ -888,12 +914,10 @@ async function filterFurnitureGrid() {
     });
   }
 
-  // Filter by category
   if (category) {
     furniture = furniture.filter(item => item.category === category);
   }
 
-  // Filter by tags
   if (selectedTags.length > 0) {
     furniture = furniture.filter(item => {
       if (!item.tags) return false;
@@ -910,64 +934,58 @@ async function filterFurnitureGrid() {
     return;
   }
 
+  // Batch availability for filtered items only
+  const entryIds = furniture.map(item => item.id);
+  const placedCounts = {};
+  for (const id of entryIds) {
+    placedCounts[id] = getPlacedCountForEntry(id);
+  }
+
+  const currentHouse = getCurrentHouse();
+  const availabilityMap = await getBatchAvailability(
+    entryIds,
+    currentHouse?.id || null,
+    currentRoomId,
+    placedCounts
+  );
+
   for (const item of furniture) {
-    const card = await createFurnitureCard(item);
+    const availability = availabilityMap[item.id] || { available: 0, total: item.quantity || 1 };
+    const card = await createFurnitureCard(item, availability);
     grid.appendChild(card);
   }
 }
 
-async function createFurnitureCard(item) {
+/**
+ * Create a furniture card element.
+ * @param {Object} item - Furniture entry metadata
+ * @param {Object} availability - Pre-calculated availability { available, total }
+ */
+async function createFurnitureCard(item, availability) {
   const card = document.createElement('div');
   card.className = 'furniture-card';
   card.dataset.id = item.id;
 
-  // Get availability info (include count already placed in current scene)
-  const placedInScene = getPlacedCountForEntry(item.id);
-  const { available, total } = await getAvailableQuantity(item.id, currentRoomId, placedInScene);
+  const { available, total } = availability;
   const isUnavailable = available <= 0;
 
   if (isUnavailable) {
     card.classList.add('unavailable');
   }
 
-  // Thumbnail container (holds image/preview and availability badge)
+  // Thumbnail container
   const thumbnailContainer = document.createElement('div');
   thumbnailContainer.className = 'card-thumbnail';
 
-  const has2dImage = item.image !== null && item.image !== undefined;
-  const has3dPreview = item.preview3d !== null && item.preview3d !== undefined;
-  const has3dModel = item.hasModel === true;
-
-  // Add 3D badge class only if entry has a placeable 3D model
-  if (has3dModel) {
+  if (item.hasModel) {
     thumbnailContainer.classList.add('has-3d-model');
   }
 
-  if (has2dImage && has3dPreview) {
-    // Both exist: show 2D image by default, 3D preview on hover
-    const img2d = document.createElement('img');
-    img2d.src = URL.createObjectURL(item.image);
-    img2d.className = 'default-image';
-    thumbnailContainer.appendChild(img2d);
+  // Show placeholder while images load
+  thumbnailContainer.innerHTML = '<span class="placeholder loading">Loading...</span>';
 
-    const img3d = document.createElement('img');
-    img3d.src = URL.createObjectURL(item.preview3d);
-    img3d.className = 'hover-image';
-    thumbnailContainer.appendChild(img3d);
-  } else if (has2dImage) {
-    // Only 2D image: show it always
-    const img = document.createElement('img');
-    img.src = URL.createObjectURL(item.image);
-    thumbnailContainer.appendChild(img);
-  } else if (has3dPreview) {
-    // Only 3D preview: show it always
-    const img = document.createElement('img');
-    img.src = URL.createObjectURL(item.preview3d);
-    thumbnailContainer.appendChild(img);
-  } else {
-    // Neither: show placeholder
-    thumbnailContainer.innerHTML = '<span class="placeholder">No Image</span>';
-  }
+  // Load images asynchronously (lazy loading)
+  loadCardImages(item.id, thumbnailContainer);
 
   // Availability badge
   const badge = document.createElement('span');
@@ -1020,6 +1038,61 @@ async function createFurnitureCard(item) {
   return card;
 }
 
+/**
+ * Load images for a card asynchronously.
+ * Called after card is rendered for progressive loading.
+ */
+async function loadCardImages(entryId, container) {
+  try {
+    // Fetch entry with images (but not model)
+    const entry = await getFurnitureEntry(entryId, {
+      includeImage: true,
+      includePreview3d: true,
+      includeModel: false,
+    });
+
+    // Remove placeholder
+    const placeholder = container.querySelector('.placeholder');
+    if (placeholder) placeholder.remove();
+
+    const has2dImage = entry.image !== null && entry.image !== undefined;
+    const has3dPreview = entry.preview3d !== null && entry.preview3d !== undefined;
+
+    if (has2dImage && has3dPreview) {
+      // Both exist: show 2D by default, 3D on hover
+      const img2d = document.createElement('img');
+      img2d.src = URL.createObjectURL(entry.image);
+      img2d.className = 'default-image';
+      container.insertBefore(img2d, container.firstChild);
+
+      const img3d = document.createElement('img');
+      img3d.src = URL.createObjectURL(entry.preview3d);
+      img3d.className = 'hover-image';
+      container.insertBefore(img3d, container.firstChild);
+    } else if (has2dImage) {
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(entry.image);
+      container.insertBefore(img, container.firstChild);
+    } else if (has3dPreview) {
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(entry.preview3d);
+      container.insertBefore(img, container.firstChild);
+    } else {
+      const noImage = document.createElement('span');
+      noImage.className = 'placeholder';
+      noImage.textContent = 'No Image';
+      container.insertBefore(noImage, container.firstChild);
+    }
+  } catch (err) {
+    console.warn('Failed to load card images:', err);
+    const placeholder = container.querySelector('.placeholder');
+    if (placeholder) {
+      placeholder.classList.remove('loading');
+      placeholder.textContent = 'Error';
+    }
+  }
+}
+
 // ============ Entry Action Popup ============
 
 function setupEntryActionPopup() {
@@ -1057,10 +1130,21 @@ function setupEntryActionPopup() {
 async function showEntryActionPopup(entryId, event) {
   popupEntryId = entryId;
 
-  const entry = await getFurnitureEntry(entryId);
-  const hasModel = entry && entry.model;
+  // Get entry metadata only (no model blob needed for popup)
+  const entry = await getFurnitureEntry(entryId, { metadataOnly: true });
+  const hasModel = entry && entry.hasModel;
+
   const placedInScene = getPlacedCountForEntry(entryId);
-  const { available } = await getAvailableQuantity(entryId, currentRoomId, placedInScene);
+
+  // Use batch availability (will hit cache if recently fetched)
+  const currentHouse = getCurrentHouse();
+  const availabilityMap = await getBatchAvailability(
+    [entryId],
+    currentHouse?.id || null,
+    currentRoomId,
+    { [entryId]: placedInScene }
+  );
+  const { available } = availabilityMap[entryId] || { available: 0 };
 
   const placeBtn = document.getElementById('popup-place-btn');
   if (hasModel && available > 0) {
@@ -1088,14 +1172,23 @@ function hideEntryActionPopup() {
 
 async function placeEntryInScene(entryId) {
   try {
-    // Check availability before placing (include count already placed in current scene)
+    // Check availability first (uses cache)
     const placedInScene = getPlacedCountForEntry(entryId);
-    const { available } = await getAvailableQuantity(entryId, currentRoomId, placedInScene);
+    const currentHouse = getCurrentHouse();
+    const availabilityMap = await getBatchAvailability(
+      [entryId],
+      currentHouse?.id || null,
+      currentRoomId,
+      { [entryId]: placedInScene }
+    );
+    const { available } = availabilityMap[entryId] || { available: 0 };
+
     if (available <= 0) {
       showError('This item is not available. All stock is in use.');
       return;
     }
 
+    // NOW load the model (only when actually placing)
     const position = getLastClickPosition();
     await placeFurniture(entryId, position);
 
@@ -2557,6 +2650,13 @@ async function loadRoomById(roomId) {
     console.log('Room lighting settings restored');
   }
 
+  // Store initial state for selective saves (only save changed fields)
+  previousRoomState = {
+    id: roomId,
+    placedFurniture: room.placedFurniture || [],
+    lightingSettings: room.lightingSettings || null,
+  };
+
   // Show scene
   showScene();
   deselectFurniture();
@@ -2571,16 +2671,20 @@ async function saveCurrentRoom() {
     id: currentRoomId,
     houseId: currentHouseId,
     name: room.name || 'Untitled Room',
-    backgroundImage: currentBackgroundImage,
-    cameraOrientation: null,
     placedFurniture: collectPlacedFurniture(),
-    // Preserve MoGe data from original room
-    mogeData: room.mogeData || null,
-    // Save lighting settings
     lightingSettings: getLightingSettings()
+    // NOTE: mogeData intentionally omitted - never changes, handled by selective save
   };
 
-  await saveRoom(roomState);
+  // Pass previous state for comparison (only changed fields will be sent)
+  await saveRoom(roomState, previousRoomState);
+
+  // Update previous state for next comparison
+  previousRoomState = {
+    id: currentRoomId,
+    placedFurniture: roomState.placedFurniture,
+    lightingSettings: roomState.lightingSettings,
+  };
 }
 
 async function closeHouse() {
@@ -2590,6 +2694,7 @@ async function closeHouse() {
   currentHouseId = null;
   currentRoomId = null;
   currentBackgroundImage = null;
+  previousRoomState = null;
   setCurrentHouse(null);
   setCurrentLoadedHouse(null);
 

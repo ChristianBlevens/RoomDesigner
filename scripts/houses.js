@@ -117,54 +117,6 @@ export async function getHouseRoomCount(houseId) {
   return rooms.length;
 }
 
-// Calculate available quantity for a furniture entry based on current house context
-// Returns { available, total } where available = total - usedInOverlappingHouses - currentRoomCount
-// currentRoomPlacedCount: count of this entry already placed in the current scene (may be unsaved)
-export async function getAvailableQuantity(entryId, currentRoomId, currentRoomPlacedCount = 0) {
-  const { getFurnitureEntry, getAllHouses, getRoomsByHouseId } = await import('./api.js');
-
-  const entry = await getFurnitureEntry(entryId);
-  if (!entry) {
-    return { available: 0, total: 0 };
-  }
-
-  const total = entry.quantity || 1;
-
-  // If no house is loaded, all furniture is available
-  if (!currentHouse) {
-    return { available: total, total };
-  }
-
-  // Find all houses with overlapping time windows
-  const allHouses = await getAllHouses();
-  const overlappingHouses = allHouses.filter(house =>
-    house.startDate <= currentHouse.endDate && house.endDate >= currentHouse.startDate
-  );
-
-  // Count total placed instances across all rooms in overlapping houses (excluding current room)
-  let otherRoomsCount = 0;
-
-  for (const house of overlappingHouses) {
-    const rooms = await getRoomsByHouseId(house.id);
-
-    for (const room of rooms) {
-      // Skip current room - we use the live scene count instead
-      if (room.id === currentRoomId) {
-        continue;
-      }
-
-      if (room.placedFurniture) {
-        const count = room.placedFurniture.filter(f => f.entryId === entryId).length;
-        otherRoomsCount += count;
-      }
-    }
-  }
-
-  // Available = total - used in other rooms - already placed in current room
-  const available = Math.max(0, total - otherRoomsCount - currentRoomPlacedCount);
-  return { available, total };
-}
-
 // Format date range for display
 export function formatDateRange(startDate, endDate) {
   const start = new Date(startDate);

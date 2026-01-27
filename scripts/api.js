@@ -1,5 +1,13 @@
 // API client for RoomDesigner server communication
 
+import {
+  getCached,
+  setCached,
+  invalidateFurnitureCache,
+  invalidateHouseCache,
+  invalidateRoomCache,
+} from './cache.js';
+
 // Detect base path from current URL (handles /room/ prefix when behind nginx proxy)
 // /room/ -> /room/api, / -> /api
 const BASE_PATH = window.location.pathname.replace(/\/+$/, '').replace(/\/index\.html$/i, '');
@@ -59,9 +67,17 @@ async function uploadFile(path, blob, filename = 'file') {
 
 // ============ Houses ============
 
-export async function getAllHouses() {
+export async function getAllHouses(skipCache = false) {
+  if (!skipCache) {
+    const cached = getCached('houses');
+    if (cached) return cached;
+  }
+
   const response = await apiFetch('/houses/');
-  return response.json();
+  const houses = await response.json();
+
+  setCached('houses', houses);
+  return houses;
 }
 
 export async function getHouse(id) {
@@ -86,6 +102,7 @@ export async function saveHouse(house) {
         method: 'PUT',
         body: JSON.stringify(payload)
       });
+      invalidateHouseCache();
       return house.id;
     } catch (e) {
       // Doesn't exist, create
@@ -97,11 +114,13 @@ export async function saveHouse(house) {
     body: JSON.stringify(payload)
   });
   const created = await response.json();
+  invalidateHouseCache();
   return created.id;
 }
 
 export async function deleteHouse(id) {
   await apiFetch(`/houses/${id}`, { method: 'DELETE' });
+  invalidateHouseCache();
 }
 
 // ============ Rooms ============
@@ -123,10 +142,20 @@ export async function loadRoom(roomId) {
   return await transformRoomWithBlobs(room);
 }
 
-export async function getRoomsByHouseId(houseId) {
+export async function getRoomsByHouseId(houseId, skipCache = false) {
+  const cacheKey = `roomsByHouse:${houseId}`;
+
+  if (!skipCache) {
+    const cached = getCached(cacheKey);
+    if (cached) return cached;
+  }
+
   const response = await apiFetch(`/rooms/house/${houseId}`);
   const rooms = await response.json();
-  return rooms.map(transformRoomResponse);
+  const transformed = rooms.map(transformRoomResponse);
+
+  setCached(cacheKey, transformed);
+  return transformed;
 }
 
 export async function getOrphanRooms() {
@@ -171,30 +200,72 @@ export async function updateRoom(roomId, updates) {
 }
 
 /**
- * Save room state (for existing rooms only - updating furniture/lighting).
+ * Save room state (for existing rooms only).
+ * Only sends fields that have actually changed.
+ *
+ * @param {Object} roomState - Current room state
+ * @param {Object} previousState - Previous room state (for comparison, optional)
+ * @returns {Promise<string>} Room ID
  */
-export async function saveRoom(roomState) {
+export async function saveRoom(roomState, previousState = null) {
   if (!roomState.id) {
     throw new Error('Use createRoom() for new rooms');
   }
 
-  const payload = {
-    name: roomState.name,
-    placedFurniture: roomState.placedFurniture || [],
-    mogeData: roomState.mogeData || null,
-    lightingSettings: roomState.lightingSettings || null
-  };
+  // Build payload with only changed fields
+  const payload = {};
+  let hasChanges = false;
+
+  // Name - always include if provided
+  if (roomState.name !== undefined) {
+    payload.name = roomState.name;
+    hasChanges = true;
+  }
+
+  // Placed furniture - compare JSON if previousState provided
+  if (roomState.placedFurniture !== undefined) {
+    const currentJson = JSON.stringify(roomState.placedFurniture || []);
+    const previousJson = previousState ? JSON.stringify(previousState.placedFurniture || []) : null;
+
+    if (!previousState || currentJson !== previousJson) {
+      payload.placedFurniture = roomState.placedFurniture || [];
+      hasChanges = true;
+    }
+  }
+
+  // Lighting settings - compare if previousState provided
+  if (roomState.lightingSettings !== undefined) {
+    const currentJson = JSON.stringify(roomState.lightingSettings || null);
+    const previousJson = previousState ? JSON.stringify(previousState.lightingSettings || null) : null;
+
+    if (!previousState || currentJson !== previousJson) {
+      payload.lightingSettings = roomState.lightingSettings || null;
+      hasChanges = true;
+    }
+  }
+
+  // NOTE: mogeData intentionally NOT included - it never changes after creation
+
+  // Skip request if nothing changed
+  if (!hasChanges) {
+    console.log('Room save skipped - no changes detected');
+    return roomState.id;
+  }
 
   await apiFetch(`/rooms/${roomState.id}`, {
     method: 'PUT',
     body: JSON.stringify(payload)
   });
 
+  // Invalidate room cache
+  invalidateRoomCache(roomState.houseId);
+
   return roomState.id;
 }
 
 export async function deleteRoom(roomId) {
   await apiFetch(`/rooms/${roomId}`, { method: 'DELETE' });
+  invalidateRoomCache();
 }
 
 function transformRoomResponse(room) {
@@ -223,36 +294,162 @@ async function transformRoomWithBlobs(room) {
 
 // ============ Furniture ============
 
-export async function getAllFurniture() {
+/**
+ * Get all furniture entries.
+ * By default returns metadata only (no blob downloads).
+ * Use includeImages: true for thumbnail display.
+ *
+ * @param {Object} options
+ * @param {boolean} options.includeImages - Whether to fetch image blobs (default: false)
+ * @param {boolean} options.includePreview3d - Whether to fetch 3D preview blobs (default: false)
+ * @param {boolean} options.skipCache - Force fresh fetch (default: false)
+ * @returns {Promise<Array>} Array of furniture entries
+ */
+export async function getAllFurniture({ includeImages = false, includePreview3d = false, skipCache = false } = {}) {
+  // Check cache for metadata
+  if (!skipCache) {
+    const cached = getCached('furnitureList');
+    if (cached) {
+      // If we need blobs and don't have them, fetch them
+      if (includeImages || includePreview3d) {
+        return await enrichFurnitureWithBlobs(cached, { includeImages, includePreview3d });
+      }
+      return cached;
+    }
+  }
+
+  // Fetch metadata from server
   const response = await apiFetch('/furniture/');
   const entries = await response.json();
 
-  return Promise.all(entries.map(async (entry) => {
+  // Transform and cache metadata (store original URLs for later blob fetching)
+  const transformed = entries.map(entry => {
     const result = transformFurnitureResponse(entry);
-    if (entry.imageUrl) {
-      result.image = await fetchAsBlob(entry.imageUrl);
-    }
-    if (entry.preview3dUrl) {
-      result.preview3d = await fetchAsBlob(entry.preview3dUrl);
-    }
+    result._imageUrl = entry.imageUrl;
+    result._preview3dUrl = entry.preview3dUrl;
+    result._modelUrl = entry.modelUrl;
     return result;
-  }));
+  });
+  setCached('furnitureList', transformed);
+
+  // Also cache individual entries
+  for (const entry of transformed) {
+    setCached(`furnitureEntry:${entry.id}`, entry);
+  }
+
+  // Fetch blobs if requested
+  if (includeImages || includePreview3d) {
+    return await enrichFurnitureWithBlobs(transformed, { includeImages, includePreview3d });
+  }
+
+  return transformed;
 }
 
-export async function getFurnitureEntry(id) {
-  const response = await apiFetch(`/furniture/${id}`);
-  const entry = await response.json();
+/**
+ * Enrich furniture entries with binary blobs.
+ * Fetches in parallel with concurrency limit.
+ */
+async function enrichFurnitureWithBlobs(entries, { includeImages = false, includePreview3d = false }) {
+  const CONCURRENT_FETCHES = 6;
+  const results = entries.map(e => ({ ...e }));
 
-  const result = transformFurnitureResponse(entry);
+  const fetchTasks = [];
 
-  if (entry.imageUrl) {
-    result.image = await fetchAsBlob(entry.imageUrl);
+  for (let i = 0; i < results.length; i++) {
+    const entry = results[i];
+
+    if (includeImages && entry._imageUrl && !entry.image) {
+      fetchTasks.push({
+        index: i,
+        type: 'image',
+        url: entry._imageUrl,
+      });
+    }
+
+    if (includePreview3d && entry._preview3dUrl && !entry.preview3d) {
+      fetchTasks.push({
+        index: i,
+        type: 'preview3d',
+        url: entry._preview3dUrl,
+      });
+    }
   }
-  if (entry.preview3dUrl) {
-    result.preview3d = await fetchAsBlob(entry.preview3dUrl);
+
+  // Process in batches
+  for (let i = 0; i < fetchTasks.length; i += CONCURRENT_FETCHES) {
+    const batch = fetchTasks.slice(i, i + CONCURRENT_FETCHES);
+    const blobPromises = batch.map(async task => {
+      const blob = await fetchAsBlob(task.url);
+      return { ...task, blob };
+    });
+
+    const blobResults = await Promise.all(blobPromises);
+
+    for (const result of blobResults) {
+      if (result.blob) {
+        results[result.index][result.type] = result.blob;
+      }
+    }
   }
-  if (entry.modelUrl) {
-    result.model = await fetchAsBlob(entry.modelUrl);
+
+  return results;
+}
+
+/**
+ * Get a single furniture entry by ID.
+ *
+ * @param {string} id - Furniture entry ID
+ * @param {Object} options
+ * @param {boolean} options.includeImage - Fetch image blob (default: true for backwards compat)
+ * @param {boolean} options.includePreview3d - Fetch 3D preview blob (default: true)
+ * @param {boolean} options.includeModel - Fetch model blob (default: true)
+ * @param {boolean} options.metadataOnly - Only fetch metadata, no blobs (default: false)
+ * @param {boolean} options.skipCache - Force fresh fetch (default: false)
+ * @returns {Promise<Object>} Furniture entry
+ */
+export async function getFurnitureEntry(id, {
+  includeImage = true,
+  includePreview3d = true,
+  includeModel = true,
+  metadataOnly = false,
+  skipCache = false,
+} = {}) {
+  // Check cache for metadata
+  const cacheKey = `furnitureEntry:${id}`;
+  let entry = skipCache ? null : getCached(cacheKey);
+
+  if (!entry) {
+    // Fetch metadata from server
+    const response = await apiFetch(`/furniture/${id}`);
+    const data = await response.json();
+    entry = transformFurnitureResponse(data);
+
+    // Store raw URLs for blob fetching
+    entry._imageUrl = data.imageUrl;
+    entry._preview3dUrl = data.preview3dUrl;
+    entry._modelUrl = data.modelUrl;
+
+    setCached(cacheKey, entry);
+  }
+
+  // Return metadata only if requested
+  if (metadataOnly) {
+    return entry;
+  }
+
+  // Fetch blobs as needed
+  const result = { ...entry };
+
+  if (includeImage && entry._imageUrl && !result.image) {
+    result.image = await fetchAsBlob(entry._imageUrl);
+  }
+
+  if (includePreview3d && entry._preview3dUrl && !result.preview3d) {
+    result.preview3d = await fetchAsBlob(entry._preview3dUrl);
+  }
+
+  if (includeModel && entry._modelUrl && !result.model) {
+    result.model = await fetchAsBlob(entry._modelUrl);
   }
 
   return result;
@@ -300,21 +497,103 @@ export async function saveFurnitureEntry(entry) {
     await uploadFile(`/files/furniture/${entryId}/model`, entry.model, 'model.glb');
   }
 
+  // Invalidate caches after save
+  invalidateFurnitureCache();
+
   return entryId;
 }
 
 export async function deleteFurnitureEntry(id) {
   await apiFetch(`/furniture/${id}`, { method: 'DELETE' });
+  invalidateFurnitureCache();
 }
 
-export async function getAllCategories() {
+export async function getAllCategories(skipCache = false) {
+  if (!skipCache) {
+    const cached = getCached('categories');
+    if (cached) return cached;
+  }
+
   const response = await apiFetch('/furniture/categories');
-  return response.json();
+  const categories = await response.json();
+
+  setCached('categories', categories);
+  return categories;
 }
 
-export async function getAllTags() {
+export async function getAllTags(skipCache = false) {
+  if (!skipCache) {
+    const cached = getCached('tags');
+    if (cached) return cached;
+  }
+
   const response = await apiFetch('/furniture/tags');
-  return response.json();
+  const tags = await response.json();
+
+  setCached('tags', tags);
+  return tags;
+}
+
+/**
+ * Batch fetch availability for multiple furniture entries.
+ * Replaces N calls to getAvailableQuantity with a single server call.
+ *
+ * @param {string[]} entryIds - Array of furniture entry IDs
+ * @param {string} currentHouseId - Current house ID for overlap calculation
+ * @param {string} currentRoomId - Current room ID to exclude from counts
+ * @param {Object} currentRoomPlacedCounts - Map of entryId -> count already placed in scene
+ * @returns {Object} Map of entryId -> { available, total }
+ */
+export async function getBatchAvailability(entryIds, currentHouseId, currentRoomId, currentRoomPlacedCounts = {}) {
+  if (!entryIds || entryIds.length === 0) {
+    return {};
+  }
+
+  // Check cache first
+  const cacheKey = `availability:${currentHouseId || 'none'}:${currentRoomId || 'none'}`;
+  const cached = getCached(cacheKey, 'derived');
+
+  // If we have a cached result and it includes all requested IDs, use it
+  if (cached && entryIds.every(id => cached.hasOwnProperty(id))) {
+    // Adjust for current room placed counts (not in cache)
+    const result = {};
+    for (const id of entryIds) {
+      const placedInScene = currentRoomPlacedCounts[id] || 0;
+      result[id] = {
+        available: Math.max(0, cached[id].available - placedInScene),
+        total: cached[id].total,
+      };
+    }
+    return result;
+  }
+
+  // Fetch from server
+  const response = await apiFetch('/furniture/availability', {
+    method: 'POST',
+    body: JSON.stringify({
+      entryIds,
+      currentHouseId,
+      currentRoomId,
+    }),
+  });
+
+  const serverResult = await response.json();
+
+  // Cache the server result (before adjusting for current room)
+  setCached(cacheKey, serverResult, 'derived');
+
+  // Adjust for current room placed counts
+  const result = {};
+  for (const id of entryIds) {
+    const placedInScene = currentRoomPlacedCounts[id] || 0;
+    const entry = serverResult[id] || { available: 0, total: 0 };
+    result[id] = {
+      available: Math.max(0, entry.available - placedInScene),
+      total: entry.total,
+    };
+  }
+
+  return result;
 }
 
 function transformFurnitureResponse(entry) {
