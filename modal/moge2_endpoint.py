@@ -47,7 +47,6 @@ image = (
         "scipy",
         "pillow",
         "trimesh[easy]",
-        "meshlib",
         "einops",
         "timm>=0.9.0",
         "huggingface-hub",
@@ -203,36 +202,17 @@ class MoGe2Inference:
 
         print(f"Original mesh: {len(faces)} faces, {len(vertices)} vertices")
 
-        # Decimation using MeshLib
-        # High error tolerance (point clouds are bumpy, real walls are flat)
-        # Tight angle preservation (keeps floor-wall-ceiling transitions sharp)
-        import meshlib.mrmeshpy as mrmeshpy
-        import meshlib.mrmeshnumpy as mrmeshnumpy
+        # Create trimesh for simplification
+        mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
 
-        mr_mesh = mrmeshnumpy.meshFromFacesVerts(
-            faces.astype(np.int32),
-            vertices.astype(np.float32)
-        )
-        mr_mesh.packOptimally()
-
-        settings = mrmeshpy.DecimateSettings()
-        settings.maxError = 0.05  # High tolerance - bumpy point cloud, flat real walls
-        settings.maxDeletedFaces = len(faces) - 500  # Target ~500 faces
-        settings.maxAngleChange = np.pi / 18  # 10 degrees - preserve surface transitions
-
-        result = mrmeshpy.decimateMesh(mr_mesh, settings)
-        print(f"Decimation removed {result.facesDeleted} faces, {result.vertsDeleted} vertices")
-
-        vertices = mrmeshnumpy.getNumpyVerts(mr_mesh).astype(np.float32)
-        faces = mrmeshnumpy.getNumpyFaces(mr_mesh.topology).astype(np.int32)
-        print(f"Decimated to {len(faces)} faces, {len(vertices)} vertices")
-
-        # Create trimesh (geometry only, no texture - used for invisible raycasting)
-        mesh = trimesh.Trimesh(
-            vertices=vertices,
-            faces=faces,
-            process=False
-        )
+        # Simplify using quadric decimation
+        # Target ~2000 faces (reasonable for raycasting, preserves room shape)
+        target_faces = min(2000, len(faces))
+        if len(faces) > target_faces:
+            mesh = mesh.simplify_quadric_decimation(target_faces)
+            print(f"Simplified to {len(mesh.faces)} faces, {len(mesh.vertices)} vertices")
+        else:
+            print(f"Mesh already has {len(faces)} faces, no simplification needed")
 
         # Validate mesh has actual depth
         bounds = mesh.bounds
@@ -245,7 +225,7 @@ class MoGe2Inference:
 
         # Clean up mesh after decimation
         mesh.remove_unreferenced_vertices()
-        mesh.remove_degenerate_faces()
+        mesh.update_faces(mesh.nondegenerate_faces())
         mesh.fix_normals()
         # No smoothing - we want sharp edges at floor-wall transitions
 
