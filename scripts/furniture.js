@@ -34,6 +34,7 @@ let hoveredObject = null;
 let isDragging = false;
 let mouseDownPosition = null;
 let dragStartPosition = null;
+let activePointerId = null;
 
 // Transform tracking for undo
 let transformStartPosition = null;
@@ -370,14 +371,14 @@ export function initFurnitureInteraction() {
   const canvas = renderer.domElement;
   gizmoMenu = document.getElementById('gizmo-menu');
 
-  // Mouse down
-  canvas.addEventListener('mousedown', onMouseDown);
+  // Pointer events (unified mouse + touch + pen)
+  canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointerup', onPointerUp);
+  canvas.addEventListener('pointercancel', onPointerCancel);
 
-  // Mouse move
-  canvas.addEventListener('mousemove', onMouseMove);
-
-  // Mouse up
-  canvas.addEventListener('mouseup', onMouseUp);
+  // Prevent default touch behaviors on canvas
+  canvas.style.touchAction = 'none';
 
   // Setup gizmo buttons
   setupGizmoButtons();
@@ -389,9 +390,15 @@ export function initFurnitureInteraction() {
   window.addEventListener('keydown', onKeyDown);
 }
 
-function onMouseDown(event) {
-  if (event.button !== 0) return;
+function onPointerDown(event) {
+  // Only handle primary pointer (left mouse button or first touch)
+  if (!event.isPrimary) return;
+  if (event.pointerType === 'mouse' && event.button !== 0) return;
   if (modalManager.isModalOpen()) return;
+
+  // Capture pointer for reliable tracking during drag
+  event.target.setPointerCapture(event.pointerId);
+  activePointerId = event.pointerId;
 
   mouseDownPosition = { x: event.clientX, y: event.clientY };
 
@@ -424,7 +431,9 @@ function onMouseDown(event) {
   }
 }
 
-function onMouseMove(event) {
+function onPointerMove(event) {
+  // Only track the active pointer
+  if (activePointerId !== null && event.pointerId !== activePointerId) return;
   if (!mouseDownPosition || !hoveredObject) return;
   if (modalManager.isModalOpen()) return;
 
@@ -503,7 +512,15 @@ function onMouseMove(event) {
   }
 }
 
-function onMouseUp(event) {
+function onPointerUp(event) {
+  // Only handle the active pointer
+  if (activePointerId !== null && event.pointerId !== activePointerId) return;
+
+  // Release pointer capture
+  if (event.target.hasPointerCapture && event.target.hasPointerCapture(event.pointerId)) {
+    event.target.releasePointerCapture(event.pointerId);
+  }
+
   if (modalManager.isModalOpen()) {
     resetMouseState();
     return;
@@ -552,10 +569,22 @@ function onMouseUp(event) {
   resetMouseState();
 }
 
+function onPointerCancel(event) {
+  // Handle interruptions (incoming call, etc.)
+  if (activePointerId !== null && event.pointerId !== activePointerId) return;
+
+  if (event.target.hasPointerCapture && event.target.hasPointerCapture(event.pointerId)) {
+    event.target.releasePointerCapture(event.pointerId);
+  }
+
+  resetMouseState();
+}
+
 function resetMouseState() {
   isDragging = false;
   mouseDownPosition = null;
   dragStartPosition = null;
+  activePointerId = null;
   clearNormalHistory();
 
   // Clear the previous surface normal tracking

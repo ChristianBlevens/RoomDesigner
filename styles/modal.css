@@ -841,3 +841,87 @@ input[type="date"]:focus {
   border-radius: 3px;
   pointer-events: none;
 }
+
+/* ============ Responsive Modal Design ============ */
+
+@media (max-width: 768px) {
+  /* Furniture modal - allow more height */
+  .furniture-modal-content {
+    width: 95vw;
+    height: 85vh;
+    max-height: none;
+    padding: 16px;
+  }
+
+  .furniture-modal-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .furniture-modal-header input[type="text"] {
+    min-width: 150px;
+  }
+
+  .furniture-modal-header select {
+    min-width: 120px;
+  }
+
+  /* Furniture grid - smaller cards on mobile */
+  .furniture-grid {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 10px;
+  }
+
+  .furniture-card {
+    width: auto;
+    height: auto;
+    min-height: 130px;
+  }
+
+  /* Entry editor - full width */
+  .entry-editor-content {
+    width: 95vw;
+    max-width: none;
+    padding: 16px;
+  }
+
+  /* Calendar modal */
+  .calendar-modal-content {
+    width: 95vw;
+    height: 90vh;
+    max-height: none;
+    padding: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Form buttons - full width */
+  .form-actions {
+    flex-direction: column-reverse;
+  }
+
+  .form-actions button {
+    width: 100%;
+  }
+
+  /* Confirm modal buttons */
+  .confirm-buttons {
+    flex-direction: column-reverse;
+    gap: 8px;
+  }
+
+  .confirm-buttons button {
+    width: 100%;
+  }
+}
+
+/* Ensure touch targets in modals */
+.ms-option {
+  min-height: 44px;
+}
+
+.tag-dropdown-item {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}

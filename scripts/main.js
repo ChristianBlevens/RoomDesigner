@@ -426,10 +426,14 @@ function setupLightingControls() {
     setLightingGizmoHover(null);
   }
 
-  // Mouse down - start dragging or start new direction
-  canvas.addEventListener('mousedown', (event) => {
+  // Track active lighting pointer for touch/pen support
+  let lightingPointerId = null;
+
+  // Pointer down - start dragging or start new direction
+  canvas.addEventListener('pointerdown', (event) => {
     if (!lightingPanelOpen) return;
-    if (event.button !== 0) return;
+    if (!event.isPrimary) return;
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
     if (modalManager.isModalOpen()) return;
 
     // Check if clicking on gizmo handle (for dragging existing)
@@ -437,6 +441,8 @@ function setupLightingControls() {
       const gizmoHit = raycastLightingGizmo(event);
       if (gizmoHit) {
         lightingDraggingHandle = gizmoHit.type;
+        lightingPointerId = event.pointerId;
+        event.target.setPointerCapture(event.pointerId);
         event.preventDefault();
         event.stopPropagation();
         return;
@@ -453,18 +459,22 @@ function setupLightingControls() {
         updateLightingGizmo();
         directionStatus.textContent = 'Drag to set target, release to confirm';
         lightingDraggingHandle = 'target'; // Now dragging the target
+        lightingPointerId = event.pointerId;
+        event.target.setPointerCapture(event.pointerId);
         event.preventDefault();
         event.stopPropagation();
       }
     }
   });
 
-  // Mouse move - update hover or drag gizmo
-  canvas.addEventListener('mousemove', (event) => {
+  // Pointer move - update hover or drag gizmo
+  canvas.addEventListener('pointermove', (event) => {
     if (!lightingPanelOpen) return;
 
     // If dragging a handle, update its position
     if (lightingDraggingHandle) {
+      if (lightingPointerId !== null && event.pointerId !== lightingPointerId) return;
+
       const hit = raycastRoomSurface(event);
       if (hit) {
         if (lightingDraggingHandle === 'source') {
@@ -477,7 +487,8 @@ function setupLightingControls() {
     }
 
     // Update hover state on gizmo handles (only when not in direction mode)
-    if (!lightingDirectionMode) {
+    // Skip hover feedback on touch devices (no hover concept)
+    if (!lightingDirectionMode && event.pointerType !== 'touch') {
       const gizmoHit = raycastLightingGizmo(event);
       if (gizmoHit) {
         setLightingGizmoHover(gizmoHit.type);
@@ -489,11 +500,17 @@ function setupLightingControls() {
     }
   });
 
-  // Mouse up - finish dragging
-  canvas.addEventListener('mouseup', (event) => {
+  // Pointer up - finish dragging
+  canvas.addEventListener('pointerup', (event) => {
     if (!lightingPanelOpen) return;
+    if (lightingPointerId !== null && event.pointerId !== lightingPointerId) return;
 
     if (lightingDraggingHandle) {
+      // Release pointer capture
+      if (event.target.hasPointerCapture && event.target.hasPointerCapture(event.pointerId)) {
+        event.target.releasePointerCapture(event.pointerId);
+      }
+
       // Finish dragging
       const hit = raycastRoomSurface(event);
       if (hit) {
@@ -519,9 +536,24 @@ function setupLightingControls() {
       }
 
       lightingDraggingHandle = null;
+      lightingPointerId = null;
       canvas.style.cursor = '';
       setLightingGizmoHover(null);
     }
+  });
+
+  // Pointer cancel - handle interruptions
+  canvas.addEventListener('pointercancel', (event) => {
+    if (lightingPointerId !== null && event.pointerId !== lightingPointerId) return;
+
+    if (event.target.hasPointerCapture && event.target.hasPointerCapture(event.pointerId)) {
+      event.target.releasePointerCapture(event.pointerId);
+    }
+
+    lightingDraggingHandle = null;
+    lightingPointerId = null;
+    canvas.style.cursor = '';
+    setLightingGizmoHover(null);
   });
 
   // Escape key cancels direction mode

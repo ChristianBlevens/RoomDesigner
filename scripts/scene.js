@@ -976,6 +976,9 @@ export function initScene() {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   container.appendChild(renderer.domElement);
 
+  // Prevent default touch behaviors on canvas (scrolling, zooming)
+  renderer.domElement.style.touchAction = 'none';
+
   // Lighting
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
   scene.add(ambientLight);
