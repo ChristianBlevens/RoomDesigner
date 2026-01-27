@@ -203,8 +203,97 @@ class MoGe2Inference:
 
         print(f"Original mesh: {len(faces)} faces, {len(vertices)} vertices")
 
-        # Adaptive decimation using MeshLib
-        # Uses error-based stopping and preserves sharp edges (floor-wall transitions)
+        # Manhattan World simplification
+        # Detect room's principal axes and snap faces to create clean planar regions
+        mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+
+        # Compute face normals and areas
+        face_normals = mesh.face_normals
+        face_areas = mesh.area_faces
+
+        # Weight normals by face area for clustering
+        weighted_normals = face_normals * face_areas[:, np.newaxis]
+
+        # Use k-means to find 6 dominant directions (±axis1, ±axis2, ±axis3)
+        from scipy.cluster.vq import kmeans2
+
+        # Normalize weighted normals for clustering
+        norm_magnitudes = np.linalg.norm(weighted_normals, axis=1, keepdims=True)
+        norm_magnitudes[norm_magnitudes < 1e-10] = 1  # Avoid division by zero
+        normalized = weighted_normals / norm_magnitudes
+
+        # Find 6 cluster centers (the dominant directions)
+        try:
+            centroids, labels = kmeans2(normalized.astype(np.float64), 6, minit='++', iter=20)
+            # Normalize centroids to unit vectors
+            centroids = centroids / np.linalg.norm(centroids, axis=1, keepdims=True)
+            print(f"Detected {len(centroids)} dominant directions")
+        except Exception as e:
+            print(f"K-means failed ({e}), using axis-aligned directions")
+            centroids = np.array([
+                [1, 0, 0], [-1, 0, 0],
+                [0, 1, 0], [0, -1, 0],
+                [0, 0, 1], [0, 0, -1]
+            ], dtype=np.float64)
+            labels = np.argmax(face_normals @ centroids.T, axis=1)
+
+        # Snap each face normal to nearest centroid
+        dots = face_normals @ centroids.T
+        snapped_labels = np.argmax(dots, axis=1)
+
+        # Count faces per direction
+        unique, counts = np.unique(snapped_labels, return_counts=True)
+        for u, c in zip(unique, counts):
+            print(f"  Direction {u}: {c} faces ({100*c/len(faces):.1f}%)")
+
+        # Planar snapping: project vertices onto fitted planes per region
+        # This smooths within planar regions while preserving sharp edges
+        vertices_new = vertices.copy()
+
+        # Find which vertices belong to which regions (a vertex can belong to multiple)
+        vertex_regions = [set() for _ in range(len(vertices))]
+        for face_idx, label in enumerate(snapped_labels):
+            for vert_idx in faces[face_idx]:
+                vertex_regions[vert_idx].add(label)
+
+        # Identify boundary vertices (belong to multiple regions)
+        boundary_verts = set(i for i, regions in enumerate(vertex_regions) if len(regions) > 1)
+        print(f"Boundary vertices (preserved): {len(boundary_verts)}")
+
+        # For each region, fit a plane and snap interior vertices
+        for region_label in unique:
+            # Get faces in this region
+            region_face_mask = snapped_labels == region_label
+            region_faces = faces[region_face_mask]
+
+            # Get unique vertices in this region
+            region_vert_indices = np.unique(region_faces.flatten())
+
+            # Filter to interior vertices only (not on boundaries)
+            interior_verts = [v for v in region_vert_indices if v not in boundary_verts]
+            if len(interior_verts) < 3:
+                continue
+
+            # Get vertex positions
+            region_verts = vertices[interior_verts]
+
+            # Fit plane using SVD (find best-fit plane)
+            centroid = region_verts.mean(axis=0)
+            centered = region_verts - centroid
+            _, _, vh = np.linalg.svd(centered)
+            normal = vh[-1]  # Normal is the smallest singular vector
+            normal = normal / np.linalg.norm(normal)
+
+            # Project vertices onto plane
+            for v_idx in interior_verts:
+                v = vertices[v_idx]
+                dist = np.dot(v - centroid, normal)
+                vertices_new[v_idx] = v - dist * normal
+
+        vertices = vertices_new
+        print(f"Planar snapping complete")
+
+        # Adaptive decimation using MeshLib with tighter angle preservation
         import meshlib.mrmeshpy as mrmeshpy
         import meshlib.mrmeshnumpy as mrmeshnumpy
 
@@ -215,11 +304,11 @@ class MoGe2Inference:
         )
         mr_mesh.packOptimally()
 
-        # Configure decimation settings
+        # Configure decimation settings - more aggressive error, tighter angle
         settings = mrmeshpy.DecimateSettings()
-        settings.maxError = 0.005  # Max geometric deviation - adaptive stopping
-        settings.maxDeletedFaces = len(faces) - 5000  # Keep at least 5000 faces
-        settings.maxAngleChange = np.pi / 6  # 30 degrees - preserve sharp edges like floor-wall transitions
+        settings.maxError = 0.02  # Higher error threshold - OK since we have planar regions
+        settings.maxDeletedFaces = len(faces) - 500  # Target ~500 faces for simple room
+        settings.maxAngleChange = np.pi / 12  # 15 degrees - preserve edges between planar regions
 
         # Run decimation
         result = mrmeshpy.decimateMesh(mr_mesh, settings)
@@ -246,9 +335,12 @@ class MoGe2Inference:
         if np.allclose(mesh_size, 0, atol=1e-6):
             return {"error": "Mesh generation failed - all vertices collapsed to single point"}
 
-        # Fix normals and apply smoothing
+        # Clean up mesh after decimation
+        mesh.remove_unreferenced_vertices()
+        mesh.remove_degenerate_faces()
         mesh.fix_normals()
-        trimesh.smoothing.filter_laplacian(mesh, iterations=2)
+        # No smoothing - we want sharp edges at floor-wall transitions
+
         print(f"Final mesh: {len(mesh.faces)} faces, {len(mesh.vertices)} vertices")
 
         # Export to GLB (geometry only)
