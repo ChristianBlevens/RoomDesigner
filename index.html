@@ -339,6 +339,23 @@
     </div>
   </div>
 
+  <!-- Export Progress Modal -->
+  <div class="modal-overlay modal-hidden" id="export-progress-modal">
+    <div class="modal-content export-progress-content">
+      <h3>Exporting Screenshots</h3>
+      <div class="export-progress-info">
+        <p id="export-progress-text">Preparing export...</p>
+        <div class="export-progress-bar">
+          <div id="export-progress-fill" class="export-progress-fill"></div>
+        </div>
+        <p id="export-progress-detail" class="export-progress-detail"></p>
+      </div>
+      <div class="export-progress-actions hidden" id="export-progress-actions">
+        <button id="export-progress-close" class="btn-primary">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Delete Confirmation Modal -->
   <div class="modal-overlay modal-hidden" id="confirm-delete-modal">
     <div class="modal-content confirm-modal-content">

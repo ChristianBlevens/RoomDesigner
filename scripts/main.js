@@ -52,11 +52,16 @@ import {
   getAllHouses,
   getHouse,
   getRoomsByHouseId,
+  getRoomsWithDataByHouseId,
   getOrphanRooms,
   subscribeToEvents,
   createRoom,
   getBatchAvailability
 } from './api.js';
+import {
+  captureRoomScreenshot,
+  disposeScreenshotRenderer
+} from './screenshot.js';
 import {
   getCurrentHouse,
   setCurrentHouse,
@@ -1944,6 +1949,10 @@ function setupSessionModal() {
   exportBtn.addEventListener('click', handleExportHouse);
   closeHouseBtn.addEventListener('click', handleCloseHouseFromSession);
   deleteHouseBtn.addEventListener('click', handleDeleteHouseFromSession);
+
+  // Export progress modal close button
+  const exportProgressCloseBtn = document.getElementById('export-progress-close');
+  exportProgressCloseBtn.addEventListener('click', hideExportProgressModal);
 }
 
 async function openSessionModal() {
@@ -1968,48 +1977,206 @@ async function handleExportHouse() {
     return;
   }
 
+  // Close session modal
+  modalManager.closeModal();
+
   // Save current room first
   if (currentRoomId && currentBackgroundImage) {
     await saveCurrentRoom();
   }
 
   const house = getCurrentHouse();
-  const rooms = await getRoomsByHouseId(currentHouseId);
 
-  // Build export data with all rooms
-  const roomsData = [];
-  for (const room of rooms) {
-    const roomExport = {
-      id: room.id,
-      name: room.name,
-      backgroundImage: room.backgroundImage ? await blobToBase64(room.backgroundImage) : null,
-      cameraOrientation: room.cameraOrientation,
-      placedFurniture: room.placedFurniture || []
-    };
-    roomsData.push(roomExport);
+  // Show export progress modal
+  showExportProgressModal();
+  updateExportProgress(0, 0, 'Loading room data...');
+
+  try {
+    // Fetch all rooms with full data (including background images)
+    const rooms = await getRoomsWithDataByHouseId(currentHouseId);
+
+    if (rooms.length === 0) {
+      hideExportProgressModal();
+      showError('No rooms to export');
+      return;
+    }
+
+    // Collect unique furniture entry IDs
+    const entryIds = new Set();
+    for (const room of rooms) {
+      if (room.placedFurniture) {
+        for (const furniture of room.placedFurniture) {
+          entryIds.add(furniture.entryId);
+        }
+      }
+    }
+
+    // Pre-fetch all furniture entries with models
+    updateExportProgress(0, rooms.length, 'Loading furniture models...');
+    const furnitureEntries = new Map();
+    for (const entryId of entryIds) {
+      try {
+        const entry = await getFurnitureEntry(entryId, { includeModel: true });
+        furnitureEntries.set(entryId, entry);
+      } catch (err) {
+        console.warn(`Failed to load furniture entry ${entryId}:`, err);
+      }
+    }
+
+    // Export screenshots
+    const zipBlob = await exportHouseScreenshotsWithProgress(
+      house,
+      rooms,
+      furnitureEntries,
+      (current, total, roomName, status) => {
+        updateExportProgress(current, total, roomName, status);
+      }
+    );
+
+    // Trigger download
+    const safeName = house.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    const link = document.createElement('a');
+    link.download = `${safeName}-screenshots.zip`;
+    link.href = URL.createObjectURL(zipBlob);
+    link.click();
+    URL.revokeObjectURL(link.href);
+
+    // Show completion
+    showExportComplete(rooms.length);
+
+  } catch (err) {
+    console.error('Export failed:', err);
+    hideExportProgressModal();
+    showError(`Export failed: ${err.message}`);
+  }
+}
+
+/**
+ * Export house screenshots with furniture entries pre-loaded.
+ */
+async function exportHouseScreenshotsWithProgress(house, rooms, furnitureEntries, onProgress) {
+  const zip = new JSZip();
+  const results = [];
+
+  for (let i = 0; i < rooms.length; i++) {
+    const room = rooms[i];
+    const roomName = room.name || `Room ${i + 1}`;
+
+    onProgress(i + 1, rooms.length, roomName, 'loading');
+
+    try {
+      if (!room.backgroundImage) {
+        console.warn(`Skipping room "${roomName}": no background image`);
+        results.push({ room: roomName, success: false, error: 'No background image' });
+        continue;
+      }
+
+      const screenshot = await captureRoomScreenshot(room, furnitureEntries);
+
+      const safeName = roomName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      const filename = `${safeName}.png`;
+
+      zip.file(filename, screenshot);
+      results.push({ room: roomName, success: true, filename });
+
+      onProgress(i + 1, rooms.length, roomName, 'complete');
+    } catch (err) {
+      console.error(`Failed to capture screenshot for "${roomName}":`, err);
+      results.push({ room: roomName, success: false, error: err.message });
+      onProgress(i + 1, rooms.length, roomName, 'error');
+    }
   }
 
-  const exportData = {
+  // Clean up renderer
+  disposeScreenshotRenderer();
+
+  // Add manifest
+  const manifest = {
+    exportDate: new Date().toISOString(),
     house: {
       id: house.id,
       name: house.name,
       startDate: house.startDate,
       endDate: house.endDate
     },
-    rooms: roomsData
+    rooms: results.map((r, i) => ({
+      name: rooms[i].name || `Room ${i + 1}`,
+      filename: r.success ? r.filename : null,
+      success: r.success,
+      error: r.error || null
+    }))
   };
+  zip.file('manifest.json', JSON.stringify(manifest, null, 2));
 
-  const jsonString = JSON.stringify(exportData, null, 2);
-  const blob = new Blob([jsonString], { type: 'application/json' });
+  // Generate ZIP
+  return zip.generateAsync({
+    type: 'blob',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 }
+  });
+}
 
-  const link = document.createElement('a');
-  const safeName = house.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-  link.download = `house-${safeName}.json`;
-  link.href = URL.createObjectURL(blob);
-  link.click();
-  URL.revokeObjectURL(link.href);
+/**
+ * Show the export progress modal.
+ */
+function showExportProgressModal() {
+  const modal = document.getElementById('export-progress-modal');
+  const actions = document.getElementById('export-progress-actions');
+  modal.classList.remove('modal-hidden');
+  actions.classList.add('hidden');
+}
 
-  modalManager.closeModal();
+/**
+ * Hide the export progress modal.
+ */
+function hideExportProgressModal() {
+  const modal = document.getElementById('export-progress-modal');
+  modal.classList.add('modal-hidden');
+}
+
+/**
+ * Update export progress display.
+ */
+function updateExportProgress(current, total, roomName, status = 'loading') {
+  const textEl = document.getElementById('export-progress-text');
+  const fillEl = document.getElementById('export-progress-fill');
+  const detailEl = document.getElementById('export-progress-detail');
+
+  if (total === 0) {
+    textEl.textContent = roomName; // Used for initial loading message
+    fillEl.style.width = '0%';
+    detailEl.textContent = '';
+    return;
+  }
+
+  const percent = Math.round((current / total) * 100);
+  fillEl.style.width = `${percent}%`;
+
+  if (status === 'loading') {
+    textEl.textContent = `Capturing "${roomName}"...`;
+    detailEl.textContent = `Room ${current} of ${total}`;
+  } else if (status === 'complete') {
+    textEl.textContent = `Captured "${roomName}"`;
+    detailEl.textContent = `Room ${current} of ${total} complete`;
+  } else if (status === 'error') {
+    textEl.textContent = `Failed: "${roomName}"`;
+    detailEl.textContent = `Room ${current} of ${total} (error)`;
+  }
+}
+
+/**
+ * Show export completion and enable close button.
+ */
+function showExportComplete(roomCount) {
+  const textEl = document.getElementById('export-progress-text');
+  const fillEl = document.getElementById('export-progress-fill');
+  const detailEl = document.getElementById('export-progress-detail');
+  const actions = document.getElementById('export-progress-actions');
+
+  textEl.textContent = 'Export Complete!';
+  fillEl.style.width = '100%';
+  detailEl.textContent = `${roomCount} room${roomCount !== 1 ? 's' : ''} exported`;
+  actions.classList.remove('hidden');
 }
 
 async function handleCloseHouseFromSession() {

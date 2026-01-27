@@ -600,6 +600,55 @@ input[type="date"]:focus {
   cursor: not-allowed;
 }
 
+/* ============ Export Progress Modal ============ */
+
+.export-progress-content {
+  max-width: 400px;
+  text-align: center;
+}
+
+.export-progress-info {
+  padding: var(--spacing-lg) 0;
+}
+
+#export-progress-text {
+  font-size: var(--font-lg);
+  margin-bottom: var(--spacing-md);
+  color: var(--color-text);
+}
+
+.export-progress-bar {
+  height: 8px;
+  background: #e5e7eb;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: var(--spacing-md);
+}
+
+.export-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4f46e5, #7c3aed);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+  width: 0%;
+}
+
+.export-progress-detail {
+  font-size: var(--font-sm);
+  color: #6b7280;
+  margin: 0;
+}
+
+.export-progress-actions {
+  margin-top: var(--spacing-lg);
+  display: flex;
+  justify-content: center;
+}
+
+.export-progress-actions.hidden {
+  display: none;
+}
+
 /* ============ Debug Panel ============ */
 
 .debug-panel {

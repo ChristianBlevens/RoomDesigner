@@ -158,6 +158,26 @@ export async function getRoomsByHouseId(houseId, skipCache = false) {
   return transformed;
 }
 
+/**
+ * Get all rooms for a house with full data (including background images).
+ * Used for screenshot export where we need complete room data.
+ *
+ * @param {string} houseId - House ID
+ * @returns {Promise<Array<Object>>} Array of room objects with background images
+ */
+export async function getRoomsWithDataByHouseId(houseId) {
+  // First get room list (metadata only, cached)
+  const roomList = await getRoomsByHouseId(houseId);
+
+  // Then load full data for each room
+  const fullRooms = [];
+  for (const room of roomList) {
+    const fullRoom = await loadRoom(room.id);
+    fullRooms.push(fullRoom);
+  }
+  return fullRooms;
+}
+
 export async function getOrphanRooms() {
   const response = await apiFetch('/rooms/orphans');
   const rooms = await response.json();
