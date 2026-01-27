@@ -391,6 +391,9 @@ function setupLightingControls() {
   lightingCloseBtn.addEventListener('click', closeLightingPanel);
 
   function openLightingPanel() {
+    // Close scale panel if open (only one can be open at a time)
+    closeScalePanelIfOpen();
+
     lightingPanelOpen = true;
     lightingPanel.classList.remove('hidden');
     lightingBtn.classList.add('active');
@@ -626,6 +629,9 @@ function setupScaleControls() {
   });
 
   function openScalePanel() {
+    // Close lighting panel if open (only one can be open at a time)
+    closeLightingPanelIfOpen();
+
     scalePanelOpen = true;
     scalePanel.classList.remove('hidden');
     scaleBtn.classList.add('active');
@@ -694,10 +700,20 @@ function setupFileInputs() {
   }
 }
 
-function setBackgroundImage(blob) {
+function setBackgroundImage(blob, bringToFront = false) {
   const container = document.getElementById('background-container');
   const url = URL.createObjectURL(blob);
   container.style.backgroundImage = `url(${url})`;
+
+  // Bring background above canvas during processing (but below modals)
+  if (bringToFront) {
+    container.style.zIndex = '2';
+  }
+}
+
+function resetBackgroundZIndex() {
+  const container = document.getElementById('background-container');
+  container.style.zIndex = '0';
 }
 
 // Get image aspect ratio from blob
@@ -834,6 +850,7 @@ async function processRoomAutomatically() {
 
     // Clear CSS background since we use 3D plane
     document.getElementById('background-container').style.backgroundImage = '';
+    resetBackgroundZIndex();
 
     console.log('Room geometry loaded and camera aligned');
 
@@ -893,6 +910,7 @@ async function cancelRoomCreationFlow() {
   pendingRoomName = null;
 
   modalManager.closeAllModals();
+  resetBackgroundZIndex();
 
   if (!currentRoomId) {
     // No room loaded yet (initial stage) - return to calendar modal
@@ -2603,8 +2621,8 @@ async function handleRoomImageUpload(event) {
   // Store pending image
   pendingRoomImage = file;
 
-  // Show the image immediately
-  setBackgroundImage(file);
+  // Show the image immediately (bring to front so it's visible over current room)
+  setBackgroundImage(file, true);
   document.getElementById('canvas-container').classList.remove('hidden');
 
   // Close house modal and open room name modal

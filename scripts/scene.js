@@ -812,8 +812,9 @@ export async function loadRoomGeometry(meshUrl, options = {}) {
         roomMesh.traverse((child) => {
           if (child.isMesh) {
             // ShadowMaterial: transparent but receives and displays shadows
+            // DoubleSide needed for interior room meshes where normals may face outward
             child.material = new THREE.ShadowMaterial({
-              opacity: 0.3,
+              opacity: 0.5,
               side: THREE.DoubleSide
             });
             child.receiveShadow = true;
@@ -1001,6 +1002,8 @@ export function initScene() {
   directionalLight.shadow.camera.right = 10;
   directionalLight.shadow.camera.top = 10;
   directionalLight.shadow.camera.bottom = -10;
+  directionalLight.shadow.bias = -0.0005; // Reduce shadow acne
+  directionalLight.shadow.normalBias = 0.02; // Help with shadow visibility on angled surfaces
   scene.add(directionalLight);
   // Add target to scene so light direction works properly
   scene.add(directionalLight.target);

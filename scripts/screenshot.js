@@ -173,6 +173,8 @@ export function addScreenshotLighting(lightingSettings = null) {
   directionalLight.shadow.camera.right = 10;
   directionalLight.shadow.camera.top = 10;
   directionalLight.shadow.camera.bottom = -10;
+  directionalLight.shadow.bias = -0.0005;
+  directionalLight.shadow.normalBias = 0.02;
 
   // Apply saved lighting settings or use defaults
   if (lightingSettings) {
@@ -335,7 +337,7 @@ export async function loadRoomMesh(meshUrl) {
         mesh.traverse((child) => {
           if (child.isMesh) {
             child.material = new THREE.ShadowMaterial({
-              opacity: 0.3,
+              opacity: 0.5,
               side: THREE.DoubleSide
             });
             child.receiveShadow = true;
