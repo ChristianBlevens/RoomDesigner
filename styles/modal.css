@@ -603,18 +603,25 @@ input[type="date"]:focus {
 /* ============ Export Progress Modal ============ */
 
 .export-progress-content {
-  max-width: 400px;
+  padding: var(--spacing-lg);
   text-align: center;
+  width: min(380px, 90vw);
+}
+
+.export-progress-content h3 {
+  font-size: var(--font-lg);
+  color: #111827;
+  margin: 0 0 var(--spacing-md) 0;
 }
 
 .export-progress-info {
-  padding: var(--spacing-lg) 0;
+  padding: var(--spacing-md) 0;
 }
 
 #export-progress-text {
-  font-size: var(--font-lg);
+  font-size: var(--font-md);
   margin-bottom: var(--spacing-md);
-  color: var(--color-text);
+  color: #374151;
 }
 
 .export-progress-bar {
@@ -647,6 +654,17 @@ input[type="date"]:focus {
 
 .export-progress-actions.hidden {
   display: none;
+}
+
+.export-progress-actions button {
+  padding: var(--btn-padding) var(--spacing-lg);
+  min-height: var(--btn-size);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-md);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
 }
 
 /* ============ Debug Panel ============ */

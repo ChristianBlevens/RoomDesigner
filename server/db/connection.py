@@ -16,15 +16,22 @@ _furniture_conn = None
 def _safe_connect(db_path: Path):
     """Connect to DuckDB, cleaning up corrupted WAL file if needed."""
     try:
-        return duckdb.connect(str(db_path))
+        conn = duckdb.connect(str(db_path))
     except duckdb.InternalException as e:
         if "WAL file" in str(e):
             wal_path = Path(str(db_path) + ".wal")
             if wal_path.exists():
                 logger.warning(f"Removing corrupted WAL file: {wal_path}")
                 wal_path.unlink()
-                return duckdb.connect(str(db_path))
-        raise
+                conn = duckdb.connect(str(db_path))
+            else:
+                raise
+        else:
+            raise
+
+    # Ensure checkpoint happens on shutdown even if close() is called without explicit CHECKPOINT
+    conn.execute("PRAGMA enable_checkpoint_on_shutdown")
+    return conn
 
 
 def init_databases():
@@ -111,8 +118,20 @@ def get_furniture_db():
     return _furniture_conn
 
 def close_databases():
+    """Close database connections with explicit checkpoint to ensure WAL is flushed."""
     global _houses_conn, _furniture_conn
     if _houses_conn:
+        try:
+            _houses_conn.execute("CHECKPOINT")
+            logger.info("Houses database checkpointed successfully")
+        except Exception as e:
+            logger.warning(f"Failed to checkpoint houses database: {e}")
         _houses_conn.close()
     if _furniture_conn:
+        try:
+            _furniture_conn.execute("CHECKPOINT")
+            logger.info("Furniture database checkpointed successfully")
+        except Exception as e:
+            logger.warning(f"Failed to checkpoint furniture database: {e}")
         _furniture_conn.close()
+    logger.info("Databases closed")

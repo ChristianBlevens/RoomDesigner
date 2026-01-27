@@ -62,6 +62,6 @@ USER appuser
 EXPOSE 8000
 
 # Start Xvfb in background, then uvicorn
-CMD Xvfb :99 -screen 0 1024x768x24 -ac +extension GLX +render -noreset & \
-    sleep 1 && \
-    uvicorn server.main:app --host 0.0.0.0 --port 8000
+# Using exec ensures SIGTERM is forwarded to uvicorn for graceful shutdown
+# (critical for DuckDB WAL checkpoint on container stop)
+CMD ["sh", "-c", "Xvfb :99 -screen 0 1024x768x24 -ac +extension GLX +render -noreset & sleep 1 && exec uvicorn server.main:app --host 0.0.0.0 --port 8000"]
