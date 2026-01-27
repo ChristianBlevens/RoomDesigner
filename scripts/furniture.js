@@ -278,6 +278,39 @@ function alignToSurface(model, surfaceNormal, contactAxis) {
 }
 
 /**
+ * Calculate the offset needed to place the model so its bounding box face
+ * sits on the surface rather than its center.
+ *
+ * @param {THREE.Object3D} model - The furniture model
+ * @param {THREE.Vector3} surfaceNormal - Surface normal (world space)
+ * @returns {number} Distance to offset along surface normal
+ */
+function calculateBoundingBoxOffset(model, surfaceNormal) {
+  // Compute world-space bounding box after rotation is applied
+  const box = new THREE.Box3().setFromObject(model);
+  const center = new THREE.Vector3();
+  box.getCenter(center);
+
+  // Find the extent of the bounding box in the direction of the surface normal
+  // We need to find how far from center to the face touching the surface
+  const size = new THREE.Vector3();
+  box.getSize(size);
+
+  // Project each half-dimension onto the surface normal to find total extent
+  // The bounding box is axis-aligned in world space, so we check each axis
+  const normalAbs = new THREE.Vector3(
+    Math.abs(surfaceNormal.x),
+    Math.abs(surfaceNormal.y),
+    Math.abs(surfaceNormal.z)
+  );
+
+  // Half-extent in the direction of the normal
+  const halfExtent = (size.x * normalAbs.x + size.y * normalAbs.y + size.z * normalAbs.z) / 2;
+
+  return halfExtent;
+}
+
+/**
  * Rotate furniture around its placement surface normal.
  * @param {THREE.Object3D} model - The furniture model
  * @param {number} deltaAngle - Angle to rotate (radians)
@@ -485,7 +518,14 @@ function onPointerMove(event) {
       const offsetOnSurface = dragOffset.clone().sub(
         surfaceNormal.clone().multiplyScalar(dragOffset.dot(surfaceNormal))
       );
-      hoveredObject.position.copy(surfaceHit.point).add(offsetOnSurface);
+
+      // Calculate bounding box offset to keep contact face on surface
+      const bbOffset = calculateBoundingBoxOffset(hoveredObject, surfaceNormal);
+
+      // Position = surface point + lateral offset + bounding box offset along normal
+      hoveredObject.position.copy(surfaceHit.point)
+        .add(offsetOnSurface)
+        .add(surfaceNormal.clone().multiplyScalar(bbOffset));
 
       // Smooth the normal
       const smoothedNormal = addNormalToHistory(surfaceHit.normal);
@@ -519,8 +559,16 @@ function onPointerMove(event) {
         // Align contact face to the new surface
         alignToSurface(hoveredObject, freshNormal, newContactAxis);
 
-        // Reset drag offset for new surface (project onto new surface plane)
-        dragOffset.sub(freshNormal.clone().multiplyScalar(dragOffset.dot(freshNormal)));
+        // Calculate bounding box offset so the contact face sits on surface
+        const bbOffset = calculateBoundingBoxOffset(hoveredObject, freshNormal);
+
+        // Position object so its bounding box face touches the surface
+        hoveredObject.position.copy(surfaceHit.point).add(
+          freshNormal.clone().multiplyScalar(bbOffset)
+        );
+
+        // Reset drag offset for new surface - recalculate from new position
+        dragOffset.set(0, 0, 0);
       } else {
         // Same surface type - update normal
         hoveredObject.userData.surfaceNormal = smoothedNormal.clone();
@@ -813,11 +861,6 @@ export async function placeFurniture(entryId, position, surfaceNormal = null) {
   // Apply scale with room scale factor (multiplies each component)
   model.scale.copy(baseScale).multiplyScalar(getRoomScale());
 
-  // Set position
-  if (position) {
-    model.position.copy(position);
-  }
-
   // Use provided surface normal or the last clicked surface normal
   const normal = surfaceNormal || lastClickSurfaceNormal || new THREE.Vector3(0, 1, 0);
 
@@ -831,6 +874,12 @@ export async function placeFurniture(entryId, position, surfaceNormal = null) {
 
   // Align furniture to surface (bottom against surface, upright)
   alignToSurface(model, normal, contactAxis);
+
+  // Set position with bounding box offset so contact face sits on surface
+  if (position) {
+    const bbOffset = calculateBoundingBoxOffset(model, normal);
+    model.position.copy(position).add(normal.clone().multiplyScalar(bbOffset));
+  }
 
   // Add to scene
   addFurnitureToScene(model, entryId, position);
