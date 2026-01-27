@@ -86,6 +86,24 @@ def init_databases():
     """)
     _furniture_conn.execute("CREATE INDEX IF NOT EXISTS idx_furniture_category ON furniture(category)")
 
+    # Meshy generation tasks table
+    _furniture_conn.execute("""
+        CREATE TABLE IF NOT EXISTS meshy_tasks (
+            id VARCHAR PRIMARY KEY,
+            furniture_id VARCHAR NOT NULL,
+            meshy_task_id VARCHAR,
+            status VARCHAR DEFAULT 'pending',
+            progress INTEGER DEFAULT 0,
+            retry_count INTEGER DEFAULT 0,
+            error_message VARCHAR,
+            glb_url VARCHAR,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    _furniture_conn.execute("CREATE INDEX IF NOT EXISTS idx_meshy_tasks_status ON meshy_tasks(status)")
+    _furniture_conn.execute("CREATE INDEX IF NOT EXISTS idx_meshy_tasks_furniture ON meshy_tasks(furniture_id)")
+
 def get_houses_db():
     return _houses_conn
 

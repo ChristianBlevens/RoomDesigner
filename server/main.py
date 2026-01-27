@@ -19,7 +19,9 @@ from events import subscribe
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_databases()
+    meshy.start_polling()
     yield
+    meshy.stop_polling()
     close_databases()
 
 app = FastAPI(title="RoomDesigner API", lifespan=lifespan)

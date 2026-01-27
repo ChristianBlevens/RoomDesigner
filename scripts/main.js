@@ -127,10 +127,15 @@ let entryTags = [];
 // Popup state
 let popupEntryId = null;
 
-// Meshy background generation tasks
-// Map of entryId -> { taskId, status, progress, entryName }
-const meshyActiveTasks = new Map();
-const MESHY_MAX_CONCURRENT = 10;
+// Meshy generation tasks - simplified client tracking
+// Set of task_ids that this client initiated (for toast notifications)
+const myMeshyTasks = new Set();
+
+// Server-provided task status (updated by polling)
+let meshyServerStatus = { tasks: [], active: 0, max: 10 };
+
+// Polling interval ID
+let meshyPollInterval = null;
 
 // ============ Utility Functions ============
 
@@ -217,6 +222,19 @@ async function init() {
   setupLightingControls();
 
   // SSE available via subscribeToEvents() for future real-time features
+
+  // Check for active Meshy tasks on page load
+  try {
+    const response = await fetch(adjustUrlForProxy('/api/meshy/tasks'));
+    if (response.ok) {
+      meshyServerStatus = await response.json();
+      if (meshyServerStatus.tasks.some(t => !['completed', 'failed'].includes(t.status))) {
+        startMeshyPolling();
+      }
+    }
+  } catch (err) {
+    console.error('Failed to check Meshy tasks:', err);
+  }
 
   // Show calendar modal on startup
   await openCalendarModal();
@@ -1290,8 +1308,7 @@ function setupEntryEditor() {
     }
   });
 
-  // Generate model button - starts Meshy.ai generation
-  // Generate model button - starts Meshy.ai background generation
+  // Generate model button - starts Meshy.ai background generation (server-side)
   generateBtn.addEventListener('click', async () => {
     if (!entryImageBlob) {
       showError('Please upload an image first');
@@ -1305,21 +1322,48 @@ function setupEntryEditor() {
       showError('Please save the entry first, then generate the 3D model');
       return;
     }
-    if (meshyActiveTasks.has(editingEntryId)) {
+
+    // Check if already generating (from server status)
+    const existingTask = meshyServerStatus.tasks.find(t =>
+      t.furniture_id === editingEntryId && !['completed', 'failed'].includes(t.status)
+    );
+    if (existingTask) {
       showError('Generation already in progress for this entry');
       return;
     }
-    if (meshyActiveTasks.size >= MESHY_MAX_CONCURRENT) {
-      showError(`Maximum ${MESHY_MAX_CONCURRENT} concurrent generations allowed`);
+
+    // Check server capacity
+    if (meshyServerStatus.active >= meshyServerStatus.max) {
+      showError(`Server at maximum capacity (${meshyServerStatus.max} concurrent tasks). Please wait.`);
       return;
     }
 
-    const entryName = document.getElementById('entry-name').value || 'Unnamed';
-    startMeshyBackgroundGeneration(editingEntryId, entryName);
+    try {
+      const response = await fetch(adjustUrlForProxy(`/api/meshy/generate/${editingEntryId}`), {
+        method: 'POST'
+      });
 
-    // Update button to show generation started
-    generateBtn.textContent = 'Generating...';
-    generateBtn.disabled = true;
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+        throw new Error(error.detail || 'Failed to start generation');
+      }
+
+      const { task_id } = await response.json();
+      myMeshyTasks.add(task_id);
+
+      // Update button
+      generateBtn.textContent = 'Generating...';
+      generateBtn.disabled = true;
+
+      // Start polling if not already
+      startMeshyPolling();
+
+      // Immediately poll to update UI
+      await pollMeshyTasks();
+
+    } catch (err) {
+      showError(err.message);
+    }
   });
 
   // Dimension inputs validation
@@ -1457,7 +1501,10 @@ async function openEntryEditor(entryId) {
 
       // Show generate button only if: image exists AND no model exists AND not currently generating
       if (entryImageBlob && !entryModelBlob) {
-        if (meshyActiveTasks.has(entryId)) {
+        const isGenerating = meshyServerStatus.tasks.some(t =>
+          t.furniture_id === entryId && !['completed', 'failed'].includes(t.status)
+        );
+        if (isGenerating) {
           generateBtn.style.display = 'block';
           generateBtn.textContent = 'Generating...';
           generateBtn.disabled = true;
@@ -1726,170 +1773,85 @@ async function handleEntrySubmit(event) {
     .catch(err => showError(`Failed to save entry: ${err.message}`));
 }
 
-// ============ Meshy Background Generation ============
+// ============ Meshy Server Polling ============
 
-function startMeshyBackgroundGeneration(entryId, entryName) {
-  // Track task
-  meshyActiveTasks.set(entryId, {
-    taskId: null,
-    status: 'Starting...',
-    progress: 0,
-    entryName: entryName
-  });
+function startMeshyPolling() {
+  if (meshyPollInterval) return;
 
-  // Update tracker UI
-  updateMeshyTrackerUI();
-
-  // Start async generation (don't await - runs in background)
-  runMeshyGeneration(entryId).catch(err => {
-    console.error('Meshy background generation failed:', err);
-  });
+  // Poll immediately, then every 5 seconds
+  pollMeshyTasks();
+  meshyPollInterval = setInterval(pollMeshyTasks, 5000);
 }
 
-async function runMeshyGeneration(entryId) {
-  const task = meshyActiveTasks.get(entryId);
-  if (!task) return;
+function stopMeshyPolling() {
+  if (meshyPollInterval) {
+    clearInterval(meshyPollInterval);
+    meshyPollInterval = null;
+  }
+}
 
+async function pollMeshyTasks() {
   try {
-    // Build the full image URL for Meshy API
-    const imageUrl = `${window.location.origin}${adjustUrlForProxy(`/api/files/furniture/${entryId}/image`)}`;
+    const response = await fetch(adjustUrlForProxy('/api/meshy/tasks'));
+    if (!response.ok) return;
 
-    // Step 1: Create Meshy task
-    updateMeshyTaskStatus(entryId, 'Connecting...', 0);
+    const data = await response.json();
+    const previousTasks = new Map(meshyServerStatus.tasks.map(t => [t.id, t]));
+    meshyServerStatus = data;
 
-    const createResponse = await fetch(adjustUrlForProxy(`/api/meshy/generate/${entryId}`), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image_url: imageUrl })
-    });
+    // Check for state changes in tasks we care about
+    for (const task of data.tasks) {
+      if (myMeshyTasks.has(task.id)) {
+        const prevTask = previousTasks.get(task.id);
 
-    if (!createResponse.ok) {
-      const error = await createResponse.json().catch(() => ({ detail: 'Unknown error' }));
-      throw new Error(error.detail || 'Failed to start generation');
-    }
+        if (task.status === 'completed' && prevTask?.status !== 'completed') {
+          showMeshyToast(task.furniture_name, true, '3D model ready!');
+          myMeshyTasks.delete(task.id);
 
-    const { task_id } = await createResponse.json();
-    task.taskId = task_id;
+          // Update entry editor if open
+          if (editingEntryId === task.furniture_id) {
+            const modelPreview = document.getElementById('model-upload-preview');
+            const generateBtn = document.getElementById('generate-model-btn');
+            if (modelPreview) modelPreview.innerHTML = '<span style="color: #22c55e;">Model generated</span>';
+            if (generateBtn) generateBtn.style.display = 'none';
+            const entry = await getFurnitureEntry(task.furniture_id);
+            if (entry) entryModelBlob = entry.model;
+          }
 
-    // Step 2: Poll for completion
-    updateMeshyTaskStatus(entryId, 'Generating...', 0);
+          // Refresh furniture modal
+          await refreshFurnitureModal();
 
-    const result = await pollMeshyBackground(entryId, task_id);
+        } else if (task.status === 'failed' && prevTask?.status !== 'failed') {
+          showMeshyToast(task.furniture_name, false, task.error_message || 'Generation failed');
+          myMeshyTasks.delete(task.id);
 
-    if (result.status === 'FAILED') {
-      throw new Error(result.message || 'Model generation failed');
-    }
-
-    // Step 3: Download the model
-    updateMeshyTaskStatus(entryId, 'Downloading...', 100);
-
-    const glbUrl = result.model_urls?.glb;
-    if (!glbUrl) {
-      throw new Error('No GLB model URL in response');
-    }
-
-    const downloadResponse = await fetch(adjustUrlForProxy(`/api/meshy/download/${entryId}`), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ glb_url: glbUrl })
-    });
-
-    if (!downloadResponse.ok) {
-      const error = await downloadResponse.json().catch(() => ({ detail: 'Unknown error' }));
-      throw new Error(error.detail || 'Failed to download model');
-    }
-
-    // Step 4: Finalize - server already processed model and generated 3D preview
-    updateMeshyTaskStatus(entryId, 'Finalizing...', 100);
-
-    // Step 5: Success - remove from tracker, show toast
-    meshyActiveTasks.delete(entryId);
-    updateMeshyTrackerUI();
-    showMeshyToast(task.entryName, true, '3D model ready!');
-
-    // Update entry editor if still open for this entry
-    if (editingEntryId === entryId) {
-      const modelPreview = document.getElementById('model-upload-preview');
-      const generateBtn = document.getElementById('generate-model-btn');
-      if (modelPreview) modelPreview.innerHTML = '<span style="color: #22c55e;">Model generated</span>';
-      if (generateBtn) generateBtn.style.display = 'none';
-      // Refresh the entry data
-      const entry = await getFurnitureEntry(entryId);
-      if (entry) entryModelBlob = entry.model;
-    }
-
-    // Refresh furniture modal if open
-    await refreshFurnitureModal();
-
-  } catch (err) {
-    console.error('Meshy generation error:', err);
-
-    // Remove from tracker, show error toast
-    const task = meshyActiveTasks.get(entryId);
-    const entryName = task?.entryName || 'Unknown';
-    meshyActiveTasks.delete(entryId);
-    updateMeshyTrackerUI();
-    showMeshyToast(entryName, false, err.message);
-
-    // Reset entry editor button if still open
-    if (editingEntryId === entryId) {
-      const generateBtn = document.getElementById('generate-model-btn');
-      if (generateBtn) {
-        generateBtn.textContent = 'Generate 3D Model';
-        generateBtn.disabled = false;
+          // Reset entry editor button if open
+          if (editingEntryId === task.furniture_id) {
+            const generateBtn = document.getElementById('generate-model-btn');
+            if (generateBtn) {
+              generateBtn.textContent = 'Generate 3D Model';
+              generateBtn.disabled = false;
+            }
+          }
+        }
       }
     }
+
+    // Update tracker UI
+    updateMeshyTrackerUI();
+
+    // Stop polling if no active tasks and none we care about
+    const hasActiveTasks = data.tasks.some(t => !['completed', 'failed'].includes(t.status));
+    if (!hasActiveTasks && myMeshyTasks.size === 0) {
+      stopMeshyPolling();
+    }
+
+  } catch (err) {
+    console.error('Failed to poll Meshy tasks:', err);
   }
-}
-
-async function pollMeshyBackground(entryId, taskId) {
-  let attempts = 0;
-  const maxAttempts = 120; // 10 minutes at 5-second intervals
-
-  while (attempts < maxAttempts) {
-    attempts++;
-
-    // Check if task was cancelled
-    if (!meshyActiveTasks.has(entryId)) {
-      throw new Error('Generation cancelled');
-    }
-
-    const response = await fetch(adjustUrlForProxy(`/api/meshy/status/${taskId}`));
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Status check failed' }));
-      throw new Error(error.detail);
-    }
-
-    const status = await response.json();
-
-    // Update progress
-    if (status.progress !== undefined) {
-      updateMeshyTaskStatus(entryId, `${status.progress}%`, status.progress);
-    }
-
-    // Check completion
-    if (status.status === 'SUCCEEDED' || status.status === 'FAILED') {
-      return status;
-    }
-
-    // Wait before next poll
-    await new Promise(resolve => setTimeout(resolve, 5000));
-  }
-
-  throw new Error('Generation timed out after 10 minutes');
 }
 
 // ============ Meshy Notification UI ============
-
-function updateMeshyTaskStatus(entryId, status, progress) {
-  const task = meshyActiveTasks.get(entryId);
-  if (task) {
-    task.status = status;
-    task.progress = progress;
-    updateMeshyTrackerUI();
-  }
-}
 
 function updateMeshyTrackerUI() {
   const tracker = document.getElementById('meshy-task-tracker');
@@ -1897,7 +1859,12 @@ function updateMeshyTrackerUI() {
   const countEl = tracker.querySelector('.meshy-tracker-count');
   const toasts = document.getElementById('meshy-toasts');
 
-  if (meshyActiveTasks.size === 0) {
+  // Filter to only show active tasks (not completed/failed)
+  const activeTasks = meshyServerStatus.tasks.filter(t =>
+    !['completed', 'failed'].includes(t.status)
+  );
+
+  if (activeTasks.length === 0) {
     tracker.classList.add('hidden');
     toasts.classList.remove('with-tracker');
     return;
@@ -1905,16 +1872,19 @@ function updateMeshyTrackerUI() {
 
   tracker.classList.remove('hidden');
   toasts.classList.add('with-tracker');
-  countEl.textContent = `${meshyActiveTasks.size} task${meshyActiveTasks.size > 1 ? 's' : ''}`;
+
+  // Show capacity: X/10
+  countEl.textContent = `${meshyServerStatus.active}/${meshyServerStatus.max}`;
 
   // Build list HTML
   let html = '';
-  for (const [entryId, task] of meshyActiveTasks) {
+  for (const task of activeTasks) {
+    const statusText = task.status === 'polling' ? `${task.progress}%` : task.status;
     html += `
-      <div class="meshy-tracker-item" data-entry-id="${entryId}">
+      <div class="meshy-tracker-item" data-task-id="${task.id}">
         <div class="meshy-tracker-item-header">
-          <span class="meshy-tracker-item-name" title="${task.entryName}">${task.entryName}</span>
-          <span class="meshy-tracker-item-status">${task.status}</span>
+          <span class="meshy-tracker-item-name" title="${task.furniture_name}">${task.furniture_name}</span>
+          <span class="meshy-tracker-item-status">${statusText}</span>
         </div>
         <div class="meshy-tracker-item-progress">
           <div class="meshy-tracker-item-progress-fill" style="width: ${task.progress}%"></div>
