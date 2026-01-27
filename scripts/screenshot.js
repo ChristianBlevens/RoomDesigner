@@ -331,17 +331,34 @@ export async function loadRoomMesh(meshUrl) {
         // Calculate bounds before making invisible
         const bounds = new THREE.Box3().setFromObject(mesh);
 
-        // Make mesh invisible (we don't need it visible for screenshots)
+        // Use ShadowMaterial for shadow receiving (transparent but shows shadows)
         mesh.traverse((child) => {
           if (child.isMesh) {
-            child.material = new THREE.MeshBasicMaterial({
-              visible: false,
+            child.material = new THREE.ShadowMaterial({
+              opacity: 0.3,
               side: THREE.DoubleSide
             });
+            child.receiveShadow = true;
           }
         });
 
         screenshotScene.add(mesh);
+
+        // Update shadow camera to encompass room bounds
+        const size = bounds.getSize(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z) * 1.5;
+        // Find directional light and update shadow camera
+        screenshotScene.traverse((obj) => {
+          if (obj.isDirectionalLight && obj.castShadow) {
+            obj.shadow.camera.left = -maxDim;
+            obj.shadow.camera.right = maxDim;
+            obj.shadow.camera.top = maxDim;
+            obj.shadow.camera.bottom = -maxDim;
+            obj.shadow.camera.far = maxDim * 3;
+            obj.shadow.camera.updateProjectionMatrix();
+          }
+        });
+
         resolve({ mesh, bounds });
       },
       undefined,

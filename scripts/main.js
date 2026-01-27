@@ -1,5 +1,6 @@
 // Main entry point for Room Furniture Planner
 
+import * as THREE from 'three';
 import {
   initScene,
   loadModelFromExtractedZip,
@@ -37,7 +38,10 @@ import {
   setLightTargetPosition,
   getLightingSettings,
   applyLightingSettings,
-  isLightingGizmoVisible
+  isLightingGizmoVisible,
+  getRoomScale,
+  setRoomScale,
+  resetRoomScale
 } from './scene.js';
 import {
   saveFurnitureEntry,
@@ -225,6 +229,7 @@ async function init() {
   setupTabBar();
   setupDebugPanel();
   setupLightingControls();
+  setupScaleControls();
 
   // SSE available via subscribeToEvents() for future real-time features
 
@@ -593,6 +598,83 @@ function setupLightingControls() {
       lightingDraggingHandle = null;
     }
   });
+}
+
+// ============ Room Scale Controls ============
+
+let scalePanelOpen = false;
+
+function setupScaleControls() {
+  const scaleBtn = document.getElementById('scale-btn');
+  const scalePanel = document.getElementById('scale-panel');
+  const scaleCloseBtn = document.getElementById('scale-close-btn');
+  const scaleSlider = document.getElementById('room-scale-slider');
+  const scaleValue = document.getElementById('room-scale-value');
+
+  if (!scaleBtn || !scalePanel) {
+    console.warn('Scale panel elements not found');
+    return;
+  }
+
+  // Toggle panel visibility
+  scaleBtn.addEventListener('click', () => {
+    if (scalePanelOpen) {
+      closeScalePanel();
+    } else {
+      openScalePanel();
+    }
+  });
+
+  function openScalePanel() {
+    scalePanelOpen = true;
+    scalePanel.classList.remove('hidden');
+    scaleBtn.classList.add('active');
+    updateScaleUI();
+  }
+
+  function closeScalePanel() {
+    scalePanelOpen = false;
+    scalePanel.classList.add('hidden');
+    scaleBtn.classList.remove('active');
+  }
+
+  // Close button
+  scaleCloseBtn.addEventListener('click', closeScalePanel);
+
+  // Scale slider
+  scaleSlider.addEventListener('input', () => {
+    const scale = parseFloat(scaleSlider.value);
+    setRoomScale(scale);
+    scaleValue.textContent = scale.toFixed(2) + 'x';
+  });
+
+  function updateScaleUI() {
+    const scale = getRoomScale();
+    scaleSlider.value = scale;
+    scaleValue.textContent = scale.toFixed(2) + 'x';
+  }
+}
+
+// Close scale panel programmatically (called when switching rooms)
+function closeScalePanelIfOpen() {
+  if (scalePanelOpen) {
+    const scalePanel = document.getElementById('scale-panel');
+    const scaleBtn = document.getElementById('scale-btn');
+    scalePanelOpen = false;
+    if (scalePanel) scalePanel.classList.add('hidden');
+    if (scaleBtn) scaleBtn.classList.remove('active');
+  }
+}
+
+// Update scale UI from current room scale (called when loading room)
+function updateScaleUIFromRoom() {
+  const scaleSlider = document.getElementById('room-scale-slider');
+  const scaleValue = document.getElementById('room-scale-value');
+  if (scaleSlider && scaleValue) {
+    const scale = getRoomScale();
+    scaleSlider.value = scale;
+    scaleValue.textContent = scale.toFixed(2) + 'x';
+  }
 }
 
 // ============ File Input Setup ============
@@ -2514,8 +2596,9 @@ async function handleRoomImageUpload(event) {
     await saveCurrentRoom();
   }
 
-  // Close lighting panel if open
+  // Close panels if open
   closeLightingPanelIfOpen();
+  closeScalePanelIfOpen();
 
   // Store pending image
   pendingRoomImage = file;
@@ -2587,8 +2670,9 @@ async function renderTabBar() {
 }
 
 async function switchRoom(roomId) {
-  // Close lighting panel before switching
+  // Close panels before switching
   closeLightingPanelIfOpen();
+  closeScalePanelIfOpen();
 
   // Save current room first
   if (currentRoomId) {
@@ -2774,6 +2858,15 @@ async function loadRoomById(roomId) {
           model.userData.rotationAroundNormal = furniture.rotationAroundNormal;
         }
 
+        // Restore base scale (needed for room scale recalculation)
+        if (furniture.baseScale) {
+          model.userData.baseScale = new THREE.Vector3(
+            furniture.baseScale.x,
+            furniture.baseScale.y,
+            furniture.baseScale.z
+          );
+        }
+
         addFurnitureToScene(model, furniture.entryId);
       } catch (err) {
         console.warn(`Failed to load furniture ${furniture.entryId}:`, err);
@@ -2787,11 +2880,21 @@ async function loadRoomById(roomId) {
     console.log('Room lighting settings restored');
   }
 
+  // Load room scale
+  if (typeof room.roomScale === 'number') {
+    setRoomScale(room.roomScale);
+  } else {
+    resetRoomScale(); // Default to 1.0 for rooms without saved scale
+  }
+  updateScaleUIFromRoom();
+  console.log('Room scale:', getRoomScale());
+
   // Store initial state for selective saves (only save changed fields)
   previousRoomState = {
     id: roomId,
     placedFurniture: room.placedFurniture || [],
     lightingSettings: room.lightingSettings || null,
+    roomScale: room.roomScale ?? 1.0,
   };
 
   // Show scene
@@ -2809,7 +2912,8 @@ async function saveCurrentRoom() {
     houseId: currentHouseId,
     name: room.name || 'Untitled Room',
     placedFurniture: collectPlacedFurniture(),
-    lightingSettings: getLightingSettings()
+    lightingSettings: getLightingSettings(),
+    roomScale: getRoomScale()
     // NOTE: mogeData intentionally omitted - never changes, handled by selective save
   };
 
@@ -2821,12 +2925,14 @@ async function saveCurrentRoom() {
     id: currentRoomId,
     placedFurniture: roomState.placedFurniture,
     lightingSettings: roomState.lightingSettings,
+    roomScale: roomState.roomScale,
   };
 }
 
 async function closeHouse() {
-  // Close lighting panel
+  // Close panels
   closeLightingPanelIfOpen();
+  closeScalePanelIfOpen();
 
   currentHouseId = null;
   currentRoomId = null;
@@ -2842,6 +2948,7 @@ async function closeHouse() {
   document.getElementById('background-container').style.backgroundImage = '';
   clearAllFurniture();
   clearRoomGeometry(); // Reset room bounds to default
+  resetRoomScale(); // Reset to default 1.0
   undoManager.clear();
   deselectFurniture();
   hideScene();

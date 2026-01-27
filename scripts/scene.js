@@ -39,6 +39,9 @@ let roomBounds = new THREE.Box3(
 // Selectable furniture objects
 export const selectableObjects = [];
 
+// Room-wide scale factor (multiplies individual furniture base scales)
+let roomScaleFactor = 1.0;
+
 // Raycaster for mouse interactions
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
@@ -803,16 +806,17 @@ export async function loadRoomGeometry(meshUrl, options = {}) {
         if (roomWireframe) roomWireframe.visible = false;
         if (floor) floor.visible = false;
 
-        // Create invisible mesh for raycasting
-        // We need the geometry to be present but not visible
+        // Create mesh for raycasting and shadow receiving
+        // ShadowMaterial is transparent but shows shadows from furniture
         roomMesh = model.clone();
         roomMesh.traverse((child) => {
           if (child.isMesh) {
-            // Make material invisible but keep mesh for raycasting
-            child.material = new THREE.MeshBasicMaterial({
-              visible: false,
+            // ShadowMaterial: transparent but receives and displays shadows
+            child.material = new THREE.ShadowMaterial({
+              opacity: 0.3,
               side: THREE.DoubleSide
             });
+            child.receiveShadow = true;
           }
         });
         scene.add(roomMesh);
@@ -835,7 +839,10 @@ export async function loadRoomGeometry(meshUrl, options = {}) {
         });
         scene.add(roomMeshWireframe);
 
-        console.log('Room mesh ready - invisible for raycasting, wireframe available for debug');
+        console.log('Room mesh ready - shadow-receiving for raycasting, wireframe available for debug');
+
+        // Update shadow camera to encompass room bounds
+        updateShadowCamera(box);
 
         resolve({
           mesh: roomMesh,
@@ -1344,6 +1351,15 @@ export function collectPlacedFurniture() {
         data.rotationAroundNormal = object.userData.rotationAroundNormal;
       }
 
+      // Save base scale for room scale recalculation on load
+      if (object.userData.baseScale) {
+        data.baseScale = {
+          x: object.userData.baseScale.x,
+          y: object.userData.baseScale.y,
+          z: object.userData.baseScale.z
+        };
+      }
+
       placedFurniture.push(data);
     }
   });
@@ -1352,6 +1368,27 @@ export function collectPlacedFurniture() {
 }
 
 // ============ Lighting Controls ============
+
+/**
+ * Update shadow camera frustum to encompass the given bounds.
+ * Called when room mesh loads to ensure shadows aren't clipped.
+ * @param {THREE.Box3} bounds - Scene bounds to encompass
+ */
+function updateShadowCamera(bounds) {
+  if (!directionalLight || !bounds) return;
+
+  const size = bounds.getSize(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z) * 1.5; // Add margin
+
+  directionalLight.shadow.camera.left = -maxDim;
+  directionalLight.shadow.camera.right = maxDim;
+  directionalLight.shadow.camera.top = maxDim;
+  directionalLight.shadow.camera.bottom = -maxDim;
+  directionalLight.shadow.camera.far = maxDim * 3;
+  directionalLight.shadow.camera.updateProjectionMatrix();
+
+  console.log('Shadow camera updated for room bounds:', maxDim.toFixed(2));
+}
 
 /**
  * Get the directional light for external control.
@@ -1718,4 +1755,43 @@ export function applyLightingSettings(settings) {
   }
 
   updateLightingGizmo();
+}
+
+// ============ Room Scale Controls ============
+
+/**
+ * Get the current room scale factor.
+ * @returns {number} Current scale factor (default 1.0)
+ */
+export function getRoomScale() {
+  return roomScaleFactor;
+}
+
+/**
+ * Set the room-wide scale factor and apply to all furniture.
+ * @param {number} scale - New scale factor (e.g., 0.5 to 2.0)
+ */
+export function setRoomScale(scale) {
+  roomScaleFactor = Math.max(0.1, Math.min(5.0, scale)); // Clamp to reasonable range
+  applyRoomScaleToAllFurniture();
+}
+
+/**
+ * Apply the current room scale factor to all placed furniture.
+ * Each furniture piece scales as: baseScale * roomScaleFactor (per component)
+ */
+export function applyRoomScaleToAllFurniture() {
+  selectableObjects.forEach(obj => {
+    if (obj.userData.isFurniture && obj.userData.baseScale) {
+      // baseScale is a Vector3, multiply each component by roomScaleFactor
+      obj.scale.copy(obj.userData.baseScale).multiplyScalar(roomScaleFactor);
+    }
+  });
+}
+
+/**
+ * Reset room scale to default (1.0).
+ */
+export function resetRoomScale() {
+  roomScaleFactor = 1.0;
 }

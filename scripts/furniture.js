@@ -13,14 +13,14 @@ import {
   loadModelFromExtractedZip,
   calculateFurnitureScale,
   selectableObjects,
-  getRoomMesh
+  getRoomMesh,
+  getRoomScale
 } from './scene.js';
 import {
   undoManager,
   PlaceFurnitureCommand,
   MoveFurnitureCommand,
   RotateFurnitureCommand,
-  ScaleFurnitureCommand,
   DeleteFurnitureCommand
 } from './undo.js';
 import { getFurnitureEntry } from './api.js';
@@ -35,6 +35,12 @@ let isDragging = false;
 let mouseDownPosition = null;
 let dragStartPosition = null;
 let activePointerId = null;
+
+// Drag offset preservation (keeps grab point stable)
+let dragOffset = new THREE.Vector3();
+
+// Original orientation for surface transitions (prevents curved-edge corruption)
+let dragStartQuaternion = new THREE.Quaternion();
 
 // Transform tracking for undo
 let transformStartPosition = null;
@@ -96,15 +102,17 @@ function clearNormalHistory() {
  *
  * @param {THREE.Object3D} model - The furniture model
  * @param {THREE.Vector3} surfaceNormal - Surface normal in world space
+ * @param {THREE.Quaternion} quaternionOverride - Optional quaternion to use instead of model's current rotation
  * @returns {THREE.Vector3} Local axis that aligns with surface normal
  */
-function detectContactAxis(model, surfaceNormal) {
+function detectContactAxis(model, surfaceNormal, quaternionOverride = null) {
+  const quat = quaternionOverride || model.quaternion;
   let bestAxis = DEFAULT_CONTACT_AXIS.clone();
   let bestDot = -2;
 
   for (const localAxis of CARDINAL_AXES) {
-    // Transform local axis to world space using model's current rotation
-    const worldAxis = localAxis.clone().applyQuaternion(model.quaternion);
+    // Transform local axis to world space using the specified rotation
+    const worldAxis = localAxis.clone().applyQuaternion(quat);
 
     // Find which axis is most aligned with surface normal
     // (pointing away from surface = pointing along normal)
@@ -409,6 +417,14 @@ function onPointerDown(event) {
     hoveredObject = hit.object;
     dragStartPosition = hit.object.position.clone();
 
+    // Calculate drag offset (difference between object center and grab point)
+    // This preserves the grab point during drag instead of snapping center to cursor
+    dragOffset.copy(hit.object.position).sub(hit.point);
+
+    // Save original quaternion for surface transition detection
+    // This prevents curved mesh edges from corrupting the orientation reference
+    dragStartQuaternion.copy(hit.object.quaternion);
+
     // Capture orientation state BEFORE drag starts
     if (hit.object.userData.surfaceNormal) {
       // Re-detect contact axis based on CURRENT orientation
@@ -463,8 +479,13 @@ function onPointerMove(event) {
     const surfaceHit = raycastRoomSurface(event, { sampleCount: 0 });
 
     if (surfaceHit) {
-      // Update position
-      hoveredObject.position.copy(surfaceHit.point);
+      // Apply drag offset projected onto surface plane
+      // This keeps the grab point stable instead of snapping center to cursor
+      const surfaceNormal = surfaceHit.normal.clone().normalize();
+      const offsetOnSurface = dragOffset.clone().sub(
+        surfaceNormal.clone().multiplyScalar(dragOffset.dot(surfaceNormal))
+      );
+      hoveredObject.position.copy(surfaceHit.point).add(offsetOnSurface);
 
       // Smooth the normal
       const smoothedNormal = addNormalToHistory(surfaceHit.normal);
@@ -480,8 +501,9 @@ function onPointerMove(event) {
         // Start fresh history with current normal
         const freshNormal = addNormalToHistory(surfaceHit.normal);
 
-        // Detect which face is now facing the new surface
-        const newContactAxis = detectContactAxis(hoveredObject, freshNormal);
+        // Detect which face should contact the new surface using ORIGINAL orientation
+        // This prevents curved mesh edges from corrupting the face detection
+        const newContactAxis = detectContactAxis(hoveredObject, freshNormal, dragStartQuaternion);
 
         console.log('Surface transition detected:', {
           contactAxis: newContactAxis.toArray(),
@@ -496,6 +518,9 @@ function onPointerMove(event) {
 
         // Align contact face to the new surface
         alignToSurface(hoveredObject, freshNormal, newContactAxis);
+
+        // Reset drag offset for new surface (project onto new surface plane)
+        dragOffset.sub(freshNormal.clone().multiplyScalar(dragOffset.dot(freshNormal)));
       } else {
         // Same surface type - update normal
         hoveredObject.userData.surfaceNormal = smoothedNormal.clone();
@@ -655,7 +680,6 @@ function hideGizmoMenu() {
 function setupGizmoButtons() {
   const dragBtn = document.getElementById('gizmo-drag-btn');
   const rotateBtn = document.getElementById('gizmo-rotate-btn');
-  const scaleBtn = document.getElementById('gizmo-scale-btn');
   const deleteBtn = document.getElementById('gizmo-delete-btn');
 
   const transformControls = getTransformControls();
@@ -674,15 +698,6 @@ function setupGizmoButtons() {
     if (selectedObject) {
       transformControls.attach(selectedObject);
       transformControls.setMode('rotate');
-    }
-    hideGizmoMenu();
-  });
-
-  scaleBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (selectedObject) {
-      transformControls.attach(selectedObject);
-      transformControls.setMode('scale');
     }
     hideGizmoMenu();
   });
@@ -731,50 +746,6 @@ function setupTransformControls() {
             endRotation
           ));
         }
-      } else if (mode === 'scale') {
-        const endScale = selectedObject.scale.clone();
-        if (!transformStartScale.equals(endScale)) {
-          undoManager.record(new ScaleFurnitureCommand(
-            selectedObject,
-            transformStartScale,
-            selectedObject.scale.clone()
-          ));
-        }
-      }
-    }
-  });
-
-  // Handle change event for continuous clamping and uniform scaling
-  transformControls.addEventListener('change', () => {
-    if (selectedObject && transformControls.dragging) {
-      const mode = transformControls.getMode();
-
-      if (mode === 'scale' && transformStartScale) {
-        // Enforce uniform scaling by comparing to the fixed start scale
-        const currentScale = selectedObject.scale;
-
-        // Calculate scale ratios from the starting scale
-        const ratioX = transformStartScale.x !== 0 ? currentScale.x / transformStartScale.x : 1;
-        const ratioY = transformStartScale.y !== 0 ? currentScale.y / transformStartScale.y : 1;
-        const ratioZ = transformStartScale.z !== 0 ? currentScale.z / transformStartScale.z : 1;
-
-        // Find which axis changed the most (furthest ratio from 1.0)
-        const devX = Math.abs(ratioX - 1);
-        const devY = Math.abs(ratioY - 1);
-        const devZ = Math.abs(ratioZ - 1);
-
-        let uniformRatio;
-        if (devX >= devY && devX >= devZ) {
-          uniformRatio = ratioX;
-        } else if (devY >= devX && devY >= devZ) {
-          uniformRatio = ratioY;
-        } else {
-          uniformRatio = ratioZ;
-        }
-
-        // Apply uniform scale based on the starting scale
-        const newUniformScale = transformStartScale.x * uniformRatio;
-        selectedObject.scale.setScalar(newUniformScale);
       }
     }
   });
@@ -797,13 +768,6 @@ function onKeyDown(event) {
       if (selectedObject) {
         transformControls.attach(selectedObject);
         transformControls.setMode('rotate');
-        hideGizmoMenu();
-      }
-      break;
-    case 's':
-      if (selectedObject) {
-        transformControls.attach(selectedObject);
-        transformControls.setMode('scale');
         hideGizmoMenu();
       }
       break;
@@ -842,9 +806,12 @@ export async function placeFurniture(entryId, position, surfaceNormal = null) {
   const model = await loadModelFromExtractedZip(extractedData);
   const scene = getScene();
 
-  // Apply dimension-based scaling
-  const scale = calculateFurnitureScale(model, entry);
-  model.scale.copy(scale);
+  // Calculate base scale from entry dimensions and store it
+  const baseScale = calculateFurnitureScale(model, entry);
+  model.userData.baseScale = baseScale.clone();
+
+  // Apply scale with room scale factor (multiplies each component)
+  model.scale.copy(baseScale).multiplyScalar(getRoomScale());
 
   // Set position
   if (position) {
