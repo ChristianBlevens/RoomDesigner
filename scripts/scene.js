@@ -808,13 +808,14 @@ export async function loadRoomGeometry(meshUrl, options = {}) {
 
         // Create mesh for raycasting and shadow receiving
         // ShadowMaterial is invisible except where shadows fall
-        // renderOrder = -1 ensures shadow-receiving mesh renders before casters
+        // depthWrite = false and renderOrder = -1 from AR.js shadow example
         roomMesh = model.clone();
         roomMesh.traverse((child) => {
           if (child.isMesh) {
             child.material = new THREE.ShadowMaterial({
               opacity: 0.5,
-              side: THREE.FrontSide
+              side: THREE.FrontSide,
+              depthWrite: false
             });
             child.receiveShadow = true;
             child.renderOrder = -1;
