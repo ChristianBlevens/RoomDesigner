@@ -279,35 +279,38 @@ function alignToSurface(model, surfaceNormal, contactAxis) {
 
 /**
  * Calculate the offset needed to place the model so its bounding box face
- * sits on the surface rather than its center.
+ * sits on the surface. This accounts for the model's origin position
+ * (models are bottom-center origin from server processing).
  *
  * @param {THREE.Object3D} model - The furniture model
  * @param {THREE.Vector3} surfaceNormal - Surface normal (world space)
  * @returns {number} Distance to offset along surface normal
  */
 function calculateBoundingBoxOffset(model, surfaceNormal) {
-  // Compute world-space bounding box after rotation is applied
+  // Save current position and temporarily move to origin for local bbox calculation
+  const savedPosition = model.position.clone();
+  model.position.set(0, 0, 0);
+
+  // Compute bounding box with model at origin (gives us local-space bounds)
   const box = new THREE.Box3().setFromObject(model);
-  const center = new THREE.Vector3();
-  box.getCenter(center);
 
-  // Find the extent of the bounding box in the direction of the surface normal
-  // We need to find how far from center to the face touching the surface
-  const size = new THREE.Vector3();
-  box.getSize(size);
+  // Restore position
+  model.position.copy(savedPosition);
 
-  // Project each half-dimension onto the surface normal to find total extent
-  // The bounding box is axis-aligned in world space, so we check each axis
-  const normalAbs = new THREE.Vector3(
-    Math.abs(surfaceNormal.x),
-    Math.abs(surfaceNormal.y),
-    Math.abs(surfaceNormal.z)
+  // Find the bounding box face that should touch the surface
+  // If normal points positive on an axis, contact face is at box min
+  // If normal points negative on an axis, contact face is at box max
+  const contactPoint = new THREE.Vector3(
+    surfaceNormal.x >= 0 ? box.min.x : box.max.x,
+    surfaceNormal.y >= 0 ? box.min.y : box.max.y,
+    surfaceNormal.z >= 0 ? box.min.z : box.max.z
   );
 
-  // Half-extent in the direction of the normal
-  const halfExtent = (size.x * normalAbs.x + size.y * normalAbs.y + size.z * normalAbs.z) / 2;
+  // The offset is the distance from local origin (0,0,0) to contact face along the normal
+  // Negative because we want to push the model AWAY from the surface
+  const offset = -contactPoint.dot(surfaceNormal);
 
-  return halfExtent;
+  return offset;
 }
 
 /**
