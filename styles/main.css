@@ -826,6 +826,11 @@ select:focus {
   z-index: 100;
   width: var(--panel-width);
   max-width: calc(100vw - var(--edge-margin) * 2);
+  pointer-events: none; /* Allow gizmo clicks to pass through */
+}
+
+.lighting-panel > * {
+  pointer-events: auto; /* Re-enable for child elements */
 }
 
 .lighting-panel-header {

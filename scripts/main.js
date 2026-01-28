@@ -463,12 +463,23 @@ function setupLightingControls() {
   // Track active lighting pointer for touch/pen support
   let lightingPointerId = null;
 
+  // Helper to check if pointer is over lighting panel
+  function isPointerOverLightingPanel(event) {
+    const panel = document.getElementById('lighting-panel');
+    if (!panel || panel.classList.contains('hidden')) return false;
+    const rect = panel.getBoundingClientRect();
+    return event.clientX >= rect.left && event.clientX <= rect.right &&
+           event.clientY >= rect.top && event.clientY <= rect.bottom;
+  }
+
   // Pointer down - start dragging or start new direction
   canvas.addEventListener('pointerdown', (event) => {
     if (!lightingPanelOpen) return;
     if (!event.isPrimary) return;
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     if (modalManager.isModalOpen()) return;
+
+    const overPanel = isPointerOverLightingPanel(event);
 
     // Check if clicking on gizmo handle (for dragging existing)
     if (!lightingDirectionMode) {
@@ -481,10 +492,15 @@ function setupLightingControls() {
         event.stopPropagation();
         return;
       }
+      // If over panel but no gizmo hit, block to prevent furniture actions
+      if (overPanel) {
+        event.stopPropagation();
+        return;
+      }
     }
 
-    // If in direction mode, set source position
-    if (lightingDirectionMode) {
+    // If in direction mode, set source position (but not through panel)
+    if (lightingDirectionMode && !overPanel) {
       const hit = raycastRoomSurface(event);
       if (hit) {
         setLightPosition(hit.point);

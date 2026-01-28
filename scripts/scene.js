@@ -817,9 +817,21 @@ export async function loadRoomGeometry(meshUrl, options = {}) {
               side: THREE.FrontSide
             });
             child.receiveShadow = true;
+            child.castShadow = false; // Only receive, don't cast
           }
         });
         scene.add(roomMesh);
+
+        // DEBUG: Add a simple plane at floor level to test if shadows work at all
+        const testPlane = new THREE.Mesh(
+          new THREE.PlaneGeometry(20, 20),
+          new THREE.MeshStandardMaterial({ color: 0x00ff00 })
+        );
+        testPlane.rotation.x = -Math.PI / 2;
+        testPlane.position.y = box.min.y + 0.01; // Slightly above floor
+        testPlane.receiveShadow = true;
+        scene.add(testPlane);
+        console.log('DEBUG: Test shadow plane added at y=' + testPlane.position.y);
 
         // Create wireframe version for debug visualization (hidden by default)
         roomMeshWireframe = model.clone();
