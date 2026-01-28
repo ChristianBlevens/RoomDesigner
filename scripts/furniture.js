@@ -362,6 +362,10 @@ function computeAABBAtPosition(object, position, target) {
   target.max.add(offset);
 }
 
+// Debug: throttle logging to avoid spam
+let lastCollisionLogTime = 0;
+const COLLISION_LOG_INTERVAL = 500; // ms
+
 /**
  * Test if AABB intersects room mesh and find collision with a DIFFERENT surface.
  * Ignores collisions with triangles that have similar normals to the current surface.
@@ -371,7 +375,10 @@ function computeAABBAtPosition(object, position, target) {
  * @returns {Object|null} { point, normal, distance } or null if no collision with different surface
  */
 function testAABBMeshCollision(aabb, mesh, currentNormal) {
-  if (!mesh || !mesh.geometry) return null;
+  if (!mesh || !mesh.geometry) {
+    console.warn('testAABBMeshCollision: No mesh or geometry');
+    return null;
+  }
 
   const geometry = mesh.geometry;
   const position = geometry.attributes.position;
@@ -386,6 +393,11 @@ function testAABBMeshCollision(aabb, mesh, currentNormal) {
 
   let closestCollision = null;
   let closestDistance = Infinity;
+
+  // Debug counters
+  let testedCount = 0;
+  let skippedSameSurface = 0;
+  let intersectedCount = 0;
 
   // Transform matrix for mesh
   const matrixWorld = mesh.matrixWorld;
@@ -416,11 +428,16 @@ function testAABBMeshCollision(aabb, mesh, currentNormal) {
 
     // Skip triangles that are part of the SAME surface (similar normal)
     if (currentNormal && triNormal.dot(currentNormal) > SURFACE_CHANGE_THRESHOLD) {
+      skippedSameSurface++;
       continue; // Same surface type, ignore
     }
 
+    testedCount++;
+
     // Check if triangle intersects AABB
     if (aabb.intersectsTriangle(triangle)) {
+      intersectedCount++;
+
       // Get collision point (closest point on triangle to AABB center)
       aabb.getCenter(_aabbCenter);
       triangle.closestPointToPoint(_aabbCenter, closestPoint);
@@ -437,6 +454,22 @@ function testAABBMeshCollision(aabb, mesh, currentNormal) {
         };
       }
     }
+  }
+
+  // Throttled debug logging
+  const now = Date.now();
+  if (now - lastCollisionLogTime > COLLISION_LOG_INTERVAL) {
+    lastCollisionLogTime = now;
+    console.log('AABB Collision Test:', {
+      totalTris: triCount,
+      skippedSameSurface,
+      testedDifferentSurface: testedCount,
+      intersections: intersectedCount,
+      currentNormal: currentNormal ? currentNormal.toArray().map(n => n.toFixed(2)) : null,
+      aabbMin: aabb.min.toArray().map(n => n.toFixed(2)),
+      aabbMax: aabb.max.toArray().map(n => n.toFixed(2)),
+      foundCollision: closestCollision ? closestCollision.normal.toArray().map(n => n.toFixed(2)) : null
+    });
   }
 
   return closestCollision;
