@@ -938,7 +938,8 @@ select:focus {
 }
 
 #lighting-btn.active,
-#scale-btn.active {
+#scale-btn.active,
+#before-after-btn.active {
   background: #4f46e5;
   color: #fff;
 }
