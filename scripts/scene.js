@@ -812,6 +812,9 @@ export async function loadRoomGeometry(meshUrl, options = {}) {
         roomMesh = model.clone();
         roomMesh.traverse((child) => {
           if (child.isMesh) {
+            // Recompute normals in case MoGe geometry has issues
+            child.geometry.computeVertexNormals();
+
             child.material = new THREE.MeshStandardMaterial({
               color: 0xffffff,
               side: THREE.FrontSide
