@@ -43,17 +43,23 @@ let dragOffset = new THREE.Vector3();
 // Original orientation for surface transitions (prevents curved-edge corruption)
 let dragStartQuaternion = new THREE.Quaternion();
 
-// Drag plane for surface-constrained movement (instead of raycasting to mesh)
+// Drag plane for surface-constrained movement
 let dragPlane = new THREE.Plane();
 let dragPlaneRaycaster = new THREE.Raycaster();
 
-// Furniture AABB for collision-based surface detection
-let furnitureAABB = new THREE.Box3();
+// Surface raycast for snapping furniture to surface during drag
+let surfaceRaycaster = new THREE.Raycaster();
+let spawnSurfaceNormal = new THREE.Vector3(0, 1, 0); // The surface normal when furniture was placed
+let lastValidPosition = new THREE.Vector3();
+let lastValidNormal = new THREE.Vector3(0, 1, 0);
 
 // Reusable vectors to avoid garbage collection
 const _planeIntersect = new THREE.Vector3();
-const _tempVec = new THREE.Vector3();
-const _aabbCenter = new THREE.Vector3();
+const _rayOrigin = new THREE.Vector3();
+const _rayDir = new THREE.Vector3();
+
+// Threshold for accepting surface normals (cosine of ~15°)
+const SURFACE_NORMAL_TOLERANCE = 0.966; // cos(15°) ≈ 0.966
 
 // Transform tracking for undo
 let transformStartPosition = null;
@@ -348,152 +354,6 @@ function raycastDragPlane(event) {
 }
 
 /**
- * Compute AABB at a hypothetical position without moving the object.
- * @param {THREE.Object3D} object - Furniture model
- * @param {THREE.Vector3} position - Hypothetical position
- * @param {THREE.Box3} target - Box3 to store result
- */
-function computeAABBAtPosition(object, position, target) {
-  // Get current AABB
-  target.setFromObject(object);
-
-  // Translate to new position
-  const offset = position.clone().sub(object.position);
-  target.min.add(offset);
-  target.max.add(offset);
-}
-
-// Debug: throttle logging to avoid spam
-let lastCollisionLogTime = 0;
-const COLLISION_LOG_INTERVAL = 500; // ms
-
-/**
- * Test if AABB intersects room mesh and find collision with a DIFFERENT surface.
- * Ignores collisions with triangles that have similar normals to the current surface.
- * @param {THREE.Box3} aabb - Furniture bounding box
- * @param {THREE.Object3D} meshOrGroup - Room mesh or group containing meshes
- * @param {THREE.Vector3} currentNormal - Current surface normal to ignore
- * @returns {Object|null} { point, normal, distance } or null if no collision with different surface
- */
-function testAABBMeshCollision(aabb, meshOrGroup, currentNormal) {
-  if (!meshOrGroup) {
-    console.warn('testAABBMeshCollision: No mesh provided');
-    return null;
-  }
-
-  // Collect all meshes with geometry (traverse if it's a group)
-  const meshes = [];
-  meshOrGroup.traverse((child) => {
-    if (child.isMesh && child.geometry) {
-      meshes.push(child);
-    }
-  });
-
-  if (meshes.length === 0) {
-    console.warn('testAABBMeshCollision: No meshes with geometry found');
-    return null;
-  }
-
-  const vA = new THREE.Vector3();
-  const vB = new THREE.Vector3();
-  const vC = new THREE.Vector3();
-  const triangle = new THREE.Triangle();
-  const closestPoint = new THREE.Vector3();
-  const triNormal = new THREE.Vector3();
-
-  let closestCollision = null;
-  let closestDistance = Infinity;
-
-  // Debug counters
-  let totalTris = 0;
-  let testedCount = 0;
-  let skippedSameSurface = 0;
-  let intersectedCount = 0;
-
-  // Test each mesh
-  for (const mesh of meshes) {
-    const geometry = mesh.geometry;
-    const position = geometry.attributes.position;
-    const index = geometry.index;
-    const matrixWorld = mesh.matrixWorld;
-
-    const triCount = index ? index.count / 3 : position.count / 3;
-    totalTris += triCount;
-
-    for (let i = 0; i < triCount; i++) {
-      // Get triangle vertices
-      if (index) {
-        vA.fromBufferAttribute(position, index.getX(i * 3));
-        vB.fromBufferAttribute(position, index.getX(i * 3 + 1));
-        vC.fromBufferAttribute(position, index.getX(i * 3 + 2));
-      } else {
-        vA.fromBufferAttribute(position, i * 3);
-        vB.fromBufferAttribute(position, i * 3 + 1);
-        vC.fromBufferAttribute(position, i * 3 + 2);
-      }
-
-      // Transform to world space
-      vA.applyMatrix4(matrixWorld);
-      vB.applyMatrix4(matrixWorld);
-      vC.applyMatrix4(matrixWorld);
-
-      triangle.set(vA, vB, vC);
-
-      // Compute face normal FIRST to filter out same-surface triangles
-      triangle.getNormal(triNormal);
-
-      // Skip triangles that are part of the SAME surface (similar normal)
-      if (currentNormal && triNormal.dot(currentNormal) > SURFACE_CHANGE_THRESHOLD) {
-        skippedSameSurface++;
-        continue; // Same surface type, ignore
-      }
-
-      testedCount++;
-
-      // Check if triangle intersects AABB
-      if (aabb.intersectsTriangle(triangle)) {
-        intersectedCount++;
-
-        // Get collision point (closest point on triangle to AABB center)
-        aabb.getCenter(_aabbCenter);
-        triangle.closestPointToPoint(_aabbCenter, closestPoint);
-
-        const distance = _aabbCenter.distanceTo(closestPoint);
-
-        if (distance < closestDistance) {
-          closestDistance = distance;
-
-          closestCollision = {
-            point: closestPoint.clone(),
-            normal: triNormal.clone(),
-            distance: distance
-          };
-        }
-      }
-    }
-  }
-
-  // Throttled debug logging
-  const now = Date.now();
-  if (now - lastCollisionLogTime > COLLISION_LOG_INTERVAL) {
-    lastCollisionLogTime = now;
-    console.log('AABB Collision Test:', {
-      meshCount: meshes.length,
-      totalTris,
-      skippedSameSurface,
-      testedDifferentSurface: testedCount,
-      intersections: intersectedCount,
-      currentNormal: currentNormal ? currentNormal.toArray().map(n => n.toFixed(2)) : null,
-      aabbMin: aabb.min.toArray().map(n => n.toFixed(2)),
-      aabbMax: aabb.max.toArray().map(n => n.toFixed(2)),
-      foundCollision: closestCollision ? closestCollision.normal.toArray().map(n => n.toFixed(2)) : null
-    });
-  }
-
-  return closestCollision;
-}
-
-/**
  * Rotate furniture around its placement surface normal.
  * @param {THREE.Object3D} model - The furniture model
  * @param {number} deltaAngle - Angle to rotate (radians)
@@ -634,29 +494,28 @@ function onPointerDown(event) {
     dragStartPosition = hit.object.position.clone();
 
     // Calculate drag offset (difference between object center and grab point)
-    // This preserves the grab point during drag instead of snapping center to cursor
     dragOffset.copy(hit.object.position).sub(hit.point);
 
-    // Save original quaternion for surface transition detection
-    // This prevents curved mesh edges from corrupting the orientation reference
+    // Save original quaternion for reference
     dragStartQuaternion.copy(hit.object.quaternion);
 
-    // Create drag plane at grab point, oriented to current surface
-    // This enables plane-constrained dragging instead of mesh raycasting
-    const surfaceNormal = hit.object.userData.surfaceNormal || new THREE.Vector3(0, 1, 0);
-    dragPlane.setFromNormalAndCoplanarPoint(surfaceNormal, hit.point);
+    // Store the spawn surface normal - this is the surface the furniture stays on
+    spawnSurfaceNormal.copy(hit.object.userData.surfaceNormal || new THREE.Vector3(0, 1, 0));
 
-    // Capture orientation state BEFORE drag starts
+    // Create drag plane at grab point, oriented to spawn surface
+    dragPlane.setFromNormalAndCoplanarPoint(spawnSurfaceNormal, hit.point);
+
+    // Initialize last valid state
+    lastValidPosition.copy(hit.object.position);
+    lastValidNormal.copy(spawnSurfaceNormal);
+
+    // Clear normal history for fresh smoothing
+    clearNormalHistory();
+
+    // Capture contact axis based on current orientation
     if (hit.object.userData.surfaceNormal) {
-      // Re-detect contact axis based on CURRENT orientation
-      // This captures any rotation applied by the 3D gizmo
       const currentContactAxis = detectContactAxis(hit.object, hit.object.userData.surfaceNormal);
       hit.object.userData.contactAxis = currentContactAxis;
-
-      // Store the surface normal for surface-change detection during drag
-      hit.object.userData.previousSurfaceNormal = hit.object.userData.surfaceNormal.clone();
-
-      console.log('Drag start - contact axis:', currentContactAxis.toArray());
     }
   } else {
     // Store click position and surface info for potential furniture placement
@@ -694,31 +553,65 @@ function onPointerMove(event) {
     hideGizmoMenu();
   }
 
-  // Continue dragging - furniture slides on drag plane, blocked by other surfaces
+  // Continue dragging - furniture slides on drag plane, raycasts to surface for snapping
   if (isDragging && hoveredObject) {
-    // Raycast to drag plane for smooth sliding on spawn surface
+    // Raycast to drag plane for smooth sliding
     const planePoint = raycastDragPlane(event);
     if (!planePoint) return;
 
-    // Calculate new position with drag offset
-    const newPosition = planePoint.clone().add(dragOffset);
+    // Calculate candidate position with drag offset
+    const candidatePosition = planePoint.clone().add(dragOffset);
 
-    // Compute AABB at new position to check for collisions with other surfaces
-    computeAABBAtPosition(hoveredObject, newPosition, furnitureAABB);
+    // Raycast from candidate position toward the spawn surface to find actual surface point
+    _rayOrigin.copy(candidatePosition);
+    _rayDir.copy(spawnSurfaceNormal).negate(); // Ray goes toward surface (opposite of normal)
 
-    // Check for collision with different surfaces (walls, etc.)
+    // Offset ray origin slightly above the surface to avoid starting inside geometry
+    _rayOrigin.add(spawnSurfaceNormal.clone().multiplyScalar(2));
+
+    surfaceRaycaster.set(_rayOrigin, _rayDir);
+
     const roomMesh = getRoomMesh();
-    const currentNormal = hoveredObject.userData.surfaceNormal || new THREE.Vector3(0, 1, 0);
-    const collision = testAABBMeshCollision(furnitureAABB, roomMesh, currentNormal);
+    if (!roomMesh) return;
 
-    if (collision) {
-      // Collision with different surface - block movement in that direction
-      // Don't move to newPosition, furniture stays where it is
-      return;
+    const intersects = surfaceRaycaster.intersectObject(roomMesh, true);
+
+    if (intersects.length > 0) {
+      const hit = intersects[0];
+      const hitNormal = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize() : spawnSurfaceNormal.clone();
+
+      // Check if the hit normal is within tolerance of spawn surface normal (~15°)
+      if (hitNormal.dot(spawnSurfaceNormal) >= SURFACE_NORMAL_TOLERANCE) {
+        // Valid surface - add to history for smoothing
+        const smoothedNormal = addNormalToHistory(hitNormal);
+
+        // Calculate bounding box offset to keep furniture on surface
+        const bbOffset = calculateBoundingBoxOffset(hoveredObject, smoothedNormal);
+
+        // Position furniture on the surface
+        hoveredObject.position.copy(hit.point).add(
+          smoothedNormal.clone().multiplyScalar(bbOffset)
+        );
+
+        // Update surface normal and alignment
+        hoveredObject.userData.surfaceNormal = smoothedNormal.clone();
+
+        // Keep contact axis aligned to smoothed normal
+        const contactAxis = hoveredObject.userData.contactAxis || DEFAULT_CONTACT_AXIS;
+        alignContactAxisToSurface(hoveredObject, smoothedNormal, contactAxis);
+        applyUprightCorrection(hoveredObject, smoothedNormal);
+
+        // Store as last valid state
+        lastValidPosition.copy(hoveredObject.position);
+        lastValidNormal.copy(smoothedNormal);
+      } else {
+        // Invalid surface (wall, etc.) - use last valid position
+        hoveredObject.position.copy(lastValidPosition);
+      }
+    } else {
+      // No hit - use last valid position
+      hoveredObject.position.copy(lastValidPosition);
     }
-
-    // No collision - move to new position
-    hoveredObject.position.copy(newPosition);
   }
 }
 
