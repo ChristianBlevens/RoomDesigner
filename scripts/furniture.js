@@ -83,6 +83,7 @@ const DEFAULT_CONTACT_AXIS = new THREE.Vector3(0, 1, 0);
 // Threshold for detecting surface change (cosine of ~45°)
 const SURFACE_CHANGE_THRESHOLD = 0.7;
 
+
 /**
  * Add a normal to the history and return the averaged normal.
  * @param {THREE.Vector3} normal - The new normal to add
@@ -693,78 +694,31 @@ function onPointerMove(event) {
     hideGizmoMenu();
   }
 
-  // Continue dragging - furniture slides on drag plane, surface changes on AABB collision
+  // Continue dragging - furniture slides on drag plane, blocked by other surfaces
   if (isDragging && hoveredObject) {
-    // Raycast to drag plane (NOT room mesh) for smooth sliding
+    // Raycast to drag plane for smooth sliding on spawn surface
     const planePoint = raycastDragPlane(event);
     if (!planePoint) return;
 
     // Calculate new position with drag offset
     const newPosition = planePoint.clone().add(dragOffset);
 
-    // Compute AABB at new position to check for surface collisions
+    // Compute AABB at new position to check for collisions with other surfaces
     computeAABBAtPosition(hoveredObject, newPosition, furnitureAABB);
 
-    // Check for collision with room mesh (only DIFFERENT surfaces)
+    // Check for collision with different surfaces (walls, etc.)
     const roomMesh = getRoomMesh();
     const currentNormal = hoveredObject.userData.surfaceNormal || new THREE.Vector3(0, 1, 0);
     const collision = testAABBMeshCollision(furnitureAABB, roomMesh, currentNormal);
 
     if (collision) {
-      // Surface transition detected via AABB collision with different surface
-      const newNormal = collision.normal;
-
-      console.log('AABB collision - surface transition:', {
-        from: currentNormal.toArray(),
-        to: newNormal.toArray(),
-        point: collision.point.toArray()
-      });
-
-      // Clear normal history and start fresh
-      clearNormalHistory();
-      addNormalToHistory(newNormal);
-
-      // Detect new contact axis using original orientation
-      const newContactAxis = detectContactAxis(hoveredObject, newNormal, dragStartQuaternion);
-      hoveredObject.userData.contactAxis = newContactAxis;
-      hoveredObject.userData.previousSurfaceNormal = newNormal.clone();
-      hoveredObject.userData.surfaceNormal = newNormal.clone();
-
-      // Align to new surface
-      alignToSurface(hoveredObject, newNormal, newContactAxis);
-
-      // Position on new surface
-      const bbOffset = calculateBoundingBoxOffset(hoveredObject, newNormal);
-      hoveredObject.position.copy(collision.point).add(
-        newNormal.clone().multiplyScalar(bbOffset)
-      );
-
-      // Raycast to furniture to find new grab point for drag plane
-      const furnitureHit = raycastFurniture(event);
-      if (furnitureHit && furnitureHit.object === hoveredObject) {
-        // Create drag plane at the pointer's position on furniture
-        dragPlane.setFromNormalAndCoplanarPoint(newNormal, furnitureHit.point);
-        // Recalculate drag offset from new grab point
-        dragOffset.copy(hoveredObject.position).sub(furnitureHit.point);
-      } else {
-        // Fallback: use collision point for drag plane
-        dragPlane.setFromNormalAndCoplanarPoint(newNormal, collision.point);
-        dragOffset.set(0, 0, 0);
-      }
-
+      // Collision with different surface - block movement in that direction
+      // Don't move to newPosition, furniture stays where it is
       return;
     }
 
-    // No surface transition - move along current plane
-    const surfaceNormal = hoveredObject.userData.surfaceNormal || new THREE.Vector3(0, 1, 0);
-
-    // Apply position
+    // No collision - move to new position
     hoveredObject.position.copy(newPosition);
-
-    // Keep aligned to current surface (handles minor variations)
-    const contactAxis = hoveredObject.userData.contactAxis || DEFAULT_CONTACT_AXIS;
-    alignContactAxisToSurface(hoveredObject, surfaceNormal, contactAxis);
-    applyUprightCorrection(hoveredObject, surfaceNormal);
   }
 }
 
