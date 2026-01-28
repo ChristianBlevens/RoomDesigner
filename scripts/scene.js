@@ -807,34 +807,20 @@ export async function loadRoomGeometry(meshUrl, options = {}) {
         if (floor) floor.visible = false;
 
         // Create mesh for raycasting and shadow receiving
-        // DEBUG: Using opaque MeshStandardMaterial to test if shadows work at all
-        // TODO: Switch back to ShadowMaterial once shadows are confirmed working
+        // ShadowMaterial is invisible except where shadows fall
         roomMesh = model.clone();
         roomMesh.traverse((child) => {
           if (child.isMesh) {
-            // Recompute normals in case MoGe geometry has issues
+            // Recompute normals - MoGe geometry needs this for proper shadow receiving
             child.geometry.computeVertexNormals();
 
-            child.material = new THREE.MeshStandardMaterial({
-              color: 0xffffff,
-              side: THREE.FrontSide
+            child.material = new THREE.ShadowMaterial({
+              opacity: 0.5
             });
             child.receiveShadow = true;
-            child.castShadow = false; // Only receive, don't cast
           }
         });
         scene.add(roomMesh);
-
-        // DEBUG: Add a simple plane at floor level to test ShadowMaterial
-        const testPlane = new THREE.Mesh(
-          new THREE.PlaneGeometry(20, 20),
-          new THREE.ShadowMaterial({ opacity: 0.5 })
-        );
-        testPlane.rotation.x = -Math.PI / 2;
-        testPlane.position.y = box.min.y + 0.01; // Slightly above floor
-        testPlane.receiveShadow = true;
-        scene.add(testPlane);
-        console.log('DEBUG: Test ShadowMaterial plane added at y=' + testPlane.position.y);
 
         // Create wireframe version for debug visualization (hidden by default)
         roomMeshWireframe = model.clone();
