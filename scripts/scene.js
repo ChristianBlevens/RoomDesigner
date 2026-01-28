@@ -1200,6 +1200,18 @@ export function clearAllFurniture() {
   toRemove.forEach(obj => removeFurnitureFromScene(obj));
 }
 
+// Toggle furniture visibility (for before/after comparison)
+export function setFurnitureVisible(visible) {
+  selectableObjects.forEach(obj => {
+    obj.visible = visible;
+    obj.traverse(child => {
+      if (child.isMesh) {
+        child.castShadow = visible;
+      }
+    });
+  });
+}
+
 // Generate 3D preview image from an already-loaded Three.js model (client-side, unused - server generates previews)
 export async function generatePreview3dFromModel(model, width = 256, height = 256) {
   // Create offscreen renderer

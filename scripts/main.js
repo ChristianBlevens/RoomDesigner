@@ -41,7 +41,8 @@ import {
   isLightingGizmoVisible,
   getRoomScale,
   setRoomScale,
-  resetRoomScale
+  resetRoomScale,
+  setFurnitureVisible
 } from './scene.js';
 import {
   saveFurnitureEntry,
@@ -230,6 +231,7 @@ async function init() {
   setupDebugPanel();
   setupLightingControls();
   setupScaleControls();
+  setupBeforeAfterToggle();
 
   // SSE available via subscribeToEvents() for future real-time features
 
@@ -697,6 +699,32 @@ function updateScaleUIFromRoom() {
     scaleSlider.value = scale;
     scaleValue.textContent = scale.toFixed(2) + 'x';
   }
+}
+
+// ============ Before/After Toggle ============
+
+let furnitureVisible = true;
+
+function setupBeforeAfterToggle() {
+  const btn = document.getElementById('before-after-btn');
+  if (!btn) {
+    console.warn('Before/after button not found');
+    return;
+  }
+
+  btn.addEventListener('click', () => {
+    furnitureVisible = !furnitureVisible;
+    setFurnitureVisible(furnitureVisible);
+    btn.classList.toggle('active', !furnitureVisible);
+  });
+}
+
+// Reset furniture visibility when loading a new house (session-scoped)
+function resetFurnitureVisibility() {
+  furnitureVisible = true;
+  setFurnitureVisible(true);
+  const btn = document.getElementById('before-after-btn');
+  if (btn) btn.classList.remove('active');
 }
 
 // ============ File Input Setup ============
@@ -2183,7 +2211,7 @@ async function exportHouseScreenshotsWithProgress(house, rooms, furnitureEntries
     try {
       if (!room.backgroundImage) {
         console.warn(`Skipping room "${roomName}": no background image`);
-        results.push({ room: roomName, success: false, error: 'No background image' });
+        results.push({ room: roomName, success: false, error: 'No background image', screenshot: null });
         continue;
       }
 
@@ -2193,12 +2221,12 @@ async function exportHouseScreenshotsWithProgress(house, rooms, furnitureEntries
       const filename = `${safeName}.png`;
 
       zip.file(filename, screenshot);
-      results.push({ room: roomName, success: true, filename });
+      results.push({ room: roomName, success: true, filename, screenshot });
 
       onProgress(i + 1, rooms.length, roomName, 'complete');
     } catch (err) {
       console.error(`Failed to capture screenshot for "${roomName}":`, err);
-      results.push({ room: roomName, success: false, error: err.message });
+      results.push({ room: roomName, success: false, error: err.message, screenshot: null });
       onProgress(i + 1, rooms.length, roomName, 'error');
     }
   }
@@ -2206,29 +2234,153 @@ async function exportHouseScreenshotsWithProgress(house, rooms, furnitureEntries
   // Clean up renderer
   disposeScreenshotRenderer();
 
-  // Add manifest
+  // Build delivery manifest
   const manifest = {
-    exportDate: new Date().toISOString(),
     house: {
-      id: house.id,
       name: house.name,
       startDate: house.startDate,
       endDate: house.endDate
     },
-    rooms: results.map((r, i) => ({
-      name: rooms[i].name || `Room ${i + 1}`,
-      filename: r.success ? r.filename : null,
-      success: r.success,
-      error: r.error || null
-    }))
+    exportDate: new Date().toISOString(),
+    rooms: rooms.map(room => ({
+      name: room.name,
+      furniture: (room.placedFurniture || []).map(pf => {
+        const entry = furnitureEntries.get(pf.entryId);
+        return {
+          name: entry?.name || 'Unknown',
+          category: entry?.category || null,
+          dimensions: entry ? {
+            width: entry.dimensionX,
+            height: entry.dimensionY,
+            depth: entry.dimensionZ
+          } : null
+        };
+      })
+    })),
+    inventory: aggregateFurnitureInventory(rooms, furnitureEntries)
   };
   zip.file('manifest.json', JSON.stringify(manifest, null, 2));
+
+  // Generate PDF report
+  const pdf = await generateExportPDF(house, rooms, results, furnitureEntries);
+  zip.file('staging_report.pdf', pdf);
 
   // Generate ZIP
   return zip.generateAsync({
     type: 'blob',
     compression: 'DEFLATE',
     compressionOptions: { level: 6 }
+  });
+}
+
+/**
+ * Aggregate furniture inventory across all rooms.
+ */
+function aggregateFurnitureInventory(rooms, furnitureEntries) {
+  const counts = new Map();
+  rooms.forEach(room => {
+    (room.placedFurniture || []).forEach(pf => {
+      counts.set(pf.entryId, (counts.get(pf.entryId) || 0) + 1);
+    });
+  });
+
+  return Array.from(counts.entries()).map(([entryId, count]) => {
+    const entry = furnitureEntries.get(entryId);
+    return {
+      name: entry?.name || 'Unknown',
+      category: entry?.category || null,
+      quantity: count
+    };
+  }).sort((a, b) => (a.category || '').localeCompare(b.category || '') || a.name.localeCompare(b.name));
+}
+
+/**
+ * Generate PDF report for house export.
+ */
+async function generateExportPDF(house, rooms, results, furnitureEntries) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+
+  // Title page
+  doc.setFontSize(24);
+  doc.text(house.name, 105, 40, { align: 'center' });
+  doc.setFontSize(12);
+  doc.text(`${house.startDate} - ${house.endDate}`, 105, 50, { align: 'center' });
+  doc.text(`Generated: ${new Date().toLocaleDateString()}`, 105, 60, { align: 'center' });
+
+  // Each room on a new page (screenshot above, furniture list below)
+  for (let i = 0; i < rooms.length; i++) {
+    const room = rooms[i];
+    const result = results[i];
+
+    doc.addPage();
+
+    // Room name header
+    doc.setFontSize(18);
+    doc.text(room.name || `Room ${i + 1}`, 20, 15);
+
+    let yPos = 25;
+
+    // Screenshot at top (if successful)
+    if (result.success && result.screenshot) {
+      const imgData = await blobToDataURL(result.screenshot);
+      // Scale to fit page width (170mm), auto height maintains aspect ratio
+      doc.addImage(imgData, 'PNG', 20, yPos, 170, 0);
+      yPos = 140;
+    }
+
+    // Furniture list below image
+    const furnitureList = room.placedFurniture || [];
+    if (furnitureList.length > 0) {
+      doc.setFontSize(12);
+      doc.text('Furniture:', 20, yPos);
+      yPos += 7;
+
+      doc.setFontSize(10);
+      furnitureList.forEach(pf => {
+        const entry = furnitureEntries.get(pf.entryId);
+        const name = entry?.name || 'Unknown';
+        const dims = entry && entry.dimensionX ? `(${entry.dimensionX}"W x ${entry.dimensionY}"H x ${entry.dimensionZ}"D)` : '';
+        doc.text(`- ${name} ${dims}`, 25, yPos);
+        yPos += 5;
+      });
+    }
+  }
+
+  // Final page: Complete inventory for truck loading
+  doc.addPage();
+  doc.setFontSize(18);
+  doc.text('Complete Inventory', 20, 20);
+
+  const inventory = aggregateFurnitureInventory(rooms, furnitureEntries);
+  let yPos = 32;
+  doc.setFontSize(10);
+
+  let currentCategory = null;
+  inventory.forEach(item => {
+    // Category header
+    if (item.category !== currentCategory) {
+      currentCategory = item.category;
+      doc.setFontSize(12);
+      doc.text(currentCategory || 'Uncategorized', 20, yPos);
+      yPos += 6;
+      doc.setFontSize(10);
+    }
+    doc.text(`  ${item.name} x${item.quantity}`, 25, yPos);
+    yPos += 5;
+  });
+
+  return doc.output('blob');
+}
+
+/**
+ * Convert blob to data URL for PDF embedding.
+ */
+function blobToDataURL(blob) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.readAsDataURL(blob);
   });
 }
 
@@ -2749,6 +2901,9 @@ async function confirmDeleteRoomFromTab(roomId) {
 
 async function loadHouse(houseId) {
   if (!houseId) return;
+
+  // Reset furniture visibility for new house session
+  resetFurnitureVisibility();
 
   const house = await getHouseById(houseId);
   if (!house) {
