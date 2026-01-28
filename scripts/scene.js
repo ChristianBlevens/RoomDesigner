@@ -807,18 +807,16 @@ export async function loadRoomGeometry(meshUrl, options = {}) {
         if (floor) floor.visible = false;
 
         // Create mesh for raycasting and shadow receiving
-        // ShadowMaterial is invisible except where shadows fall
-        // depthWrite = false and renderOrder = -1 from AR.js shadow example
+        // DEBUG: Using opaque MeshStandardMaterial to test if shadows work at all
+        // TODO: Switch back to ShadowMaterial once shadows are confirmed working
         roomMesh = model.clone();
         roomMesh.traverse((child) => {
           if (child.isMesh) {
-            child.material = new THREE.ShadowMaterial({
-              opacity: 0.5,
-              side: THREE.FrontSide,
-              depthWrite: false
+            child.material = new THREE.MeshStandardMaterial({
+              color: 0x808080,
+              side: THREE.FrontSide
             });
             child.receiveShadow = true;
-            child.renderOrder = -1;
           }
         });
         scene.add(roomMesh);
