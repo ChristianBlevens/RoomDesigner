@@ -363,12 +363,14 @@ function computeAABBAtPosition(object, position, target) {
 }
 
 /**
- * Test if AABB intersects room mesh and find collision details.
+ * Test if AABB intersects room mesh and find collision with a DIFFERENT surface.
+ * Ignores collisions with triangles that have similar normals to the current surface.
  * @param {THREE.Box3} aabb - Furniture bounding box
  * @param {THREE.Mesh} mesh - Room mesh
- * @returns {Object|null} { point, normal, distance } or null if no collision
+ * @param {THREE.Vector3} currentNormal - Current surface normal to ignore
+ * @returns {Object|null} { point, normal, distance } or null if no collision with different surface
  */
-function testAABBMeshCollision(aabb, mesh) {
+function testAABBMeshCollision(aabb, mesh, currentNormal) {
   if (!mesh || !mesh.geometry) return null;
 
   const geometry = mesh.geometry;
@@ -380,6 +382,7 @@ function testAABBMeshCollision(aabb, mesh) {
   const vC = new THREE.Vector3();
   const triangle = new THREE.Triangle();
   const closestPoint = new THREE.Vector3();
+  const triNormal = new THREE.Vector3();
 
   let closestCollision = null;
   let closestDistance = Infinity;
@@ -408,6 +411,14 @@ function testAABBMeshCollision(aabb, mesh) {
 
     triangle.set(vA, vB, vC);
 
+    // Compute face normal FIRST to filter out same-surface triangles
+    triangle.getNormal(triNormal);
+
+    // Skip triangles that are part of the SAME surface (similar normal)
+    if (currentNormal && triNormal.dot(currentNormal) > SURFACE_CHANGE_THRESHOLD) {
+      continue; // Same surface type, ignore
+    }
+
     // Check if triangle intersects AABB
     if (aabb.intersectsTriangle(triangle)) {
       // Get collision point (closest point on triangle to AABB center)
@@ -419,13 +430,9 @@ function testAABBMeshCollision(aabb, mesh) {
       if (distance < closestDistance) {
         closestDistance = distance;
 
-        // Compute face normal
-        const normal = new THREE.Vector3();
-        triangle.getNormal(normal);
-
         closestCollision = {
           point: closestPoint.clone(),
-          normal: normal,
+          normal: triNormal.clone(),
           distance: distance
         };
       }
@@ -648,57 +655,60 @@ function onPointerMove(event) {
     // Compute AABB at new position to check for surface collisions
     computeAABBAtPosition(hoveredObject, newPosition, furnitureAABB);
 
-    // Check for collision with room mesh (surface transition detection)
+    // Check for collision with room mesh (only DIFFERENT surfaces)
     const roomMesh = getRoomMesh();
-    const collision = testAABBMeshCollision(furnitureAABB, roomMesh);
+    const currentNormal = hoveredObject.userData.surfaceNormal || new THREE.Vector3(0, 1, 0);
+    const collision = testAABBMeshCollision(furnitureAABB, roomMesh, currentNormal);
 
     if (collision) {
-      // Potential surface transition - check if it's actually a different surface
+      // Surface transition detected via AABB collision with different surface
       const newNormal = collision.normal;
-      const currentNormal = hoveredObject.userData.surfaceNormal || new THREE.Vector3(0, 1, 0);
 
-      if (currentNormal.dot(newNormal) < SURFACE_CHANGE_THRESHOLD) {
-        // Surface transition detected via AABB collision
-        console.log('AABB collision - surface transition:', {
-          from: currentNormal.toArray(),
-          to: newNormal.toArray(),
-          point: collision.point.toArray()
-        });
+      console.log('AABB collision - surface transition:', {
+        from: currentNormal.toArray(),
+        to: newNormal.toArray(),
+        point: collision.point.toArray()
+      });
 
-        // Clear normal history and start fresh
-        clearNormalHistory();
-        addNormalToHistory(newNormal);
+      // Clear normal history and start fresh
+      clearNormalHistory();
+      addNormalToHistory(newNormal);
 
-        // Detect new contact axis using original orientation
-        const newContactAxis = detectContactAxis(hoveredObject, newNormal, dragStartQuaternion);
-        hoveredObject.userData.contactAxis = newContactAxis;
-        hoveredObject.userData.previousSurfaceNormal = newNormal.clone();
-        hoveredObject.userData.surfaceNormal = newNormal.clone();
+      // Detect new contact axis using original orientation
+      const newContactAxis = detectContactAxis(hoveredObject, newNormal, dragStartQuaternion);
+      hoveredObject.userData.contactAxis = newContactAxis;
+      hoveredObject.userData.previousSurfaceNormal = newNormal.clone();
+      hoveredObject.userData.surfaceNormal = newNormal.clone();
 
-        // Align to new surface
-        alignToSurface(hoveredObject, newNormal, newContactAxis);
+      // Align to new surface
+      alignToSurface(hoveredObject, newNormal, newContactAxis);
 
-        // Position on new surface
-        const bbOffset = calculateBoundingBoxOffset(hoveredObject, newNormal);
-        hoveredObject.position.copy(collision.point).add(
-          newNormal.clone().multiplyScalar(bbOffset)
-        );
+      // Position on new surface
+      const bbOffset = calculateBoundingBoxOffset(hoveredObject, newNormal);
+      hoveredObject.position.copy(collision.point).add(
+        newNormal.clone().multiplyScalar(bbOffset)
+      );
 
-        // Create NEW drag plane for new surface
+      // Raycast to furniture to find new grab point for drag plane
+      const furnitureHit = raycastFurniture(event);
+      if (furnitureHit && furnitureHit.object === hoveredObject) {
+        // Create drag plane at the pointer's position on furniture
+        dragPlane.setFromNormalAndCoplanarPoint(newNormal, furnitureHit.point);
+        // Recalculate drag offset from new grab point
+        dragOffset.copy(hoveredObject.position).sub(furnitureHit.point);
+      } else {
+        // Fallback: use collision point for drag plane
         dragPlane.setFromNormalAndCoplanarPoint(newNormal, collision.point);
-
-        // Reset drag offset for new surface
         dragOffset.set(0, 0, 0);
-
-        return;
       }
+
+      return;
     }
 
     // No surface transition - move along current plane
     const surfaceNormal = hoveredObject.userData.surfaceNormal || new THREE.Vector3(0, 1, 0);
-    const bbOffset = calculateBoundingBoxOffset(hoveredObject, surfaceNormal);
 
-    // Apply position with bounding box offset to keep contact face on surface
+    // Apply position
     hoveredObject.position.copy(newPosition);
 
     // Keep aligned to current surface (handles minor variations)
