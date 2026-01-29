@@ -5,6 +5,226 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { adjustUrlForProxy } from './api.js';
 
+// =============================================================================
+// Shadow System - Soft Shadows + PCSS with runtime toggle
+// =============================================================================
+
+// Shadow mode: 'soft' or 'pcss'
+let shadowMode = 'soft';
+
+// PCSS parameters - updated when room loads
+let pcssLightSizeUV = 0.015;
+let pcssShadowNearPlane = 0.5;
+
+// Store original shader chunk for re-injection
+let originalShadowChunk = null;
+
+/**
+ * Build the shadow shader code with current parameters baked in as #defines.
+ */
+function buildShadowShaderCode() {
+  const usePCSS = shadowMode === 'pcss' ? 1 : 0;
+
+  return /* glsl */`
+#define SHADOW_MODE ${usePCSS}
+#define PCSS_LIGHT_SIZE_UV ${pcssLightSizeUV.toFixed(6)}
+#define PCSS_SHADOW_NEAR_PLANE ${pcssShadowNearPlane.toFixed(6)}
+
+#define NUM_SAMPLES 17
+#define NUM_RINGS 11
+#define SOFT_SHADOW_SAMPLES 9
+#define SOFT_SHADOW_RADIUS 0.002
+
+vec2 poissonDisk[NUM_SAMPLES];
+
+void initPoissonSamples(const in vec2 randomSeed) {
+  float ANGLE_STEP = PI2 * float(NUM_RINGS) / float(NUM_SAMPLES);
+  float INV_NUM_SAMPLES = 1.0 / float(NUM_SAMPLES);
+
+  float angle = rand(randomSeed) * PI2;
+  float radius = INV_NUM_SAMPLES;
+  float radiusStep = radius;
+
+  for (int i = 0; i < NUM_SAMPLES; i++) {
+    poissonDisk[i] = vec2(cos(angle), sin(angle)) * pow(radius, 0.75);
+    radius += radiusStep;
+    angle += ANGLE_STEP;
+  }
+}
+
+float SoftShadow(sampler2D shadowMap, vec4 coords) {
+  vec2 uv = coords.xy;
+  float zReceiver = coords.z;
+
+  initPoissonSamples(uv);
+
+  float sum = 0.0;
+  for (int i = 0; i < SOFT_SHADOW_SAMPLES; i++) {
+    float depth = unpackRGBAToDepth(texture2D(shadowMap, uv + poissonDisk[i] * SOFT_SHADOW_RADIUS));
+    if (zReceiver <= depth) sum += 1.0;
+  }
+
+  return sum / float(SOFT_SHADOW_SAMPLES);
+}
+
+float penumbraSize(const in float zReceiver, const in float zBlocker) {
+  return (zReceiver - zBlocker) / zBlocker;
+}
+
+float findBlocker(sampler2D shadowMap, const in vec2 uv, const in float zReceiver) {
+  float searchRadius = PCSS_LIGHT_SIZE_UV * (zReceiver - PCSS_SHADOW_NEAR_PLANE) / zReceiver;
+  float blockerDepthSum = 0.0;
+  int numBlockers = 0;
+
+  for (int i = 0; i < NUM_SAMPLES; i++) {
+    float shadowMapDepth = unpackRGBAToDepth(texture2D(shadowMap, uv + poissonDisk[i] * searchRadius));
+    if (shadowMapDepth < zReceiver) {
+      blockerDepthSum += shadowMapDepth;
+      numBlockers++;
+    }
+  }
+
+  if (numBlockers == 0) return -1.0;
+  return blockerDepthSum / float(numBlockers);
+}
+
+float PCF_Filter(sampler2D shadowMap, vec2 uv, float zReceiver, float filterRadius) {
+  float sum = 0.0;
+
+  for (int i = 0; i < NUM_SAMPLES; i++) {
+    float depth = unpackRGBAToDepth(texture2D(shadowMap, uv + poissonDisk[i] * filterRadius));
+    if (zReceiver <= depth) sum += 1.0;
+  }
+
+  for (int i = 0; i < NUM_SAMPLES; i++) {
+    float depth = unpackRGBAToDepth(texture2D(shadowMap, uv + -poissonDisk[i].yx * filterRadius));
+    if (zReceiver <= depth) sum += 1.0;
+  }
+
+  return sum / (2.0 * float(NUM_SAMPLES));
+}
+
+float PCSS(sampler2D shadowMap, vec4 coords) {
+  vec2 uv = coords.xy;
+  float zReceiver = coords.z;
+
+  initPoissonSamples(uv);
+
+  float avgBlockerDepth = findBlocker(shadowMap, uv, zReceiver);
+  if (avgBlockerDepth == -1.0) return 1.0;
+
+  float penumbraRatio = penumbraSize(zReceiver, avgBlockerDepth);
+  float filterRadius = penumbraRatio * PCSS_LIGHT_SIZE_UV * PCSS_SHADOW_NEAR_PLANE / zReceiver;
+
+  return PCF_Filter(shadowMap, uv, zReceiver, filterRadius);
+}
+
+float getCustomShadow(sampler2D shadowMap, vec4 coords) {
+  #if SHADOW_MODE == 1
+    return PCSS(shadowMap, coords);
+  #else
+    return SoftShadow(shadowMap, coords);
+  #endif
+}
+`;
+}
+
+/**
+ * Inject custom shadow shader code into Three.js shadow mapping.
+ * MUST be called before any materials are created.
+ */
+function injectShadowShader() {
+  // Store original for re-injection
+  if (!originalShadowChunk) {
+    originalShadowChunk = THREE.ShaderChunk.shadowmap_pars_fragment;
+  }
+
+  let shader = originalShadowChunk;
+  const shadowCode = buildShadowShaderCode();
+
+  // Add our shadow functions after USE_SHADOWMAP check
+  shader = shader.replace(
+    '#ifdef USE_SHADOWMAP',
+    '#ifdef USE_SHADOWMAP\n' + shadowCode
+  );
+
+  // Replace the shadow return with our custom function
+  shader = shader.replace(
+    /return shadow;/g,
+    'return getCustomShadow(shadowMap, shadowCoord);'
+  );
+
+  THREE.ShaderChunk.shadowmap_pars_fragment = shader;
+
+  console.log(`Shadow shader injected (mode: ${shadowMode})`);
+}
+
+/**
+ * Recompile all materials with updated shadow shader.
+ * Called when shadow mode or PCSS parameters change.
+ */
+function recompileShadowMaterials() {
+  // Re-inject shader with new parameters
+  injectShadowShader();
+
+  // Force all scene materials to recompile
+  if (scene) {
+    scene.traverse((object) => {
+      if (object.isMesh && object.material) {
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        materials.forEach(mat => {
+          mat.needsUpdate = true;
+        });
+      }
+    });
+  }
+}
+
+/**
+ * Set shadow mode.
+ * @param {string} mode - 'soft' or 'pcss'
+ */
+export function setShadowMode(mode) {
+  if (mode !== 'soft' && mode !== 'pcss') mode = 'soft';
+  if (shadowMode === mode) return;
+
+  shadowMode = mode;
+  recompileShadowMaterials();
+  console.log(`Shadow mode: ${mode}`);
+}
+
+/**
+ * Get current shadow mode.
+ * @returns {string} 'soft' or 'pcss'
+ */
+export function getShadowMode() {
+  return shadowMode;
+}
+
+/**
+ * Update PCSS parameters based on current room bounds and shadow camera.
+ * Called when room mesh loads or shadow camera updates.
+ */
+function updatePCSSParameters() {
+  if (!directionalLight) return;
+
+  const shadowCamera = directionalLight.shadow.camera;
+  const frustumWidth = shadowCamera.right - shadowCamera.left;
+
+  // Light size as proportion of frustum (controls PCSS softness)
+  const lightWorldSize = frustumWidth * 0.015; // 1.5% of frustum width
+
+  pcssLightSizeUV = lightWorldSize / frustumWidth;
+  pcssShadowNearPlane = shadowCamera.near;
+
+  // Only recompile if in PCSS mode (soft shadows don't use these parameters)
+  if (shadowMode === 'pcss') {
+    recompileShadowMaterials();
+  }
+}
+
+// =============================================================================
+
 // Scene state
 let scene, camera, renderer;
 let transformControls;
@@ -957,6 +1177,9 @@ export function clearRoomGeometry() {
 
 // Initialize the Three.js scene
 export function initScene() {
+  // CRITICAL: Inject shadow shader before any materials are created
+  injectShadowShader();
+
   const container = document.getElementById('canvas-container');
 
   // Scene with no background (transparent)
@@ -981,7 +1204,7 @@ export function initScene() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setClearColor(0x000000, 0);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.BasicShadowMap;  // Required for custom shadow sampling (PCSS)
   container.appendChild(renderer.domElement);
 
   // Prevent default touch behaviors on canvas (scrolling, zooming)
@@ -1403,6 +1626,9 @@ function updateShadowCamera(bounds) {
   directionalLight.shadow.camera.far = maxDim * 3;
   directionalLight.shadow.camera.updateProjectionMatrix();
 
+  // Update PCSS parameters with new frustum dimensions
+  updatePCSSParameters();
+
   console.log('Shadow camera frustum expanded:', maxDim.toFixed(2));
 }
 
@@ -1732,7 +1958,8 @@ export function getLightingSettings() {
       y: directionalLight.target.position.y,
       z: directionalLight.target.position.z
     },
-    temperature: directionalLight.userData.temperature || 6500
+    temperature: directionalLight.userData.temperature || 6500,
+    shadowMode: getShadowMode()
   };
 }
 
@@ -1768,6 +1995,10 @@ export function applyLightingSettings(settings) {
     directionalLight.userData.temperature = settings.temperature;
     const color = kelvinToRGB(settings.temperature);
     directionalLight.color.copy(color);
+  }
+
+  if (settings.shadowMode) {
+    setShadowMode(settings.shadowMode);
   }
 
   updateLightingGizmo();

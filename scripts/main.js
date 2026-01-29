@@ -42,7 +42,9 @@ import {
   getRoomScale,
   setRoomScale,
   resetRoomScale,
-  setFurnitureVisible
+  setFurnitureVisible,
+  setShadowMode,
+  getShadowMode
 } from './scene.js';
 import {
   saveFurnitureEntry,
@@ -367,6 +369,17 @@ function updateLightingUI() {
   }
 }
 
+function updateShadowModeUI() {
+  const mode = getShadowMode();
+  const softBtn = document.getElementById('shadow-mode-soft');
+  const pcssBtn = document.getElementById('shadow-mode-pcss');
+
+  if (softBtn && pcssBtn) {
+    softBtn.classList.toggle('active', mode === 'soft');
+    pcssBtn.classList.toggle('active', mode === 'pcss');
+  }
+}
+
 function setupLightingControls() {
   const lightingBtn = document.getElementById('lighting-btn');
   const lightingPanel = document.getElementById('lighting-panel');
@@ -432,6 +445,22 @@ function setupLightingControls() {
     // Store temperature in light userData for saving
     const light = getDirectionalLight();
     if (light) light.userData.temperature = kelvin;
+  });
+
+  // Shadow mode toggle
+  const shadowModeSoft = document.getElementById('shadow-mode-soft');
+  const shadowModePcss = document.getElementById('shadow-mode-pcss');
+
+  shadowModeSoft?.addEventListener('click', () => {
+    setShadowMode('soft');
+    shadowModeSoft.classList.add('active');
+    shadowModePcss.classList.remove('active');
+  });
+
+  shadowModePcss?.addEventListener('click', () => {
+    setShadowMode('pcss');
+    shadowModePcss.classList.add('active');
+    shadowModeSoft.classList.remove('active');
   });
 
   // Set Direction button
@@ -3066,6 +3095,8 @@ async function loadRoomById(roomId) {
   // Load lighting settings
   if (room.lightingSettings) {
     applyLightingSettings(room.lightingSettings);
+    // Update shadow mode UI buttons
+    updateShadowModeUI();
     console.log('Room lighting settings restored');
   }
 
