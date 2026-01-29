@@ -26,6 +26,10 @@ let lightingGizmoTarget = null;  // Sphere at light target
 let lightingGizmoLine = null;    // Line connecting them
 let lightingGizmoArrow = null;   // Arrow head
 
+// Gizmo positions (visual, user-controlled) - separate from actual light position
+let gizmoSourcePos = new THREE.Vector3(5, 10, 7.5);
+let gizmoTargetPos = new THREE.Vector3(0, 0, 0);
+
 // Room mesh for raycasting (invisible) and debug visualization (wireframe)
 let roomMesh = null;
 let roomMeshWireframe = null;
@@ -1472,17 +1476,18 @@ export function setLightIntensity(intensity) {
  */
 /**
  * Recenter the directional light over the room bounds while preserving direction.
+ * Uses the gizmo positions to determine direction, not the actual light position.
  * This ensures the shadow camera frustum covers the room from any light angle.
  */
 function recenterLightOverRoom() {
   if (!directionalLight) return;
 
-  // Get current light direction
+  // Get direction from GIZMO positions (not actual light)
   const direction = new THREE.Vector3()
-    .subVectors(directionalLight.target.position, directionalLight.position)
+    .subVectors(gizmoTargetPos, gizmoSourcePos)
     .normalize();
 
-  // If direction is zero (same position/target), use default down-forward
+  // If direction is zero, use default
   if (direction.length() === 0) {
     direction.set(-0.5, -1, -0.5).normalize();
   }
@@ -1496,8 +1501,7 @@ function recenterLightOverRoom() {
   roomBounds.getSize(size);
   const distance = Math.max(size.x, size.y, size.z) * 2;
 
-  // Position light along the direction vector, centered over room
-  // Light is placed "upstream" of the direction (where light comes FROM)
+  // Position actual light centered over room (for shadow frustum)
   const newPosition = roomCenter.clone().sub(direction.clone().multiplyScalar(distance));
   const newTarget = roomCenter.clone();
 
@@ -1511,11 +1515,11 @@ function recenterLightOverRoom() {
 export function setLightDirection(position, target) {
   if (!directionalLight) return;
 
-  // Temporarily set position/target to extract direction
-  directionalLight.position.copy(position);
-  directionalLight.target.position.copy(target);
+  // Store gizmo positions (user-visible)
+  gizmoSourcePos.copy(position);
+  gizmoTargetPos.copy(target);
 
-  // Now recenter over room while preserving that direction
+  // Recenter actual light over room using gizmo direction
   recenterLightOverRoom();
   updateLightingGizmo();
 }
@@ -1655,8 +1659,9 @@ function createLightingGizmo() {
 export function updateLightingGizmo() {
   if (!lightingGizmo || !directionalLight) return;
 
-  const sourcePos = directionalLight.position.clone();
-  const targetPos = directionalLight.target.position.clone();
+  // Use GIZMO positions (user-visible), not actual light positions
+  const sourcePos = gizmoSourcePos.clone();
+  const targetPos = gizmoTargetPos.clone();
 
   // Update sphere positions
   lightingGizmoSource.position.copy(sourcePos);
@@ -1762,7 +1767,8 @@ export function setLightingGizmoHover(handleType) {
  * @returns {THREE.Vector3}
  */
 export function getLightPosition() {
-  return directionalLight ? directionalLight.position.clone() : new THREE.Vector3(5, 10, 7.5);
+  // Return gizmo position (user-visible), not actual light position
+  return gizmoSourcePos.clone();
 }
 
 /**
@@ -1770,7 +1776,8 @@ export function getLightPosition() {
  * @returns {THREE.Vector3}
  */
 export function getLightTarget() {
-  return directionalLight ? directionalLight.target.position.clone() : new THREE.Vector3(0, 0, 0);
+  // Return gizmo target (user-visible), not actual light target
+  return gizmoTargetPos.clone();
 }
 
 /**
@@ -1779,8 +1786,9 @@ export function getLightTarget() {
  */
 export function setLightPosition(position) {
   if (directionalLight) {
-    // Update position, then recenter to keep shadow frustum over room
-    directionalLight.position.copy(position);
+    // Update gizmo source position (visual)
+    gizmoSourcePos.copy(position);
+    // Recenter actual light over room
     recenterLightOverRoom();
     updateLightingGizmo();
   }
@@ -1792,9 +1800,9 @@ export function setLightPosition(position) {
  */
 export function setLightTargetPosition(target) {
   if (directionalLight) {
-    // Update target, then recenter to keep shadow frustum over room
-    directionalLight.target.position.copy(target);
-    directionalLight.target.updateMatrixWorld();
+    // Update gizmo target position (visual)
+    gizmoTargetPos.copy(target);
+    // Recenter actual light over room
     recenterLightOverRoom();
     updateLightingGizmo();
   }
@@ -1807,17 +1815,18 @@ export function setLightTargetPosition(target) {
 export function getLightingSettings() {
   if (!directionalLight) return null;
 
+  // Save gizmo positions (user-visible), not actual light positions
   return {
     intensity: directionalLight.intensity,
     position: {
-      x: directionalLight.position.x,
-      y: directionalLight.position.y,
-      z: directionalLight.position.z
+      x: gizmoSourcePos.x,
+      y: gizmoSourcePos.y,
+      z: gizmoSourcePos.z
     },
     target: {
-      x: directionalLight.target.position.x,
-      y: directionalLight.target.position.y,
-      z: directionalLight.target.position.z
+      x: gizmoTargetPos.x,
+      y: gizmoTargetPos.y,
+      z: gizmoTargetPos.z
     },
     temperature: directionalLight.userData.temperature || 6500
   };
@@ -1834,8 +1843,9 @@ export function applyLightingSettings(settings) {
     directionalLight.intensity = settings.intensity;
   }
 
+  // Restore gizmo positions (user-visible)
   if (settings.position) {
-    directionalLight.position.set(
+    gizmoSourcePos.set(
       settings.position.x,
       settings.position.y,
       settings.position.z
@@ -1843,15 +1853,14 @@ export function applyLightingSettings(settings) {
   }
 
   if (settings.target) {
-    directionalLight.target.position.set(
+    gizmoTargetPos.set(
       settings.target.x,
       settings.target.y,
       settings.target.z
     );
-    directionalLight.target.updateMatrixWorld();
   }
 
-  // Recenter light over room to ensure shadow frustum coverage
+  // Recenter actual light over room using restored gizmo direction
   recenterLightOverRoom();
 
   if (typeof settings.temperature === 'number') {
