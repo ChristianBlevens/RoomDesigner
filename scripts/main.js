@@ -1355,6 +1355,9 @@ async function placeEntryInScene(entryId) {
       return;
     }
 
+    // Show immediate feedback
+    showActionNotification('Placing furniture...');
+
     // NOW load the model (only when actually placing)
     const position = getLastClickPosition();
     await placeFurniture(entryId, position);
@@ -1373,6 +1376,7 @@ async function confirmDeleteEntry(entryId) {
   showConfirmDialog(
     `Are you sure you want to delete "${entry.name}"? This will also remove all placed instances.`,
     async () => {
+      showActionNotification('Deleting entry...');
       await deleteFurnitureEntry(entryId);
       removeAllFurnitureByEntryId(entryId);
       modalManager.closeModal();
@@ -1486,6 +1490,9 @@ function setupEntryEditor() {
       showError(`Server at maximum capacity (${meshyServerStatus.max} concurrent tasks). Please wait.`);
       return;
     }
+
+    // Show immediate feedback
+    showActionNotification('Starting 3D generation...');
 
     try {
       const response = await fetch(adjustUrlForProxy(`/api/meshy/generate/${editingEntryId}`), {
@@ -1913,6 +1920,9 @@ async function handleEntrySubmit(event) {
     dimensionZ: dimZVal !== '' ? parseFloat(dimZVal) : null
   };
 
+  // Show immediate feedback
+  showActionNotification(editingEntryId ? 'Saving entry...' : 'Creating entry...');
+
   // Close modal immediately for responsiveness
   closeEntryEditor();
 
@@ -2077,6 +2087,33 @@ function removeMeshyToast(toast) {
   setTimeout(() => {
     toast.remove();
   }, 300);
+}
+
+// ============ Action Notification (Bottom-Left Feedback) ============
+
+let actionNotificationTimeout = null;
+
+export function showActionNotification(message) {
+  const el = document.getElementById('action-notification');
+  if (!el) return;
+
+  // Clear any pending hide
+  if (actionNotificationTimeout) {
+    clearTimeout(actionNotificationTimeout);
+  }
+
+  // Update message and show
+  el.textContent = message;
+  el.classList.remove('hidden');
+  // Force reflow for animation
+  el.offsetHeight;
+  el.classList.add('visible');
+
+  // Auto-hide after 2 seconds
+  actionNotificationTimeout = setTimeout(() => {
+    el.classList.remove('visible');
+    setTimeout(() => el.classList.add('hidden'), 200);
+  }, 2000);
 }
 
 // ============ Session Modal (House Operations) ============
@@ -2749,6 +2786,9 @@ async function handleHouseEditorSubmit(event) {
     return;
   }
 
+  // Show immediate feedback
+  showActionNotification(editingHouseId ? 'Saving house...' : 'Creating house...');
+
   try {
     if (editingHouseId) {
       // Update existing house
@@ -2826,6 +2866,7 @@ async function confirmDeleteHouse(houseId) {
   showConfirmDialog(
     `Are you sure you want to delete "${house.name}" and all ${roomCount} room${roomCount !== 1 ? 's' : ''}? This cannot be undone.`,
     async () => {
+      showActionNotification('Deleting house...');
       await deleteHouseWithRooms(houseId);
       modalManager.closeModal();
       await renderCalendar();
@@ -2965,6 +3006,9 @@ async function renderTabBar() {
 }
 
 async function switchRoom(roomId) {
+  // Show immediate feedback
+  showActionNotification('Switching room...');
+
   // Close panels before switching
   closeLightingPanelIfOpen();
   closeScalePanelIfOpen();
@@ -2988,6 +3032,7 @@ async function confirmDeleteRoomFromTab(roomId) {
   showConfirmDialog(
     `Are you sure you want to delete "${room.name || 'this room'}"? This cannot be undone.`,
     async () => {
+      showActionNotification('Deleting room...');
       modalManager.closeModal();
       await deleteRoom(roomId);
 
@@ -3010,6 +3055,9 @@ async function confirmDeleteRoomFromTab(roomId) {
 
 async function loadHouse(houseId) {
   if (!houseId) return;
+
+  // Show immediate feedback
+  showActionNotification('Loading house...');
 
   // Reset furniture visibility for new house session
   resetFurnitureVisibility();

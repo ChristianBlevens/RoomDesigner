@@ -17,6 +17,9 @@
   /* Edge margins (distance from screen edge) */
   --edge-margin: clamp(8px, 2vw, 16px);
 
+  /* Modal margin (minimum tappable area around modals for dismissal) */
+  --modal-margin-min: 44px;
+
   /* Panel widths */
   --panel-width: clamp(200px, 60vw, 280px);
 
@@ -942,4 +945,32 @@ select:focus {
 #before-after-btn.active {
   background: #4f46e5;
   color: #fff;
+}
+
+/* ============ Action Notification ============ */
+
+.action-notification {
+  position: fixed;
+  bottom: calc(var(--tab-height) + var(--spacing-md));
+  left: var(--edge-margin);
+  background: #1f2937;
+  color: #fff;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  font-size: var(--font-sm);
+  z-index: 1001;
+  opacity: 0;
+  transform: translateX(-20px);
+  transition: opacity 0.2s, transform 0.2s;
+  pointer-events: none;
+  max-width: clamp(200px, 40vw, 300px);
+}
+
+.action-notification.visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.action-notification.hidden {
+  display: none;
 }

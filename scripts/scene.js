@@ -43,6 +43,9 @@ let roomBounds = new THREE.Box3(
 // Selectable furniture objects
 export const selectableObjects = [];
 
+// Invisible AABB hitboxes for furniture selection (easier clicking/tapping)
+const furnitureHitBoxes = [];
+
 // Room-wide scale factor (multiplies individual furniture base scales)
 let roomScaleFactor = 1.0;
 
@@ -1127,24 +1130,23 @@ function updateMouse(event) {
   mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 }
 
-// Raycast to find furniture at mouse position
+// Raycast to find furniture at mouse position using AABB hitboxes
 export function raycastFurniture(event) {
   updateMouse(event);
   raycaster.setFromCamera(mouse, camera);
 
-  const intersects = raycaster.intersectObjects(selectableObjects, true);
+  // Raycast against invisible AABB hitboxes for easier selection
+  const intersects = raycaster.intersectObjects(furnitureHitBoxes, false);
 
   if (intersects.length > 0) {
-    // Find the root furniture object
-    let hitObject = intersects[0].object;
-    while (hitObject.parent && hitObject.parent !== scene) {
-      if (hitObject.userData.isFurniture) break;
-      hitObject = hitObject.parent;
+    const hitBox = intersects[0].object;
+    const furnitureModel = hitBox.userData.furnitureModel;
+    if (furnitureModel) {
+      return {
+        object: furnitureModel,
+        point: intersects[0].point
+      };
     }
-    return {
-      object: hitObject.userData.isFurniture ? hitObject : findFurnitureRoot(hitObject),
-      point: intersects[0].point
-    };
   }
   return null;
 }
@@ -1184,6 +1186,9 @@ export function addFurnitureToScene(model, entryId, position) {
   scene.add(model);
   selectableObjects.push(model);
 
+  // Create invisible AABB hitbox for easier selection
+  createFurnitureHitBox(model);
+
   return model;
 }
 
@@ -1195,10 +1200,89 @@ export function removeFurnitureFromScene(model) {
     selectableObjects.splice(index, 1);
   }
 
+  // Remove associated hitbox
+  removeFurnitureHitBox(model);
+
   // Detach transform controls if attached to this model
   if (transformControls.object === model) {
     transformControls.detach();
   }
+}
+
+// Create invisible AABB hitbox for a furniture model
+function createFurnitureHitBox(model) {
+  // Compute world-space bounding box
+  const box = new THREE.Box3().setFromObject(model);
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  box.getSize(size);
+  box.getCenter(center);
+
+  // Create invisible box geometry matching the AABB
+  const geometry = new THREE.BoxGeometry(size.x, size.y, size.z);
+  const material = new THREE.MeshBasicMaterial({
+    visible: false,
+    transparent: true,
+    opacity: 0
+  });
+  const hitBox = new THREE.Mesh(geometry, material);
+
+  // Position at AABB center
+  hitBox.position.copy(center);
+
+  // Store reference to the furniture model
+  hitBox.userData.furnitureModel = model;
+  hitBox.userData.isHitBox = true;
+
+  // Store reference on the model for easy lookup
+  model.userData.hitBox = hitBox;
+
+  scene.add(hitBox);
+  furnitureHitBoxes.push(hitBox);
+}
+
+// Remove hitbox associated with a furniture model
+function removeFurnitureHitBox(model) {
+  const hitBox = model.userData.hitBox;
+  if (hitBox) {
+    scene.remove(hitBox);
+    const index = furnitureHitBoxes.indexOf(hitBox);
+    if (index > -1) {
+      furnitureHitBoxes.splice(index, 1);
+    }
+    hitBox.geometry.dispose();
+    hitBox.material.dispose();
+    model.userData.hitBox = null;
+  }
+}
+
+// Update hitbox to match current furniture transform
+export function updateFurnitureHitBox(model) {
+  const hitBox = model.userData.hitBox;
+  if (!hitBox) return;
+
+  // Recompute AABB from current model state
+  const box = new THREE.Box3().setFromObject(model);
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  box.getSize(size);
+  box.getCenter(center);
+
+  // Update hitbox geometry
+  hitBox.geometry.dispose();
+  hitBox.geometry = new THREE.BoxGeometry(size.x, size.y, size.z);
+
+  // Update position to new AABB center
+  hitBox.position.copy(center);
+}
+
+// Update all furniture hitboxes (call after room scale changes)
+function updateAllFurnitureHitBoxes() {
+  selectableObjects.forEach(obj => {
+    if (obj.userData.isFurniture) {
+      updateFurnitureHitBox(obj);
+    }
+  });
 }
 
 // Remove all furniture with a specific entry ID
@@ -1902,6 +1986,8 @@ export function applyRoomScaleToAllFurniture() {
       obj.scale.copy(obj.userData.baseScale).multiplyScalar(roomScaleFactor);
     }
   });
+  // Update hitboxes to match new scale
+  updateAllFurnitureHitBoxes();
 }
 
 /**

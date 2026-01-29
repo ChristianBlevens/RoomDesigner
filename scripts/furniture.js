@@ -15,7 +15,8 @@ import {
   calculateFurnitureScale,
   selectableObjects,
   getRoomMesh,
-  getRoomScale
+  getRoomScale,
+  updateFurnitureHitBox
 } from './scene.js';
 import {
   undoManager,
@@ -27,7 +28,7 @@ import {
 import { getFurnitureEntry } from './api.js';
 import { modalManager } from './modals.js';
 import { extractModelFromZip } from './utils.js';
-import { isLightingDirectionMode } from './main.js';
+import { isLightingDirectionMode, showActionNotification } from './main.js';
 
 // Interaction state
 let selectedObject = null;
@@ -549,6 +550,9 @@ function onPointerMove(event) {
 
     isDragging = true;
 
+    // Show immediate feedback
+    showActionNotification('Moving furniture...');
+
     // Hide gizmo menu if visible (but transform controls weren't attached)
     hideGizmoMenu();
   }
@@ -638,6 +642,8 @@ function onPointerUp(event) {
         dragStartPosition,
         endPosition
       ));
+      // Update hitbox position
+      updateFurnitureHitBox(hoveredObject);
     }
     selectedObject = hoveredObject;
   } else if (hoveredObject && mouseDownPosition) {
@@ -663,6 +669,7 @@ function onPointerUp(event) {
       } else if (!isLightingDirectionMode()) {
         // Open furniture modal (but not if in lighting direction mode)
         if (onOpenFurnitureModal) {
+          showActionNotification('Opening furniture...');
           onOpenFurnitureModal();
         }
       }
@@ -706,6 +713,7 @@ function selectFurniture(object, event) {
     return;
   }
 
+  showActionNotification('Selected');
   deselectFurniture();
   selectedObject = object;
 
@@ -765,6 +773,7 @@ function setupGizmoButtons() {
   dragBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     if (selectedObject) {
+      showActionNotification('Move mode');
       transformControls.attach(selectedObject);
       transformControls.setMode('translate');
     }
@@ -774,6 +783,7 @@ function setupGizmoButtons() {
   rotateBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     if (selectedObject) {
+      showActionNotification('Rotate mode');
       transformControls.attach(selectedObject);
       transformControls.setMode('rotate');
     }
@@ -814,6 +824,8 @@ function setupTransformControls() {
             transformStartPosition,
             selectedObject.position.clone()
           ));
+          // Update hitbox position
+          updateFurnitureHitBox(selectedObject);
         }
       } else if (mode === 'rotate') {
         const endRotation = selectedObject.rotation.clone();
@@ -823,6 +835,8 @@ function setupTransformControls() {
             transformStartRotation,
             endRotation
           ));
+          // Update hitbox after rotation (AABB changes)
+          updateFurnitureHitBox(selectedObject);
         }
       }
     }
@@ -864,6 +878,9 @@ function onKeyDown(event) {
 
 function deleteSelectedFurniture() {
   if (!selectedObject) return;
+
+  // Show immediate feedback
+  showActionNotification('Deleting...');
 
   const scene = getScene();
   const command = new DeleteFurnitureCommand(scene, selectedObject, selectableObjects);

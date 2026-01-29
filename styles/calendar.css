@@ -4,8 +4,8 @@
 /* ============ Calendar Modal ============ */
 
 .calendar-modal-content {
-  width: min(900px, 95vw);
-  height: min(700px, 90vh);
+  width: min(900px, calc(100vw - var(--modal-margin-min) * 2));
+  height: min(700px, calc(100vh - var(--modal-margin-min) * 2));
   padding: var(--spacing-lg);
   display: flex;
   flex-direction: column;

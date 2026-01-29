@@ -40,7 +40,7 @@
 .orientation-modal-content {
   padding: var(--spacing-lg) var(--spacing-lg);
   text-align: center;
-  width: min(450px, 95vw);
+  width: min(450px, calc(100vw - var(--modal-margin-min) * 2));
 }
 
 .orientation-modal-content h2 {
@@ -98,8 +98,8 @@
 /* ============ Furniture Modal ============ */
 
 .furniture-modal-content {
-  width: min(900px, 95vw);
-  height: min(700px, 90vh);
+  width: min(900px, calc(100vw - var(--modal-margin-min) * 2));
+  height: min(700px, calc(100vh - var(--modal-margin-min) * 2));
   padding: var(--spacing-lg);
   display: flex;
   flex-direction: column;
@@ -283,7 +283,7 @@
 }
 
 .entry-editor-content {
-  width: min(500px, 95vw);
+  width: min(500px, calc(100vw - var(--modal-margin-min) * 2));
   padding: var(--spacing-lg);
 }
 
@@ -297,7 +297,7 @@
 
 .session-modal-content {
   padding: var(--spacing-lg);
-  width: min(320px, 90vw);
+  width: min(320px, calc(100vw - var(--modal-margin-min) * 2));
 }
 
 .session-house-info {
@@ -350,7 +350,7 @@
 .confirm-modal-content {
   padding: var(--spacing-lg);
   text-align: center;
-  width: min(350px, 90vw);
+  width: min(350px, calc(100vw - var(--modal-margin-min) * 2));
 }
 
 .confirm-modal-content h3 {
@@ -493,7 +493,7 @@
 /* ============ Modal Sizes ============ */
 
 .modal-small {
-  width: min(400px, 90vw);
+  width: min(400px, calc(100vw - var(--modal-margin-min) * 2));
   padding: var(--spacing-lg);
 }
 
@@ -605,7 +605,7 @@ input[type="date"]:focus {
 .export-progress-content {
   padding: var(--spacing-lg);
   text-align: center;
-  width: min(380px, 90vw);
+  width: min(380px, calc(100vw - var(--modal-margin-min) * 2));
 }
 
 .export-progress-content h3 {
