@@ -264,6 +264,17 @@ export async function saveRoom(roomState, previousState = null) {
     }
   }
 
+  // Room scale - compare if previousState provided
+  if (roomState.roomScale !== undefined) {
+    const currentScale = roomState.roomScale ?? 1.0;
+    const previousScale = previousState?.roomScale ?? 1.0;
+
+    if (!previousState || currentScale !== previousScale) {
+      payload.roomScale = currentScale;
+      hasChanges = true;
+    }
+  }
+
   // NOTE: mogeData intentionally NOT included - it never changes after creation
 
   // Skip request if nothing changed

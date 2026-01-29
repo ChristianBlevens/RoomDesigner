@@ -11,6 +11,11 @@ class PlacedFurniture(BaseModel):
     position: Position
     rotation: Position
     scale: Position
+    surfaceNormal: Optional[Position] = None
+    contactAxis: Optional[Position] = None
+    uprightRotation: Optional[float] = None
+    rotationAroundNormal: Optional[float] = None
+    baseScale: Optional[Position] = None
 
 class MogeData(BaseModel):
     meshUrl: Optional[str] = None
@@ -32,6 +37,7 @@ class RoomUpdate(BaseModel):
     placedFurniture: Optional[List[PlacedFurniture]] = None
     mogeData: Optional[MogeData] = None
     lightingSettings: Optional[LightingSettings] = None
+    roomScale: Optional[float] = None
 
 class RoomResponse(BaseModel):
     id: str
@@ -43,3 +49,4 @@ class RoomResponse(BaseModel):
     placedFurniture: List[dict] = []
     mogeData: Optional[dict] = None
     lightingSettings: Optional[dict] = None
+    roomScale: Optional[float] = None

@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 ROOM_SELECT = """
     SELECT id, house_id, name, status, error_message, background_image_path,
-           placed_furniture, moge_data, lighting_settings
+           placed_furniture, moge_data, lighting_settings, room_scale
     FROM rooms
 """
 
@@ -33,6 +33,7 @@ def row_to_response(row) -> RoomResponse:
     placed_furniture = json.loads(row[6]) if row[6] else []
     moge_data = json.loads(row[7]) if row[7] else None
     lighting_settings = json.loads(row[8]) if row[8] else None
+    room_scale = row[9] if row[9] is not None else 1.0
 
     background_url = f"/api/files/room/{room_id}/background" if background_path else None
 
@@ -45,7 +46,8 @@ def row_to_response(row) -> RoomResponse:
         backgroundImageUrl=background_url,
         placedFurniture=placed_furniture,
         mogeData=moge_data,
-        lightingSettings=lighting_settings
+        lightingSettings=lighting_settings,
+        roomScale=room_scale
     )
 
 
@@ -183,6 +185,9 @@ def update_room(room_id: str, room: RoomUpdate):
     if room.lightingSettings is not None:
         updates.append("lighting_settings = ?")
         values.append(json.dumps(room.lightingSettings.model_dump()))
+    if room.roomScale is not None:
+        updates.append("room_scale = ?")
+        values.append(room.roomScale)
 
     if updates:
         values.append(room_id)
