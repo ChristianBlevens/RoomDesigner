@@ -645,7 +645,7 @@ function onPointerUp(event) {
       // Update hitbox position
       updateFurnitureHitBox(hoveredObject);
     }
-    selectedObject = hoveredObject;
+    // Don't auto-select after drag - user can tap to select if needed
   } else if (hoveredObject && mouseDownPosition) {
     // Check if this was a click (not a drag)
     const dx = event.clientX - mouseDownPosition.x;
