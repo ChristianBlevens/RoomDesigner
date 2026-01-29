@@ -40,8 +40,8 @@ image = (
     )
     .env({"HF_HOME": "/root/.cache/huggingface"})
     .pip_install(
-        "torch>=2.0.0",
-        "torchvision",
+        "torch==2.5.1",
+        "torchvision==0.20.1",
         "pillow",
         "numpy<2.0",
         "fastapi[standard]",
