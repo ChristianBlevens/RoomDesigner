@@ -1390,35 +1390,20 @@ export function collectPlacedFurniture() {
  * @param {THREE.Box3} bounds - Scene bounds to encompass
  */
 function updateShadowCamera(bounds) {
-  if (!directionalLight || !camera) return;
+  if (!directionalLight) return;
 
-  // Calculate shadow frustum from view camera's visible area
-  const fovRad = THREE.MathUtils.degToRad(camera.fov);
-  const aspect = camera.aspect;
+  // Use a large fixed frustum that covers the room from any light angle
+  // The shadow camera rotates with the light, so we need enough coverage
+  // for all possible orientations
+  const size = 50; // Large enough to cover typical rooms from any angle
 
-  // Determine depth to cover (room depth + padding)
-  let maxDepth = camera.far;
-  if (bounds) {
-    const center = bounds.getCenter(new THREE.Vector3());
-    const size = bounds.getSize(new THREE.Vector3());
-    maxDepth = Math.abs(center.z) + size.z / 2 + 10;
-  }
-
-  // Visible dimensions at max depth: size = 2 * depth * tan(fov/2)
-  const visibleHeight = 2 * maxDepth * Math.tan(fovRad / 2);
-  const visibleWidth = visibleHeight * aspect;
-  const shadowSize = Math.max(visibleWidth, visibleHeight) * 1.2;
-
-  // Set shadow camera to cover the visible area
-  directionalLight.shadow.camera.left = -shadowSize / 2;
-  directionalLight.shadow.camera.right = shadowSize / 2;
-  directionalLight.shadow.camera.top = shadowSize / 2;
-  directionalLight.shadow.camera.bottom = -shadowSize / 2;
+  directionalLight.shadow.camera.left = -size;
+  directionalLight.shadow.camera.right = size;
+  directionalLight.shadow.camera.top = size;
+  directionalLight.shadow.camera.bottom = -size;
   directionalLight.shadow.camera.near = 0.1;
-  directionalLight.shadow.camera.far = maxDepth * 4;
+  directionalLight.shadow.camera.far = 200;
   directionalLight.shadow.camera.updateProjectionMatrix();
-
-  console.log('Shadow frustum matched to camera view:', shadowSize.toFixed(2));
 }
 
 /**
