@@ -1390,20 +1390,23 @@ export function collectPlacedFurniture() {
  * @param {THREE.Box3} bounds - Scene bounds to encompass
  */
 function updateShadowCamera(bounds) {
-  if (!directionalLight) return;
+  if (!directionalLight || !bounds) return;
 
-  // Use a large fixed frustum that covers the room from any light angle
-  // The shadow camera rotates with the light, so we need enough coverage
-  // for all possible orientations
-  const size = 50; // Large enough to cover typical rooms from any angle
+  // Use bounding SPHERE - it looks the same from any angle,
+  // so the shadow frustum size is constant regardless of light direction
+  const sphere = new THREE.Sphere();
+  bounds.getBoundingSphere(sphere);
+  const radius = sphere.radius * 1.5; // Padding for furniture outside room bounds
 
-  directionalLight.shadow.camera.left = -size;
-  directionalLight.shadow.camera.right = size;
-  directionalLight.shadow.camera.top = size;
-  directionalLight.shadow.camera.bottom = -size;
+  directionalLight.shadow.camera.left = -radius;
+  directionalLight.shadow.camera.right = radius;
+  directionalLight.shadow.camera.top = radius;
+  directionalLight.shadow.camera.bottom = -radius;
   directionalLight.shadow.camera.near = 0.1;
-  directionalLight.shadow.camera.far = 200;
+  directionalLight.shadow.camera.far = radius * 4;
   directionalLight.shadow.camera.updateProjectionMatrix();
+
+  console.log('Shadow camera set to bounding sphere radius:', radius.toFixed(2));
 }
 
 /**
