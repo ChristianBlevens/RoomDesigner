@@ -56,7 +56,7 @@ app = modal.App("roomdesigner-lbm", image=image)
 @app.cls(
     gpu="T4",
     scaledown_window=300,
-    timeout=120,
+    timeout=180,  # 3 minutes to handle processing
     retries=modal.Retries(max_retries=2, initial_delay=1.0),
 )
 class LBMRelighting:
@@ -117,6 +117,8 @@ class LBMRelighting:
             return {"error": f"Failed to decode images: {str(e)}"}
 
         # Load images
+        import numpy as np
+
         background = Image.open(io.BytesIO(background_bytes)).convert("RGB")
         composite = Image.open(io.BytesIO(composite_bytes)).convert("RGB")
 
@@ -126,8 +128,28 @@ class LBMRelighting:
 
         print(f"Processing: background={background.size}, composite={composite.size}")
 
-        # LBM expects the source image to be the composite (foreground on background)
-        # The model will relight the foreground to match the background lighting
+        # Compute mask: where composite differs from background (that's the furniture)
+        bg_array = np.array(background).astype(np.float32)
+        comp_array = np.array(composite).astype(np.float32)
+
+        # Calculate absolute difference across color channels
+        diff = np.abs(comp_array - bg_array)
+        diff_gray = np.max(diff, axis=2)  # Max difference across RGB
+
+        # Threshold to create binary mask (furniture pixels)
+        # Using a low threshold to catch subtle differences like shadows
+        threshold = 10
+        mask_array = (diff_gray > threshold).astype(np.uint8) * 255
+
+        # Dilate mask slightly to catch edges
+        from PIL import ImageFilter
+        mask = Image.fromarray(mask_array, mode='L')
+        mask = mask.filter(ImageFilter.MaxFilter(3))  # Dilate
+        mask = mask.filter(ImageFilter.GaussianBlur(2))  # Smooth edges
+
+        print(f"Mask coverage: {np.mean(np.array(mask) > 128) * 100:.1f}% of image")
+
+        # Run LBM on the composite
         try:
             output_image = evaluate(
                 self.model,
@@ -136,6 +158,14 @@ class LBMRelighting:
             )
         except Exception as e:
             return {"error": f"LBM inference failed: {str(e)}"}
+
+        # Resize output to match original size (LBM may resize)
+        if output_image.size != background.size:
+            output_image = output_image.resize(background.size, Image.LANCZOS)
+
+        # Re-composite: place relighted areas onto original background using mask
+        # This keeps the original background pristine and only applies relighting to furniture
+        output_image = Image.composite(output_image, background, mask)
 
         # Convert result to PNG bytes
         output_buffer = io.BytesIO()

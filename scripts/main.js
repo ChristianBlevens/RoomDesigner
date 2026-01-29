@@ -2270,11 +2270,17 @@ async function exportHouseScreenshotsWithProgress(house, rooms, furnitureEntries
       if (useLbm && room.id) {
         onProgress(i + 1, rooms.length, roomName, 'relighting');
         try {
+          const originalSize = screenshot.size;
           const compositeBase64 = await blobToBase64(screenshot);
+          console.log(`LBM: Sending ${roomName}, composite size: ${compositeBase64.length} chars`);
+
           const relightedBase64 = await relightScreenshot(room.id, compositeBase64);
+          console.log(`LBM: Received ${roomName}, result size: ${relightedBase64.length} chars`);
+
           screenshot = base64ToBlob(relightedBase64, 'image/png');
+          console.log(`LBM: Converted to blob, size: ${screenshot.size} bytes (was ${originalSize})`);
         } catch (lbmErr) {
-          console.warn(`LBM relighting failed for "${roomName}":`, lbmErr);
+          console.error(`LBM relighting failed for "${roomName}":`, lbmErr);
           // Continue with original screenshot if LBM fails
         }
       }

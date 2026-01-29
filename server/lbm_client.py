@@ -10,7 +10,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 LBM_ENDPOINT = os.environ.get("LBM_MODAL_ENDPOINT", "")
-LBM_TIMEOUT = 120.0
+LBM_TIMEOUT = 120.0  # 2 minutes to handle cold start (~70s) + processing (~15s)
 
 
 class LBMError(Exception):

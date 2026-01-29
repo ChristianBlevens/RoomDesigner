@@ -336,6 +336,8 @@ export async function loadRoomMesh(meshUrl) {
         // ShadowMaterial is invisible except where shadows fall
         mesh.traverse((child) => {
           if (child.isMesh) {
+            // Compute vertex normals for proper shadow rendering (MoGe meshes need this)
+            child.geometry.computeVertexNormals();
             child.material = new THREE.ShadowMaterial({
               opacity: 0.4,
               side: THREE.DoubleSide
