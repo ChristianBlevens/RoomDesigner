@@ -5,272 +5,6 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { adjustUrlForProxy } from './api.js';
 
-// =============================================================================
-// Shadow System - Soft Shadows + PCSS with runtime toggle
-// =============================================================================
-
-// Shadow mode: 'soft' or 'pcss'
-let shadowMode = 'soft';
-
-// PCSS parameters - updated when room loads
-let pcssLightSizeUV = 0.015;
-let pcssShadowNearPlane = 0.5;
-
-// Store original shader chunk for re-injection
-let originalShadowChunk = null;
-
-/**
- * Build a complete replacement for the getShadow function.
- */
-function buildShadowShaderCode() {
-  const usePCSS = shadowMode === 'pcss' ? 1 : 0;
-
-  return /* glsl */`
-#define SHADOW_MODE ${usePCSS}
-#define PCSS_LIGHT_SIZE_UV ${pcssLightSizeUV.toFixed(6)}
-#define PCSS_SHADOW_NEAR_PLANE ${pcssShadowNearPlane.toFixed(6)}
-
-#define NUM_SAMPLES 17
-#define NUM_RINGS 11
-#define SOFT_SHADOW_SAMPLES 9
-#define SOFT_SHADOW_RADIUS 0.003
-
-vec2 poissonDisk[NUM_SAMPLES];
-
-void initPoissonSamples(const in vec2 randomSeed) {
-  float ANGLE_STEP = PI2 * float(NUM_RINGS) / float(NUM_SAMPLES);
-  float INV_NUM_SAMPLES = 1.0 / float(NUM_SAMPLES);
-
-  float angle = rand(randomSeed) * PI2;
-  float radius = INV_NUM_SAMPLES;
-  float radiusStep = radius;
-
-  for (int i = 0; i < NUM_SAMPLES; i++) {
-    poissonDisk[i] = vec2(cos(angle), sin(angle)) * pow(radius, 0.75);
-    radius += radiusStep;
-    angle += ANGLE_STEP;
-  }
-}
-
-float texture2DCompare( sampler2D depths, vec2 uv, float compare ) {
-  return step( compare, unpackRGBAToDepth( texture2D( depths, uv ) ) );
-}
-
-float SoftPCF(sampler2D shadowMap, vec2 uv, float zReceiver, vec2 texelSize) {
-  initPoissonSamples(uv);
-
-  float sum = 0.0;
-  for (int i = 0; i < SOFT_SHADOW_SAMPLES; i++) {
-    sum += texture2DCompare(shadowMap, uv + poissonDisk[i] * SOFT_SHADOW_RADIUS, zReceiver);
-  }
-
-  return sum / float(SOFT_SHADOW_SAMPLES);
-}
-
-float penumbraSize(const in float zReceiver, const in float zBlocker) {
-  return (zReceiver - zBlocker) / zBlocker;
-}
-
-float findBlocker(sampler2D shadowMap, const in vec2 uv, const in float zReceiver) {
-  float searchRadius = PCSS_LIGHT_SIZE_UV * (zReceiver - PCSS_SHADOW_NEAR_PLANE) / zReceiver;
-  float blockerDepthSum = 0.0;
-  int numBlockers = 0;
-
-  for (int i = 0; i < NUM_SAMPLES; i++) {
-    float shadowMapDepth = unpackRGBAToDepth(texture2D(shadowMap, uv + poissonDisk[i] * searchRadius));
-    if (shadowMapDepth < zReceiver) {
-      blockerDepthSum += shadowMapDepth;
-      numBlockers++;
-    }
-  }
-
-  if (numBlockers == 0) return -1.0;
-  return blockerDepthSum / float(numBlockers);
-}
-
-float PCF_Filter(sampler2D shadowMap, vec2 uv, float zReceiver, float filterRadius) {
-  float sum = 0.0;
-
-  for (int i = 0; i < NUM_SAMPLES; i++) {
-    sum += texture2DCompare(shadowMap, uv + poissonDisk[i] * filterRadius, zReceiver);
-  }
-
-  for (int i = 0; i < NUM_SAMPLES; i++) {
-    sum += texture2DCompare(shadowMap, uv + -poissonDisk[i].yx * filterRadius, zReceiver);
-  }
-
-  return sum / (2.0 * float(NUM_SAMPLES));
-}
-
-float PCSS(sampler2D shadowMap, vec2 uv, float zReceiver) {
-  initPoissonSamples(uv);
-
-  float avgBlockerDepth = findBlocker(shadowMap, uv, zReceiver);
-  if (avgBlockerDepth == -1.0) return 1.0;
-
-  float penumbraRatio = penumbraSize(zReceiver, avgBlockerDepth);
-  float filterRadius = penumbraRatio * PCSS_LIGHT_SIZE_UV * PCSS_SHADOW_NEAR_PLANE / zReceiver;
-  filterRadius = clamp(filterRadius, 0.001, 0.1);
-
-  return PCF_Filter(shadowMap, uv, zReceiver, filterRadius);
-}
-`;
-}
-
-/**
- * Build replacement getShadow function.
- */
-function buildGetShadowFunction() {
-  const usePCSS = shadowMode === 'pcss';
-
-  if (usePCSS) {
-    return /* glsl */`
-float getShadow( sampler2D shadowMap, vec2 shadowMapSize, float shadowBias, float shadowRadius, vec4 shadowCoord ) {
-  shadowCoord.xyz /= shadowCoord.w;
-  shadowCoord.z += shadowBias;
-
-  bool inFrustum = shadowCoord.x >= 0.0 && shadowCoord.x <= 1.0 && shadowCoord.y >= 0.0 && shadowCoord.y <= 1.0;
-  bool frustumTest = inFrustum && shadowCoord.z <= 1.0;
-
-  if ( frustumTest ) {
-    return PCSS(shadowMap, shadowCoord.xy, shadowCoord.z);
-  }
-
-  return 1.0;
-}
-`;
-  } else {
-    return /* glsl */`
-float getShadow( sampler2D shadowMap, vec2 shadowMapSize, float shadowBias, float shadowRadius, vec4 shadowCoord ) {
-  shadowCoord.xyz /= shadowCoord.w;
-  shadowCoord.z += shadowBias;
-
-  bool inFrustum = shadowCoord.x >= 0.0 && shadowCoord.x <= 1.0 && shadowCoord.y >= 0.0 && shadowCoord.y <= 1.0;
-  bool frustumTest = inFrustum && shadowCoord.z <= 1.0;
-
-  if ( frustumTest ) {
-    vec2 texelSize = vec2( 1.0 ) / shadowMapSize;
-    return SoftPCF(shadowMap, shadowCoord.xy, shadowCoord.z, texelSize);
-  }
-
-  return 1.0;
-}
-`;
-  }
-}
-
-/**
- * Inject custom shadow shader code into Three.js shadow mapping.
- * MUST be called before any materials are created.
- */
-function injectShadowShader() {
-  // Store original for re-injection
-  if (!originalShadowChunk) {
-    originalShadowChunk = THREE.ShaderChunk.shadowmap_pars_fragment;
-  }
-
-  let shader = originalShadowChunk;
-
-  // Find and replace the entire getShadow function
-  // Match: float getShadow( ... ) { ... return shadow; }
-  // The [\s\S]*? matches any content non-greedily until we hit "return shadow;"
-  const getShadowRegex = /float\s+getShadow\s*\([^)]+\)\s*\{[\s\S]*?return\s+shadow\s*;\s*\}/;
-
-  const helperFunctions = buildShadowShaderCode();
-  const newGetShadow = buildGetShadowFunction();
-
-  // Check if regex matches
-  const regexMatch = shader.match(getShadowRegex);
-  if (!regexMatch) {
-    console.error('PCSS: Could not find getShadow function to replace!');
-    console.log('Shader chunk preview:', shader.substring(0, 500));
-    return;
-  }
-
-  // Add helper functions after USE_SHADOWMAP
-  shader = shader.replace(
-    '#ifdef USE_SHADOWMAP',
-    '#ifdef USE_SHADOWMAP\n' + helperFunctions
-  );
-
-  // Replace the getShadow function
-  shader = shader.replace(getShadowRegex, newGetShadow);
-
-  THREE.ShaderChunk.shadowmap_pars_fragment = shader;
-
-  console.log(`Shadow shader injected (mode: ${shadowMode})`);
-  console.log('Replaced getShadow function, length:', regexMatch[0].length);
-}
-
-/**
- * Recompile all materials with updated shadow shader.
- * Called when shadow mode or PCSS parameters change.
- */
-function recompileShadowMaterials() {
-  // Re-inject shader with new parameters
-  injectShadowShader();
-
-  // Force all scene materials to recompile
-  let materialCount = 0;
-  if (scene) {
-    scene.traverse((object) => {
-      if (object.isMesh && object.material) {
-        const materials = Array.isArray(object.material) ? object.material : [object.material];
-        materials.forEach(mat => {
-          mat.needsUpdate = true;
-          materialCount++;
-        });
-      }
-    });
-  }
-  console.log(`Recompiled ${materialCount} materials for shadow mode: ${shadowMode}`);
-}
-
-/**
- * Set shadow mode.
- * @param {string} mode - 'soft' or 'pcss'
- */
-export function setShadowMode(mode) {
-  if (mode !== 'soft' && mode !== 'pcss') mode = 'soft';
-  if (shadowMode === mode) return;
-
-  shadowMode = mode;
-  recompileShadowMaterials();
-  console.log(`Shadow mode: ${mode}`);
-}
-
-/**
- * Get current shadow mode.
- * @returns {string} 'soft' or 'pcss'
- */
-export function getShadowMode() {
-  return shadowMode;
-}
-
-/**
- * Update PCSS parameters based on current room bounds and shadow camera.
- * Called when room mesh loads or shadow camera updates.
- */
-function updatePCSSParameters() {
-  if (!directionalLight) return;
-
-  const shadowCamera = directionalLight.shadow.camera;
-  const frustumWidth = shadowCamera.right - shadowCamera.left;
-
-  // Light size as proportion of frustum (controls PCSS softness)
-  const lightWorldSize = frustumWidth * 0.015; // 1.5% of frustum width
-
-  pcssLightSizeUV = lightWorldSize / frustumWidth;
-  pcssShadowNearPlane = shadowCamera.near;
-
-  // Only recompile if in PCSS mode (soft shadows don't use these parameters)
-  if (shadowMode === 'pcss') {
-    recompileShadowMaterials();
-  }
-}
-
-// =============================================================================
-
 // Scene state
 let scene, camera, renderer;
 let transformControls;
@@ -1223,9 +957,6 @@ export function clearRoomGeometry() {
 
 // Initialize the Three.js scene
 export function initScene() {
-  // CRITICAL: Inject shadow shader before any materials are created
-  injectShadowShader();
-
   const container = document.getElementById('canvas-container');
 
   // Scene with no background (transparent)
@@ -1250,7 +981,7 @@ export function initScene() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setClearColor(0x000000, 0);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.BasicShadowMap;  // Required for custom shadow sampling (PCSS)
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   container.appendChild(renderer.domElement);
 
   // Prevent default touch behaviors on canvas (scrolling, zooming)
@@ -1661,25 +1392,21 @@ export function collectPlacedFurniture() {
 function updateShadowCamera(bounds) {
   if (!directionalLight || !camera) return;
 
-  // Calculate the visible area based on the view camera's frustum
-  // For perspective camera: visible_size = 2 * depth * tan(fov/2)
+  // Calculate shadow frustum from view camera's visible area
   const fovRad = THREE.MathUtils.degToRad(camera.fov);
   const aspect = camera.aspect;
 
-  // Use the room's furthest depth (or camera far plane) to determine shadow coverage
+  // Determine depth to cover (room depth + padding)
   let maxDepth = camera.far;
   if (bounds) {
     const center = bounds.getCenter(new THREE.Vector3());
     const size = bounds.getSize(new THREE.Vector3());
-    // Depth from camera (at origin) to furthest point of room
-    maxDepth = Math.abs(center.z) + size.z / 2 + 10; // Add padding
+    maxDepth = Math.abs(center.z) + size.z / 2 + 10;
   }
 
-  // Visible dimensions at max depth
+  // Visible dimensions at max depth: size = 2 * depth * tan(fov/2)
   const visibleHeight = 2 * maxDepth * Math.tan(fovRad / 2);
   const visibleWidth = visibleHeight * aspect;
-
-  // Use the larger dimension with some padding
   const shadowSize = Math.max(visibleWidth, visibleHeight) * 1.2;
 
   // Set shadow camera to cover the visible area
@@ -1690,9 +1417,6 @@ function updateShadowCamera(bounds) {
   directionalLight.shadow.camera.near = 0.1;
   directionalLight.shadow.camera.far = maxDepth * 4;
   directionalLight.shadow.camera.updateProjectionMatrix();
-
-  // Update PCSS parameters with new frustum dimensions
-  updatePCSSParameters();
 
   console.log('Shadow frustum matched to camera view:', shadowSize.toFixed(2));
 }
@@ -2023,8 +1747,7 @@ export function getLightingSettings() {
       y: directionalLight.target.position.y,
       z: directionalLight.target.position.z
     },
-    temperature: directionalLight.userData.temperature || 6500,
-    shadowMode: getShadowMode()
+    temperature: directionalLight.userData.temperature || 6500
   };
 }
 
@@ -2060,10 +1783,6 @@ export function applyLightingSettings(settings) {
     directionalLight.userData.temperature = settings.temperature;
     const color = kelvinToRGB(settings.temperature);
     directionalLight.color.copy(color);
-  }
-
-  if (settings.shadowMode) {
-    setShadowMode(settings.shadowMode);
   }
 
   updateLightingGizmo();

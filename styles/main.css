@@ -913,35 +913,6 @@ select:focus {
   text-align: right;
 }
 
-/* Shadow mode toggle */
-.shadow-toggle {
-  display: flex;
-  gap: 0;
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  border: 1px solid #374151;
-}
-
-.shadow-mode-btn {
-  flex: 1;
-  padding: 0.25rem 0.5rem;
-  font-size: var(--font-xs);
-  border: none;
-  background: #1f2937;
-  color: #9ca3af;
-  cursor: pointer;
-  transition: background-color 0.15s, color 0.15s;
-}
-
-.shadow-mode-btn:hover {
-  background: #374151;
-}
-
-.shadow-mode-btn.active {
-  background: #4f46e5;
-  color: white;
-}
-
 .lighting-direction-row {
   display: flex;
   flex-wrap: wrap;
