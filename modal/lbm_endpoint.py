@@ -17,6 +17,9 @@ import base64
 
 def download_model():
     """Download LBM relighting model during image build (cached)."""
+    import os
+    os.environ["HF_HOME"] = "/root/.cache/huggingface"
+
     import torch
     from lbm.inference import get_model
 
@@ -35,6 +38,7 @@ image = (
         "libglib2.0-0",
         "git",
     )
+    .env({"HF_HOME": "/root/.cache/huggingface"})
     .pip_install(
         "torch>=2.0.0",
         "torchvision",
@@ -65,6 +69,9 @@ class LBMRelighting:
     @modal.enter()
     def load_model(self):
         """Load model when container starts (runs once)."""
+        import os
+        os.environ["HF_HOME"] = "/root/.cache/huggingface"
+
         import torch
         from lbm.inference import get_model
 
