@@ -20,7 +20,7 @@ let pcssShadowNearPlane = 0.5;
 let originalShadowChunk = null;
 
 /**
- * Build the shadow shader code with current parameters baked in as #defines.
+ * Build a complete replacement for the getShadow function.
  */
 function buildShadowShaderCode() {
   const usePCSS = shadowMode === 'pcss' ? 1 : 0;
@@ -33,7 +33,7 @@ function buildShadowShaderCode() {
 #define NUM_SAMPLES 17
 #define NUM_RINGS 11
 #define SOFT_SHADOW_SAMPLES 9
-#define SOFT_SHADOW_RADIUS 0.002
+#define SOFT_SHADOW_RADIUS 0.003
 
 vec2 poissonDisk[NUM_SAMPLES];
 
@@ -52,16 +52,16 @@ void initPoissonSamples(const in vec2 randomSeed) {
   }
 }
 
-float SoftShadow(sampler2D shadowMap, vec4 coords) {
-  vec2 uv = coords.xy;
-  float zReceiver = coords.z;
+float texture2DCompare( sampler2D depths, vec2 uv, float compare ) {
+  return step( compare, unpackRGBAToDepth( texture2D( depths, uv ) ) );
+}
 
+float SoftPCF(sampler2D shadowMap, vec2 uv, float zReceiver, vec2 texelSize) {
   initPoissonSamples(uv);
 
   float sum = 0.0;
   for (int i = 0; i < SOFT_SHADOW_SAMPLES; i++) {
-    float depth = unpackRGBAToDepth(texture2D(shadowMap, uv + poissonDisk[i] * SOFT_SHADOW_RADIUS));
-    if (zReceiver <= depth) sum += 1.0;
+    sum += texture2DCompare(shadowMap, uv + poissonDisk[i] * SOFT_SHADOW_RADIUS, zReceiver);
   }
 
   return sum / float(SOFT_SHADOW_SAMPLES);
@@ -92,22 +92,17 @@ float PCF_Filter(sampler2D shadowMap, vec2 uv, float zReceiver, float filterRadi
   float sum = 0.0;
 
   for (int i = 0; i < NUM_SAMPLES; i++) {
-    float depth = unpackRGBAToDepth(texture2D(shadowMap, uv + poissonDisk[i] * filterRadius));
-    if (zReceiver <= depth) sum += 1.0;
+    sum += texture2DCompare(shadowMap, uv + poissonDisk[i] * filterRadius, zReceiver);
   }
 
   for (int i = 0; i < NUM_SAMPLES; i++) {
-    float depth = unpackRGBAToDepth(texture2D(shadowMap, uv + -poissonDisk[i].yx * filterRadius));
-    if (zReceiver <= depth) sum += 1.0;
+    sum += texture2DCompare(shadowMap, uv + -poissonDisk[i].yx * filterRadius, zReceiver);
   }
 
   return sum / (2.0 * float(NUM_SAMPLES));
 }
 
-float PCSS(sampler2D shadowMap, vec4 coords) {
-  vec2 uv = coords.xy;
-  float zReceiver = coords.z;
-
+float PCSS(sampler2D shadowMap, vec2 uv, float zReceiver) {
   initPoissonSamples(uv);
 
   float avgBlockerDepth = findBlocker(shadowMap, uv, zReceiver);
@@ -115,18 +110,53 @@ float PCSS(sampler2D shadowMap, vec4 coords) {
 
   float penumbraRatio = penumbraSize(zReceiver, avgBlockerDepth);
   float filterRadius = penumbraRatio * PCSS_LIGHT_SIZE_UV * PCSS_SHADOW_NEAR_PLANE / zReceiver;
+  filterRadius = clamp(filterRadius, 0.001, 0.1);
 
   return PCF_Filter(shadowMap, uv, zReceiver, filterRadius);
 }
+`;
+}
 
-float getCustomShadow(sampler2D shadowMap, vec4 coords) {
-  #if SHADOW_MODE == 1
-    return PCSS(shadowMap, coords);
-  #else
-    return SoftShadow(shadowMap, coords);
-  #endif
+/**
+ * Build replacement getShadow function.
+ */
+function buildGetShadowFunction() {
+  const usePCSS = shadowMode === 'pcss';
+
+  if (usePCSS) {
+    return /* glsl */`
+float getShadow( sampler2D shadowMap, vec2 shadowMapSize, float shadowBias, float shadowRadius, vec4 shadowCoord ) {
+  shadowCoord.xyz /= shadowCoord.w;
+  shadowCoord.z += shadowBias;
+
+  bool inFrustum = shadowCoord.x >= 0.0 && shadowCoord.x <= 1.0 && shadowCoord.y >= 0.0 && shadowCoord.y <= 1.0;
+  bool frustumTest = inFrustum && shadowCoord.z <= 1.0;
+
+  if ( frustumTest ) {
+    return PCSS(shadowMap, shadowCoord.xy, shadowCoord.z);
+  }
+
+  return 1.0;
 }
 `;
+  } else {
+    return /* glsl */`
+float getShadow( sampler2D shadowMap, vec2 shadowMapSize, float shadowBias, float shadowRadius, vec4 shadowCoord ) {
+  shadowCoord.xyz /= shadowCoord.w;
+  shadowCoord.z += shadowBias;
+
+  bool inFrustum = shadowCoord.x >= 0.0 && shadowCoord.x <= 1.0 && shadowCoord.y >= 0.0 && shadowCoord.y <= 1.0;
+  bool frustumTest = inFrustum && shadowCoord.z <= 1.0;
+
+  if ( frustumTest ) {
+    vec2 texelSize = vec2( 1.0 ) / shadowMapSize;
+    return SoftPCF(shadowMap, shadowCoord.xy, shadowCoord.z, texelSize);
+  }
+
+  return 1.0;
+}
+`;
+  }
 }
 
 /**
@@ -140,23 +170,36 @@ function injectShadowShader() {
   }
 
   let shader = originalShadowChunk;
-  const shadowCode = buildShadowShaderCode();
 
-  // Add our shadow functions after USE_SHADOWMAP check
+  // Find and replace the entire getShadow function
+  // Match: float getShadow( ... ) { ... return shadow; }
+  // The [\s\S]*? matches any content non-greedily until we hit "return shadow;"
+  const getShadowRegex = /float\s+getShadow\s*\([^)]+\)\s*\{[\s\S]*?return\s+shadow\s*;\s*\}/;
+
+  const helperFunctions = buildShadowShaderCode();
+  const newGetShadow = buildGetShadowFunction();
+
+  // Check if regex matches
+  const regexMatch = shader.match(getShadowRegex);
+  if (!regexMatch) {
+    console.error('PCSS: Could not find getShadow function to replace!');
+    console.log('Shader chunk preview:', shader.substring(0, 500));
+    return;
+  }
+
+  // Add helper functions after USE_SHADOWMAP
   shader = shader.replace(
     '#ifdef USE_SHADOWMAP',
-    '#ifdef USE_SHADOWMAP\n' + shadowCode
+    '#ifdef USE_SHADOWMAP\n' + helperFunctions
   );
 
-  // Replace the shadow return with our custom function
-  shader = shader.replace(
-    /return shadow;/g,
-    'return getCustomShadow(shadowMap, shadowCoord);'
-  );
+  // Replace the getShadow function
+  shader = shader.replace(getShadowRegex, newGetShadow);
 
   THREE.ShaderChunk.shadowmap_pars_fragment = shader;
 
   console.log(`Shadow shader injected (mode: ${shadowMode})`);
+  console.log('Replaced getShadow function, length:', regexMatch[0].length);
 }
 
 /**
@@ -168,16 +211,19 @@ function recompileShadowMaterials() {
   injectShadowShader();
 
   // Force all scene materials to recompile
+  let materialCount = 0;
   if (scene) {
     scene.traverse((object) => {
       if (object.isMesh && object.material) {
         const materials = Array.isArray(object.material) ? object.material : [object.material];
         materials.forEach(mat => {
           mat.needsUpdate = true;
+          materialCount++;
         });
       }
     });
   }
+  console.log(`Recompiled ${materialCount} materials for shadow mode: ${shadowMode}`);
 }
 
 /**
@@ -1613,23 +1659,42 @@ export function collectPlacedFurniture() {
  * @param {THREE.Box3} bounds - Scene bounds to encompass
  */
 function updateShadowCamera(bounds) {
-  if (!directionalLight || !bounds) return;
+  if (!directionalLight || !camera) return;
 
-  const size = bounds.getSize(new THREE.Vector3());
-  const maxDim = Math.max(size.x, size.y, size.z) * 1.5;
+  // Calculate the visible area based on the view camera's frustum
+  // For perspective camera: visible_size = 2 * depth * tan(fov/2)
+  const fovRad = THREE.MathUtils.degToRad(camera.fov);
+  const aspect = camera.aspect;
 
-  // Expand shadow camera frustum to cover room bounds
-  directionalLight.shadow.camera.left = -maxDim;
-  directionalLight.shadow.camera.right = maxDim;
-  directionalLight.shadow.camera.top = maxDim;
-  directionalLight.shadow.camera.bottom = -maxDim;
-  directionalLight.shadow.camera.far = maxDim * 3;
+  // Use the room's furthest depth (or camera far plane) to determine shadow coverage
+  let maxDepth = camera.far;
+  if (bounds) {
+    const center = bounds.getCenter(new THREE.Vector3());
+    const size = bounds.getSize(new THREE.Vector3());
+    // Depth from camera (at origin) to furthest point of room
+    maxDepth = Math.abs(center.z) + size.z / 2 + 10; // Add padding
+  }
+
+  // Visible dimensions at max depth
+  const visibleHeight = 2 * maxDepth * Math.tan(fovRad / 2);
+  const visibleWidth = visibleHeight * aspect;
+
+  // Use the larger dimension with some padding
+  const shadowSize = Math.max(visibleWidth, visibleHeight) * 1.2;
+
+  // Set shadow camera to cover the visible area
+  directionalLight.shadow.camera.left = -shadowSize / 2;
+  directionalLight.shadow.camera.right = shadowSize / 2;
+  directionalLight.shadow.camera.top = shadowSize / 2;
+  directionalLight.shadow.camera.bottom = -shadowSize / 2;
+  directionalLight.shadow.camera.near = 0.1;
+  directionalLight.shadow.camera.far = maxDepth * 4;
   directionalLight.shadow.camera.updateProjectionMatrix();
 
   // Update PCSS parameters with new frustum dimensions
   updatePCSSParameters();
 
-  console.log('Shadow camera frustum expanded:', maxDim.toFixed(2));
+  console.log('Shadow frustum matched to camera view:', shadowSize.toFixed(2));
 }
 
 /**
