@@ -1410,7 +1410,7 @@ function updateShadowCamera(bounds) {
   const size = new THREE.Vector3();
   bounds.getSize(size);
   const maxDim = Math.max(size.x, size.y, size.z);
-  const halfSize = maxDim; // Use full maxDim as half-size for padding
+  const halfSize = maxDim * 0.6; // Half the max dimension plus small padding
 
   directionalLight.shadow.camera.left = -halfSize;
   directionalLight.shadow.camera.right = halfSize;
