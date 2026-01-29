@@ -691,3 +691,22 @@ export async function getFurniturePreview3d(id) {
   return response.blob();
 }
 
+// ============ LBM Relighting ============
+
+export async function getLbmStatus() {
+  const response = await apiFetch('/lbm/status');
+  return response.json();
+}
+
+export async function relightScreenshot(roomId, compositeBase64) {
+  const response = await apiFetch('/lbm/relight', {
+    method: 'POST',
+    body: JSON.stringify({
+      room_id: roomId,
+      composite_base64: compositeBase64
+    })
+  });
+  const result = await response.json();
+  return result.image_base64;
+}
+

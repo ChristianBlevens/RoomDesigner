@@ -948,3 +948,11 @@ input[type="date"]:focus {
   border-radius: 3px;
   pointer-events: none;
 }
+
+/* ============ LBM Confirmation Modal ============ */
+
+.lbm-note {
+  font-size: 0.85rem;
+  color: var(--text-secondary, #6b7280);
+  margin-top: 0.5rem;
+}

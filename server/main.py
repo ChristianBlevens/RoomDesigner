@@ -13,7 +13,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent))
 
 from db.connection import init_databases, close_databases
-from routers import houses, rooms, furniture, files, meshy
+from routers import houses, rooms, furniture, files, meshy, lbm
 from events import subscribe
 
 @asynccontextmanager
@@ -40,6 +40,7 @@ app.include_router(rooms.router, prefix="/api/rooms", tags=["rooms"])
 app.include_router(furniture.router, prefix="/api/furniture", tags=["furniture"])
 app.include_router(files.router, prefix="/api/files", tags=["files"])
 app.include_router(meshy.router, prefix="/api/meshy", tags=["meshy"])
+app.include_router(lbm.router, prefix="/api/lbm", tags=["lbm"])
 
 
 @app.get("/api/events")

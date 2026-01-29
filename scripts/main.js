@@ -61,7 +61,9 @@ import {
   getOrphanRooms,
   subscribeToEvents,
   createRoom,
-  getBatchAvailability
+  getBatchAvailability,
+  getLbmStatus,
+  relightScreenshot
 } from './api.js';
 import {
   captureRoomScreenshot,
@@ -97,8 +99,6 @@ import {
   showError,
   hideError,
   extractModelFromZip,
-  blobToBase64,
-  base64ToBlob,
   debounce
 } from './utils.js';
 import { adjustUrlForProxy } from './api.js';
@@ -2081,6 +2081,9 @@ function removeMeshyToast(toast) {
 
 // ============ Session Modal (House Operations) ============
 
+// LBM confirmation state
+let lbmResolve = null;
+
 function setupSessionModal() {
   const sessionBtn = document.getElementById('session-btn');
   const editHouseBtn = document.getElementById('edit-house-session-btn');
@@ -2097,6 +2100,42 @@ function setupSessionModal() {
   // Export progress modal close button
   const exportProgressCloseBtn = document.getElementById('export-progress-close');
   exportProgressCloseBtn.addEventListener('click', hideExportProgressModal);
+
+  // LBM Confirmation Modal
+  const lbmSkipBtn = document.getElementById('lbm-skip-btn');
+  const lbmApplyBtn = document.getElementById('lbm-apply-btn');
+
+  lbmSkipBtn.addEventListener('click', () => {
+    document.getElementById('lbm-confirm-modal').classList.add('modal-hidden');
+    if (lbmResolve) lbmResolve(false);
+  });
+
+  lbmApplyBtn.addEventListener('click', () => {
+    document.getElementById('lbm-confirm-modal').classList.add('modal-hidden');
+    if (lbmResolve) lbmResolve(true);
+  });
+}
+
+/**
+ * Show LBM confirmation modal if LBM is configured.
+ * Returns true if user wants LBM, false otherwise.
+ */
+async function showLbmConfirmation() {
+  // Check if LBM is configured
+  try {
+    const status = await getLbmStatus();
+    if (!status.configured) {
+      return false;  // Skip LBM if not configured
+    }
+  } catch (e) {
+    console.warn('LBM status check failed:', e);
+    return false;
+  }
+
+  return new Promise((resolve) => {
+    lbmResolve = resolve;
+    document.getElementById('lbm-confirm-modal').classList.remove('modal-hidden');
+  });
 }
 
 async function openSessionModal() {
@@ -2128,6 +2167,9 @@ async function handleExportHouse() {
   if (currentRoomId && currentBackgroundImage) {
     await saveCurrentRoom();
   }
+
+  // Ask about LBM relighting
+  const useLbm = await showLbmConfirmation();
 
   const house = getCurrentHouse();
 
@@ -2167,11 +2209,12 @@ async function handleExportHouse() {
       }
     }
 
-    // Export screenshots
+    // Export screenshots (with optional LBM relighting)
     const zipBlob = await exportHouseScreenshotsWithProgress(
       house,
       rooms,
       furnitureEntries,
+      useLbm,
       (current, total, roomName, status) => {
         updateExportProgress(current, total, roomName, status);
       }
@@ -2197,8 +2240,13 @@ async function handleExportHouse() {
 
 /**
  * Export house screenshots with furniture entries pre-loaded.
+ * @param {Object} house - House data
+ * @param {Array} rooms - Room data array
+ * @param {Map} furnitureEntries - Map of entryId to furniture entry
+ * @param {boolean} useLbm - Whether to apply LBM relighting
+ * @param {Function} onProgress - Progress callback
  */
-async function exportHouseScreenshotsWithProgress(house, rooms, furnitureEntries, onProgress) {
+async function exportHouseScreenshotsWithProgress(house, rooms, furnitureEntries, useLbm, onProgress) {
   const zip = new JSZip();
   const results = [];
 
@@ -2215,7 +2263,21 @@ async function exportHouseScreenshotsWithProgress(house, rooms, furnitureEntries
         continue;
       }
 
-      const screenshot = await captureRoomScreenshot(room, furnitureEntries);
+      // Capture screenshot
+      let screenshot = await captureRoomScreenshot(room, furnitureEntries);
+
+      // Apply LBM relighting if requested
+      if (useLbm && room.id) {
+        onProgress(i + 1, rooms.length, roomName, 'relighting');
+        try {
+          const compositeBase64 = await blobToBase64(screenshot);
+          const relightedBase64 = await relightScreenshot(room.id, compositeBase64);
+          screenshot = base64ToBlob(relightedBase64, 'image/png');
+        } catch (lbmErr) {
+          console.warn(`LBM relighting failed for "${roomName}":`, lbmErr);
+          // Continue with original screenshot if LBM fails
+        }
+      }
 
       const safeName = roomName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
       const filename = `${safeName}.png`;
@@ -2385,6 +2447,38 @@ function blobToDataURL(blob) {
 }
 
 /**
+ * Convert a Blob to base64 string (without data URL prefix).
+ */
+async function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64 = reader.result.split(',')[1];
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * Convert base64 string to Blob.
+ */
+function base64ToBlob(base64, mimeType = 'image/png') {
+  const byteChars = atob(base64);
+  const byteArrays = [];
+  for (let offset = 0; offset < byteChars.length; offset += 512) {
+    const slice = byteChars.slice(offset, offset + 512);
+    const byteNumbers = new Array(slice.length);
+    for (let i = 0; i < slice.length; i++) {
+      byteNumbers[i] = slice.charCodeAt(i);
+    }
+    byteArrays.push(new Uint8Array(byteNumbers));
+  }
+  return new Blob(byteArrays, { type: mimeType });
+}
+
+/**
  * Show the export progress modal.
  */
 function showExportProgressModal() {
@@ -2423,6 +2517,9 @@ function updateExportProgress(current, total, roomName, status = 'loading') {
   if (status === 'loading') {
     textEl.textContent = `Capturing "${roomName}"...`;
     detailEl.textContent = `Room ${current} of ${total}`;
+  } else if (status === 'relighting') {
+    textEl.textContent = `Relighting "${roomName}"...`;
+    detailEl.textContent = `Room ${current} of ${total} (AI processing)`;
   } else if (status === 'complete') {
     textEl.textContent = `Captured "${roomName}"`;
     detailEl.textContent = `Room ${current} of ${total} complete`;
