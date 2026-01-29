@@ -56,7 +56,7 @@ app = modal.App("roomdesigner-lbm", image=image)
 @app.cls(
     gpu="T4",
     scaledown_window=300,
-    timeout=180,  # 3 minutes to handle processing
+    timeout=300,  # 5 minutes - plenty of time for processing
     retries=modal.Retries(max_retries=2, initial_delay=1.0),
 )
 class LBMRelighting:
@@ -149,7 +149,7 @@ class LBMRelighting:
 
         print(f"Mask coverage: {np.mean(np.array(mask) > 128) * 100:.1f}% of image")
 
-        # Run LBM on the composite
+        # Run LBM on the composite (naive paste)
         try:
             output_image = evaluate(
                 self.model,

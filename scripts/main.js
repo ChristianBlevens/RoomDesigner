@@ -2263,26 +2263,32 @@ async function exportHouseScreenshotsWithProgress(house, rooms, furnitureEntries
         continue;
       }
 
-      // Capture screenshot
-      let screenshot = await captureRoomScreenshot(room, furnitureEntries);
+      let screenshot;
 
-      // Apply LBM relighting if requested
       if (useLbm && room.id) {
+        // LBM mode: capture naive paste (no lighting/shadows), then send to LBM
         onProgress(i + 1, rooms.length, roomName, 'relighting');
         try {
-          const originalSize = screenshot.size;
-          const compositeBase64 = await blobToBase64(screenshot);
-          console.log(`LBM: Sending ${roomName}, composite size: ${compositeBase64.length} chars`);
+          // Capture naive paste (unlit furniture on background)
+          const naivePaste = await captureRoomScreenshot(room, furnitureEntries, { naivePaste: true });
+          const compositeBase64 = await blobToBase64(naivePaste);
+          console.log(`LBM: Sending ${roomName}, naive paste size: ${compositeBase64.length} chars`);
 
+          // Send to LBM for relighting
           const relightedBase64 = await relightScreenshot(room.id, compositeBase64);
           console.log(`LBM: Received ${roomName}, result size: ${relightedBase64.length} chars`);
 
           screenshot = base64ToBlob(relightedBase64, 'image/png');
-          console.log(`LBM: Converted to blob, size: ${screenshot.size} bytes (was ${originalSize})`);
+          console.log(`LBM: Converted to blob, size: ${screenshot.size} bytes`);
         } catch (lbmErr) {
           console.error(`LBM relighting failed for "${roomName}":`, lbmErr);
-          // Continue with original screenshot if LBM fails
+          // Fallback: capture with normal lighting/shadows
+          console.log(`LBM: Falling back to normal render for "${roomName}"`);
+          screenshot = await captureRoomScreenshot(room, furnitureEntries);
         }
+      } else {
+        // Normal mode: capture with lighting and shadows
+        screenshot = await captureRoomScreenshot(room, furnitureEntries);
       }
 
       const safeName = roomName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
