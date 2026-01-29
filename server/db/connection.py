@@ -66,19 +66,6 @@ def init_databases():
         )
     """)
 
-    # Migration: add status column if it doesn't exist (for existing databases)
-    try:
-        _houses_conn.execute("SELECT status FROM rooms LIMIT 1")
-    except Exception:
-        _houses_conn.execute("ALTER TABLE rooms ADD COLUMN status VARCHAR DEFAULT 'ready'")
-        _houses_conn.execute("ALTER TABLE rooms ADD COLUMN error_message VARCHAR")
-
-    # Migration: add room_scale column if it doesn't exist
-    try:
-        _houses_conn.execute("SELECT room_scale FROM rooms LIMIT 1")
-    except Exception:
-        _houses_conn.execute("ALTER TABLE rooms ADD COLUMN room_scale DOUBLE DEFAULT 1.0")
-
     _houses_conn.execute("CREATE INDEX IF NOT EXISTS idx_rooms_house_id ON rooms(house_id)")
 
     # Furniture database
