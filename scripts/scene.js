@@ -1392,21 +1392,32 @@ export function collectPlacedFurniture() {
 function updateShadowCamera(bounds) {
   if (!directionalLight || !bounds) return;
 
-  // Use bounding SPHERE - it looks the same from any angle,
-  // so the shadow frustum size is constant regardless of light direction
-  const sphere = new THREE.Sphere();
-  bounds.getBoundingSphere(sphere);
-  const radius = sphere.radius * 1.5; // Padding for furniture outside room bounds
+  // Shadow frustum centered on room, sized to cover it from any angle
+  const size = new THREE.Vector3();
+  bounds.getSize(size);
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const halfSize = maxDim; // Use full maxDim as half-size for padding
 
-  directionalLight.shadow.camera.left = -radius;
-  directionalLight.shadow.camera.right = radius;
-  directionalLight.shadow.camera.top = radius;
-  directionalLight.shadow.camera.bottom = -radius;
+  directionalLight.shadow.camera.left = -halfSize;
+  directionalLight.shadow.camera.right = halfSize;
+  directionalLight.shadow.camera.top = halfSize;
+  directionalLight.shadow.camera.bottom = -halfSize;
   directionalLight.shadow.camera.near = 0.1;
-  directionalLight.shadow.camera.far = radius * 4;
+  directionalLight.shadow.camera.far = maxDim * 6;
   directionalLight.shadow.camera.updateProjectionMatrix();
 
-  console.log('Shadow camera set to bounding sphere radius:', radius.toFixed(2));
+  // Re-center light over room with current direction
+  const currentDir = new THREE.Vector3()
+    .subVectors(directionalLight.target.position, directionalLight.position)
+    .normalize();
+  if (currentDir.length() > 0) {
+    setLightDirection(
+      directionalLight.position,
+      directionalLight.target.position
+    );
+  }
+
+  console.log('Shadow frustum sized to room:', halfSize.toFixed(2));
 }
 
 /**
@@ -1433,11 +1444,28 @@ export function setLightIntensity(intensity) {
  * @param {THREE.Vector3} target - Target position the light points at
  */
 export function setLightDirection(position, target) {
-  if (directionalLight) {
-    directionalLight.position.copy(position);
-    directionalLight.target.position.copy(target);
-    directionalLight.target.updateMatrixWorld();
-  }
+  if (!directionalLight) return;
+
+  // Calculate light direction from the provided position/target
+  const direction = new THREE.Vector3().subVectors(target, position).normalize();
+
+  // Center the shadow camera over the room bounds
+  const roomCenter = new THREE.Vector3();
+  roomBounds.getCenter(roomCenter);
+
+  // Position light along the direction vector, but centered over the room
+  // Light sits "above" the room center (opposite to direction), at a distance
+  const size = new THREE.Vector3();
+  roomBounds.getSize(size);
+  const distance = Math.max(size.x, size.y, size.z) * 2;
+
+  // New position: roomCenter - direction * distance (so light is "behind" the direction)
+  const newPosition = roomCenter.clone().sub(direction.clone().multiplyScalar(distance));
+  const newTarget = roomCenter.clone();
+
+  directionalLight.position.copy(newPosition);
+  directionalLight.target.position.copy(newTarget);
+  directionalLight.target.updateMatrixWorld();
 }
 
 /**
