@@ -55,6 +55,7 @@ let debugKeysPressed = {};
 let debugMouseDown = false;
 let debugLastMouseX = 0;
 let debugLastMouseY = 0;
+let shadowCameraHelper = null;
 
 // Export getters
 export function getScene() { return scene; }
@@ -255,6 +256,9 @@ export function enableDebugCamera() {
   debugCameraEnabled = true;
   debugKeysPressed = {};
 
+  // Show shadow camera helper in debug mode
+  updateShadowCameraHelper();
+
   // Add event listeners
   document.addEventListener('keydown', handleDebugKeyDown);
   document.addEventListener('keyup', handleDebugKeyUp);
@@ -285,6 +289,9 @@ export function disableDebugCamera() {
   debugCameraEnabled = false;
   debugKeysPressed = {};
   savedCameraState = null;
+
+  // Hide shadow camera helper
+  updateShadowCameraHelper();
 
   // Remove event listeners
   document.removeEventListener('keydown', handleDebugKeyDown);
@@ -1025,6 +1032,9 @@ export function initScene() {
   // Animation loop
   renderer.setAnimationLoop(animate);
 
+  // Center light over default room bounds
+  recenterLightOverRoom();
+
   return { scene, camera, renderer, transformControls };
 }
 
@@ -1406,18 +1416,35 @@ function updateShadowCamera(bounds) {
   directionalLight.shadow.camera.far = maxDim * 6;
   directionalLight.shadow.camera.updateProjectionMatrix();
 
-  // Re-center light over room with current direction
-  const currentDir = new THREE.Vector3()
-    .subVectors(directionalLight.target.position, directionalLight.position)
-    .normalize();
-  if (currentDir.length() > 0) {
-    setLightDirection(
-      directionalLight.position,
-      directionalLight.target.position
-    );
-  }
+  // Re-center light over room to ensure shadow frustum coverage
+  recenterLightOverRoom();
 
   console.log('Shadow frustum sized to room:', halfSize.toFixed(2));
+}
+
+/**
+ * Update shadow camera helper visibility and position.
+ * Shows the shadow frustum when debug mode is enabled.
+ */
+function updateShadowCameraHelper() {
+  if (!directionalLight || !scene) return;
+
+  if (debugCameraEnabled) {
+    // Create helper if needed
+    if (!shadowCameraHelper) {
+      shadowCameraHelper = new THREE.CameraHelper(directionalLight.shadow.camera);
+      shadowCameraHelper.visible = true;
+      scene.add(shadowCameraHelper);
+    }
+    // Update helper to match current shadow camera
+    shadowCameraHelper.update();
+    shadowCameraHelper.visible = true;
+  } else {
+    // Hide helper when not in debug mode
+    if (shadowCameraHelper) {
+      shadowCameraHelper.visible = false;
+    }
+  }
 }
 
 /**
@@ -1443,29 +1470,54 @@ export function setLightIntensity(intensity) {
  * @param {THREE.Vector3} position - Light source position
  * @param {THREE.Vector3} target - Target position the light points at
  */
-export function setLightDirection(position, target) {
+/**
+ * Recenter the directional light over the room bounds while preserving direction.
+ * This ensures the shadow camera frustum covers the room from any light angle.
+ */
+function recenterLightOverRoom() {
   if (!directionalLight) return;
 
-  // Calculate light direction from the provided position/target
-  const direction = new THREE.Vector3().subVectors(target, position).normalize();
+  // Get current light direction
+  const direction = new THREE.Vector3()
+    .subVectors(directionalLight.target.position, directionalLight.position)
+    .normalize();
+
+  // If direction is zero (same position/target), use default down-forward
+  if (direction.length() === 0) {
+    direction.set(-0.5, -1, -0.5).normalize();
+  }
 
   // Center the shadow camera over the room bounds
   const roomCenter = new THREE.Vector3();
   roomBounds.getCenter(roomCenter);
 
-  // Position light along the direction vector, but centered over the room
-  // Light sits "above" the room center (opposite to direction), at a distance
+  // Get distance based on room size
   const size = new THREE.Vector3();
   roomBounds.getSize(size);
   const distance = Math.max(size.x, size.y, size.z) * 2;
 
-  // New position: roomCenter - direction * distance (so light is "behind" the direction)
+  // Position light along the direction vector, centered over room
+  // Light is placed "upstream" of the direction (where light comes FROM)
   const newPosition = roomCenter.clone().sub(direction.clone().multiplyScalar(distance));
   const newTarget = roomCenter.clone();
 
   directionalLight.position.copy(newPosition);
   directionalLight.target.position.copy(newTarget);
   directionalLight.target.updateMatrixWorld();
+
+  updateShadowCameraHelper();
+}
+
+export function setLightDirection(position, target) {
+  if (!directionalLight) return;
+
+  // Temporarily set position/target to extract direction
+  directionalLight.position.copy(position);
+  directionalLight.target.position.copy(target);
+
+  // Now recenter over room while preserving that direction
+  recenterLightOverRoom();
+  updateLightingGizmo();
 }
 
 /**
@@ -1727,7 +1779,9 @@ export function getLightTarget() {
  */
 export function setLightPosition(position) {
   if (directionalLight) {
+    // Update position, then recenter to keep shadow frustum over room
     directionalLight.position.copy(position);
+    recenterLightOverRoom();
     updateLightingGizmo();
   }
 }
@@ -1738,8 +1792,10 @@ export function setLightPosition(position) {
  */
 export function setLightTargetPosition(target) {
   if (directionalLight) {
+    // Update target, then recenter to keep shadow frustum over room
     directionalLight.target.position.copy(target);
     directionalLight.target.updateMatrixWorld();
+    recenterLightOverRoom();
     updateLightingGizmo();
   }
 }
@@ -1794,6 +1850,9 @@ export function applyLightingSettings(settings) {
     );
     directionalLight.target.updateMatrixWorld();
   }
+
+  // Recenter light over room to ensure shadow frustum coverage
+  recenterLightOverRoom();
 
   if (typeof settings.temperature === 'number') {
     directionalLight.userData.temperature = settings.temperature;
