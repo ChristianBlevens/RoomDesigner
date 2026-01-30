@@ -13,17 +13,19 @@ let currentLoadedHouseId = null;
 // Callbacks
 let onHouseClick = null;
 let onNewHouse = null;
+let onDayClick = null;
 
 // Color palette for houses
 const HOUSE_COLORS = 8;
 
 /**
  * Initialize the calendar module
- * @param {Object} callbacks - { onHouseClick, onNewHouse }
+ * @param {Object} callbacks - { onHouseClick, onNewHouse, onDayClick }
  */
 export function initCalendar(callbacks) {
   onHouseClick = callbacks.onHouseClick;
   onNewHouse = callbacks.onNewHouse;
+  onDayClick = callbacks.onDayClick;
 
   setupCalendarControls();
 }
@@ -205,6 +207,18 @@ function renderCalendarGrid() {
       eventsContainer.appendChild(eventEl);
     });
 
+    // Day click handler (for when house entries are too small to tap)
+    dayCell.addEventListener('click', (e) => {
+      // Only trigger if clicking on the day cell itself, not on a house event
+      if (e.target.closest('.house-event')) return;
+
+      // Get all unique houses for this day
+      const housesOnDay = getUniqueHousesForDate(dateStr);
+      if (housesOnDay.length > 0 && onDayClick) {
+        onDayClick(dateStr, housesOnDay, e);
+      }
+    });
+
     dayCell.appendChild(eventsContainer);
     daysContainer.appendChild(dayCell);
   }
@@ -340,6 +354,22 @@ function getHousesForDate(dateStr, houseRows) {
   result.sort((a, b) => a.row - b.row);
 
   return result;
+}
+
+/**
+ * Get unique houses that fall on a specific date (simpler version for day click)
+ */
+function getUniqueHousesForDate(dateStr) {
+  return housesData.filter(house =>
+    dateStr >= house.startDate && dateStr <= house.endDate
+  );
+}
+
+/**
+ * Get color class index for a house
+ */
+export function getHouseColorIndex(houseId) {
+  return houseColorMap.get(houseId) || 0;
 }
 
 /**

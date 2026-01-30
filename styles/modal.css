@@ -16,7 +16,7 @@
   z-index: 500;
   opacity: 1;
   transition: opacity 0.2s;
-  padding: var(--edge-margin);
+  padding: var(--modal-margin-min);
 }
 
 .modal-overlay.modal-hidden {

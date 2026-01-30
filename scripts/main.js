@@ -83,7 +83,8 @@ import {
 import {
   initCalendar,
   renderCalendar,
-  setCurrentLoadedHouse
+  setCurrentLoadedHouse,
+  getHouseColorIndex
 } from './calendar.js';
 import { modalManager, MultiSelectTags } from './modals.js';
 import { undoManager } from './undo.js';
@@ -2662,6 +2663,9 @@ function setupCalendar() {
     },
     onNewHouse: () => {
       openHouseEditor(null);
+    },
+    onDayClick: (dateStr, houses, event) => {
+      showDayHousesModal(dateStr, houses);
     }
   });
 }
@@ -2674,6 +2678,61 @@ async function openCalendarModal() {
   await renderCalendar();
   await checkForLegacyRooms();
   modalManager.openModal('calendar-modal');
+}
+
+function showDayHousesModal(dateStr, houses) {
+  // Format date for display (e.g., "January 15, 2026")
+  const date = new Date(dateStr + 'T00:00:00');
+  const options = { month: 'long', day: 'numeric', year: 'numeric' };
+  const formattedDate = date.toLocaleDateString('en-US', options);
+
+  // Update modal title
+  const titleEl = document.getElementById('day-houses-title');
+  titleEl.textContent = `Houses on ${formattedDate}`;
+
+  // Populate houses list
+  const listEl = document.getElementById('day-houses-list');
+  listEl.innerHTML = '';
+
+  houses.forEach(house => {
+    const btn = document.createElement('button');
+    btn.className = 'day-house-btn';
+
+    const colorEl = document.createElement('span');
+    colorEl.className = 'day-house-color';
+    colorEl.style.backgroundColor = getHouseColorStyle(getHouseColorIndex(house.id));
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'day-house-name';
+    nameEl.textContent = house.name;
+
+    const datesEl = document.createElement('span');
+    datesEl.className = 'day-house-dates';
+    datesEl.textContent = formatDateRange(house.startDate, house.endDate);
+
+    btn.appendChild(colorEl);
+    btn.appendChild(nameEl);
+    btn.appendChild(datesEl);
+
+    btn.addEventListener('click', async () => {
+      modalManager.closeModal();
+      showActionNotification('Loading house...');
+      await loadHouse(house.id);
+    });
+
+    listEl.appendChild(btn);
+  });
+
+  modalManager.openModal('day-houses-modal');
+}
+
+// Get CSS color for house color index
+function getHouseColorStyle(colorIndex) {
+  const colors = [
+    '#3b82f6', '#10b981', '#f59e0b', '#ef4444',
+    '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'
+  ];
+  return colors[colorIndex % colors.length];
 }
 
 // Check for legacy rooms and show notice
