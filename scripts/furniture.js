@@ -911,16 +911,16 @@ export async function placeFurniture(entryId, position, surfaceNormal = null) {
   // Use provided surface normal or the last clicked surface normal
   const normal = surfaceNormal || lastClickSurfaceNormal || new THREE.Vector3(0, 1, 0);
 
-  // For initial placement, use default contact axis (bottom of model)
-  // This gives natural "standing" behavior for floor placement
-  const contactAxis = DEFAULT_CONTACT_AXIS.clone();
+  // Detect contact axis based on upright model's orientation relative to surface
+  // This determines which face of the model touches the surface
+  const contactAxis = detectContactAxis(model, normal);
 
   // Store surface info in userData for later rotation/dragging
   model.userData.surfaceNormal = normal.clone();
   model.userData.contactAxis = contactAxis;
 
-  // Align furniture to surface (bottom against surface, upright)
-  alignToSurface(model, normal, contactAxis);
+  // Model stays in natural upright orientation - no rotation applied
+  // User can manually rotate after placement, and drags will preserve that rotation
 
   // Set position with bounding box offset so contact face sits on surface
   if (position) {
