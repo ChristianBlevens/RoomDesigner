@@ -9,6 +9,7 @@
   padding: var(--spacing-lg);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .calendar-header {
@@ -92,6 +93,9 @@
 .calendar-grid {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .calendar-weekdays {
@@ -100,6 +104,7 @@
   border-bottom: 1px solid #e5e7eb;
   padding-bottom: var(--spacing-sm);
   margin-bottom: var(--spacing-sm);
+  flex-shrink: 0;
 }
 
 .calendar-weekday {
@@ -113,16 +118,19 @@
 .calendar-days {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  grid-template-rows: repeat(6, auto);
+  grid-auto-rows: min-content;
   gap: 1px;
   background: #e5e7eb;
   border: 1px solid #e5e7eb;
   border-radius: var(--radius-md);
+  overflow-y: auto;
+  max-height: 100%;
 }
 
 .calendar-day {
   background: #fff;
   padding: var(--spacing-xs);
+  min-height: 60px;
   display: flex;
   flex-direction: column;
   position: relative;
@@ -163,6 +171,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  flex: 1;
 }
 
 /* ============ House Event Bars ============ */
@@ -170,6 +179,7 @@
 .house-event {
   font-size: clamp(8px, 2vw, 11px);
   padding: 2px var(--spacing-xs);
+  min-height: 18px;
   border-radius: 3px;
   color: #fff;
   cursor: pointer;
@@ -177,6 +187,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   transition: opacity 0.2s;
+  flex-shrink: 0;
 }
 
 .house-event:hover {

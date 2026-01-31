@@ -1,5 +1,7 @@
 // Undo/Redo system using Command pattern
 
+import { createFurnitureHitBox, removeFurnitureHitBox, updateFurnitureHitBox } from './scene.js';
+
 class UndoManager {
   constructor(maxHistory = 50) {
     this.undoStack = [];
@@ -93,9 +95,15 @@ export class PlaceFurnitureCommand {
     if (!this.selectableObjects.includes(this.model)) {
       this.selectableObjects.push(this.model);
     }
+    // Recreate hitbox if it was removed
+    if (!this.model.userData.hitBox) {
+      createFurnitureHitBox(this.model);
+    }
   }
 
   undo() {
+    // Remove hitbox before removing model
+    removeFurnitureHitBox(this.model);
     this.scene.remove(this.model);
     const index = this.selectableObjects.indexOf(this.model);
     if (index > -1) this.selectableObjects.splice(index, 1);
@@ -112,10 +120,12 @@ export class MoveFurnitureCommand {
 
   execute() {
     this.model.position.copy(this.toPosition);
+    updateFurnitureHitBox(this.model);
   }
 
   undo() {
     this.model.position.copy(this.fromPosition);
+    updateFurnitureHitBox(this.model);
   }
 }
 
@@ -129,10 +139,12 @@ export class RotateFurnitureCommand {
 
   execute() {
     this.model.rotation.copy(this.toRotation);
+    updateFurnitureHitBox(this.model);
   }
 
   undo() {
     this.model.rotation.copy(this.fromRotation);
+    updateFurnitureHitBox(this.model);
   }
 }
 
@@ -146,10 +158,12 @@ export class ScaleFurnitureCommand {
 
   execute() {
     this.model.scale.copy(this.toScale);
+    updateFurnitureHitBox(this.model);
   }
 
   undo() {
     this.model.scale.copy(this.fromScale);
+    updateFurnitureHitBox(this.model);
   }
 }
 
@@ -165,6 +179,8 @@ export class DeleteFurnitureCommand {
   }
 
   execute() {
+    // Remove hitbox before removing model
+    removeFurnitureHitBox(this.model);
     this.scene.remove(this.model);
     const index = this.selectableObjects.indexOf(this.model);
     if (index > -1) this.selectableObjects.splice(index, 1);
@@ -177,6 +193,10 @@ export class DeleteFurnitureCommand {
     this.scene.add(this.model);
     if (!this.selectableObjects.includes(this.model)) {
       this.selectableObjects.push(this.model);
+    }
+    // Recreate hitbox for the restored model
+    if (!this.model.userData.hitBox) {
+      createFurnitureHitBox(this.model);
     }
   }
 }

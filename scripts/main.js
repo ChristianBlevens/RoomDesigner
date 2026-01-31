@@ -972,6 +972,9 @@ async function cancelRoomCreationFlow() {
 
 // ============ Furniture Modal ============
 
+// Action ID to prevent duplicate renders from rapid open/close
+let furnitureModalActionId = 0;
+
 function setupFurnitureModal() {
   const searchInput = document.getElementById('furniture-search');
   const categorySelect = document.getElementById('category-select');
@@ -993,6 +996,8 @@ function setupFurnitureModal() {
 }
 
 function openFurnitureModal() {
+  // Increment action ID to invalidate any in-flight requests from previous opens
+  furnitureModalActionId++;
   refreshFurnitureModal();
   modalManager.openModal('furniture-modal');
 }
@@ -1028,8 +1033,14 @@ function onTagsFilterChange(selectedTags) {
 async function renderFurnitureGrid() {
   const grid = document.getElementById('furniture-grid');
 
+  // Capture action ID at start to detect stale requests
+  const actionId = furnitureModalActionId;
+
   // Get furniture metadata only (no blob downloads yet)
   const furniture = await getAllFurniture({ includeImages: false, includePreview3d: false });
+
+  // Check if this request is stale (modal was closed/reopened)
+  if (actionId !== furnitureModalActionId) return;
 
   grid.innerHTML = '';
 
@@ -1056,6 +1067,9 @@ async function renderFurnitureGrid() {
     placedCounts
   );
 
+  // Check again after async operation
+  if (actionId !== furnitureModalActionId) return;
+
   // Render cards with availability from batch result
   for (const item of furniture) {
     const availability = availabilityMap[item.id] || { available: 0, total: item.quantity || 1 };
@@ -1065,12 +1079,18 @@ async function renderFurnitureGrid() {
 }
 
 async function filterFurnitureGrid() {
+  // Capture action ID at start to detect stale requests
+  const actionId = furnitureModalActionId;
+
   const searchTerm = document.getElementById('furniture-search').value.toLowerCase().trim();
   const category = document.getElementById('category-select').value;
   const selectedTags = tagsDropdown.getSelectedTags();
 
   // Use cached furniture list (no new fetch if cache is valid)
   let furniture = await getAllFurniture({ includeImages: false, includePreview3d: false });
+
+  // Check if this request is stale (modal was closed/reopened)
+  if (actionId !== furnitureModalActionId) return;
 
   // Client-side filtering
   if (searchTerm) {
@@ -1116,6 +1136,9 @@ async function filterFurnitureGrid() {
     currentRoomId,
     placedCounts
   );
+
+  // Check again after async operation
+  if (actionId !== furnitureModalActionId) return;
 
   for (const item of furniture) {
     const availability = availabilityMap[item.id] || { available: 0, total: item.quantity || 1 };

@@ -62,7 +62,14 @@ class ModalManager {
 
     modal.classList.remove('modal-hidden');
     this.activeModal = modal;
-    this.justOpened = true; // Set flag to prevent immediate closure
+
+    // Set flag to prevent immediate closure, clear after current event loop
+    // This ensures the opening click doesn't also close the modal,
+    // but the flag is cleared before any subsequent clicks
+    this.justOpened = true;
+    setTimeout(() => {
+      this.justOpened = false;
+    }, 0);
   }
 
   closeModal() {

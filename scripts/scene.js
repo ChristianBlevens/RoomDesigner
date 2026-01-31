@@ -1210,7 +1210,7 @@ export function removeFurnitureFromScene(model) {
 }
 
 // Create invisible AABB hitbox for a furniture model
-function createFurnitureHitBox(model) {
+export function createFurnitureHitBox(model) {
   // Compute world-space bounding box
   const box = new THREE.Box3().setFromObject(model);
   const size = new THREE.Vector3();
@@ -1242,7 +1242,7 @@ function createFurnitureHitBox(model) {
 }
 
 // Remove hitbox associated with a furniture model
-function removeFurnitureHitBox(model) {
+export function removeFurnitureHitBox(model) {
   const hitBox = model.userData.hitBox;
   if (hitBox) {
     scene.remove(hitBox);
