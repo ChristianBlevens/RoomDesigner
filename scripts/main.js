@@ -2299,9 +2299,12 @@ function setupTutorials() {
 async function openTutorialHub() {
   if (!tutorialIndex) {
     try {
-      const response = await fetch(adjustUrlForProxy('/tutorials/index.json'));
+      const basePath = window.location.pathname.replace(/\/+$/, '').replace(/\/index\.html$/i, '');
+      const response = await fetch(`${basePath}/tutorials/index.json`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       tutorialIndex = await response.json();
     } catch (err) {
+      console.error('Failed to load tutorial index:', err);
       showActionNotification('Failed to load tutorials');
       return;
     }
@@ -2326,7 +2329,9 @@ async function openTutorialHub() {
 
 async function openTutorialContent(entry) {
   try {
-    const response = await fetch(adjustUrlForProxy(`/tutorials/${entry.file}`));
+    const basePath = window.location.pathname.replace(/\/+$/, '').replace(/\/index\.html$/i, '');
+    const response = await fetch(`${basePath}/tutorials/${entry.file}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const markdown = await response.text();
 
     const rendered = document.getElementById('tutorial-content-rendered');
@@ -2334,6 +2339,7 @@ async function openTutorialContent(entry) {
 
     modalManager.openModal('tutorial-content-modal');
   } catch (err) {
+    console.error('Failed to load tutorial content:', err);
     showActionNotification('Failed to load tutorial');
   }
 }
