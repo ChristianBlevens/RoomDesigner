@@ -106,12 +106,14 @@ async def upload_furniture_model(
     verify_furniture_ownership(furniture_id, org_id)
     content = await file.read()
 
+    db = get_furniture_db()
+    row = db.execute("SELECT image_path FROM furniture WHERE id = ?", [furniture_id]).fetchone()
+    has_image = row and row[0]
+
     processor = ModelProcessor()
     result = processor.process_glb(
-        content, origin_placement='bottom-center', generate_preview=True
+        content, origin_placement='bottom-center', generate_preview=not has_image
     )
-
-    db = get_furniture_db()
 
     model_key = f"furniture/models/{furniture_id}.glb"
     r2.upload_bytes(model_key, result['glb'], 'model/gltf-binary')

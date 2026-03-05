@@ -299,14 +299,16 @@ def _process_glb_sync(glb_content: bytes, furniture_id: str) -> dict:
     """Synchronous GLB processing (for thread pool)."""
     import r2 as r2_module
 
+    conn = get_furniture_db()
+    row = conn.execute("SELECT image_path FROM furniture WHERE id = ?", [furniture_id]).fetchone()
+    has_image = row and row[0]
+
     processor = ModelProcessor()
     result = processor.process_glb(
         glb_content,
         origin_placement='bottom-center',
-        generate_preview=True
+        generate_preview=not has_image
     )
-
-    conn = get_furniture_db()
 
     model_key = f"furniture/models/{furniture_id}.glb"
     r2_module.upload_bytes(model_key, result['glb'], 'model/gltf-binary')
