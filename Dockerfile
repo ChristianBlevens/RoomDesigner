@@ -48,6 +48,7 @@ ENV QT_QPA_PLATFORM=offscreen
 COPY server/ ./server/
 COPY scripts/ ./scripts/
 COPY styles/ ./styles/
+COPY tutorials/ ./tutorials/
 COPY index.html .
 
 # Create data directories and X11 socket directory
