@@ -1037,6 +1037,16 @@ select option {
   color: var(--text-secondary);
 }
 
+#meter-stick-btn.placement-mode {
+  animation: placementPulse 1.5s ease-in-out infinite;
+  border-color: var(--accent-primary);
+}
+
+@keyframes placementPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(26, 159, 255, 0.4); }
+  50% { box-shadow: 0 0 12px 4px rgba(26, 159, 255, 0.4); }
+}
+
 #lighting-btn.active,
 #scale-btn.active,
 #before-after-btn.active {

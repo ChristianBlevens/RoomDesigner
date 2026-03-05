@@ -49,6 +49,10 @@ const furnitureHitBoxes = [];
 // Room-wide scale factor (multiplies individual furniture base scales)
 let roomScaleFactor = 1.0;
 
+// Meter stick reference object
+let meterStickMesh = null;
+let meterStickVisible = false;
+
 // Raycaster for mouse interactions
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
@@ -1299,11 +1303,14 @@ export function removeFurnitureByEntryId(entryId) {
 export function clearAllFurniture() {
   const toRemove = [...selectableObjects];
   toRemove.forEach(obj => removeFurnitureFromScene(obj));
+  meterStickMesh = null;
+  meterStickVisible = false;
 }
 
 // Toggle furniture visibility (for before/after comparison)
 export function setFurnitureVisible(visible) {
   selectableObjects.forEach(obj => {
+    if (obj.userData.isMeterStick) return;
     obj.visible = visible;
     obj.traverse(child => {
       if (child.isMesh) {
@@ -1938,4 +1945,73 @@ export function applyRoomScaleToAllFurniture() {
  */
 export function resetRoomScale() {
   roomScaleFactor = 1.0;
+}
+
+export function createMeterStick() {
+  const geometry = new THREE.BoxGeometry(0.05, 1, 0.05);
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xff6600,
+    roughness: 0.4,
+    metalness: 0.1,
+    emissive: 0xff6600,
+    emissiveIntensity: 0.15
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.castShadow = true;
+  mesh.receiveShadow = false;
+  mesh.userData.isFurniture = true;
+  mesh.userData.isDraggable = true;
+  mesh.userData.isMeterStick = true;
+  return mesh;
+}
+
+export function addMeterStickToScene(mesh) {
+  meterStickMesh = mesh;
+  meterStickVisible = true;
+  scene.add(mesh);
+  selectableObjects.push(mesh);
+  createFurnitureHitBox(mesh);
+}
+
+export function removeMeterStickFromScene() {
+  if (!meterStickMesh) return;
+  removeFurnitureFromScene(meterStickMesh);
+  meterStickMesh = null;
+  meterStickVisible = false;
+}
+
+export function setMeterStickVisible(visible) {
+  if (!meterStickMesh) return;
+  meterStickVisible = visible;
+  meterStickMesh.visible = visible;
+  if (meterStickMesh.userData.hitBox) {
+    meterStickMesh.userData.hitBox.visible = visible;
+  }
+  if (visible) {
+    if (!selectableObjects.includes(meterStickMesh)) {
+      selectableObjects.push(meterStickMesh);
+    }
+  } else {
+    const idx = selectableObjects.indexOf(meterStickMesh);
+    if (idx > -1) selectableObjects.splice(idx, 1);
+    if (transformControls.object === meterStickMesh) {
+      transformControls.detach();
+    }
+  }
+}
+
+export function getMeterStick() {
+  return meterStickMesh;
+}
+
+export function isMeterStickVisible() {
+  return meterStickVisible;
+}
+
+export function clearMeterStick() {
+  if (meterStickMesh) {
+    removeFurnitureFromScene(meterStickMesh);
+  }
+  meterStickMesh = null;
+  meterStickVisible = false;
 }

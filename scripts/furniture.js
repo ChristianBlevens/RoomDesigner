@@ -16,7 +16,9 @@ import {
   selectableObjects,
   getRoomMesh,
   getRoomScale,
-  updateFurnitureHitBox
+  updateFurnitureHitBox,
+  getMeterStick,
+  removeMeterStickFromScene
 } from './scene.js';
 import {
   undoManager,
@@ -28,7 +30,7 @@ import {
 import { getFurnitureEntry } from './api.js';
 import { modalManager } from './modals.js';
 import { extractModelFromZip } from './utils.js';
-import { isLightingDirectionMode, showActionNotification } from './main.js';
+import { isLightingDirectionMode, showActionNotification, isMeterStickPlacementMode } from './main.js';
 
 // Interaction state
 let selectedObject = null;
@@ -434,6 +436,18 @@ function extractRotationAroundNormal(model) {
 // Callback for opening furniture modal
 let onOpenFurnitureModal = null;
 
+// Callback for meter stick events
+let onMeterStickDeleted = null;
+let onMeterStickPlace = null;
+
+export function setMeterStickDeletedCallback(callback) {
+  onMeterStickDeleted = callback;
+}
+
+export function setMeterStickPlaceCallback(callback) {
+  onMeterStickPlace = callback;
+}
+
 // Store click position and surface info for placing furniture
 let lastClickPosition = null;
 let lastClickSurfaceNormal = null;
@@ -670,6 +684,10 @@ function onPointerUp(event) {
       // If something was selected, just deselect
       if (selectedObject) {
         deselectFurniture();
+      } else if (isMeterStickPlacementMode() && onMeterStickPlace) {
+        if (lastClickPosition && lastClickSurfaceNormal) {
+          onMeterStickPlace(lastClickPosition.clone(), lastClickSurfaceNormal.clone());
+        }
       } else if (!isLightingDirectionMode()) {
         // Open furniture modal (but not if in lighting direction mode)
         if (onOpenFurnitureModal) {
@@ -885,6 +903,13 @@ function deleteSelectedFurniture() {
 
   // Show immediate feedback
   showActionNotification('Deleting...');
+
+  if (selectedObject.userData.isMeterStick) {
+    removeMeterStickFromScene();
+    deselectFurniture();
+    if (onMeterStickDeleted) onMeterStickDeleted();
+    return;
+  }
 
   const scene = getScene();
   const command = new DeleteFurnitureCommand(scene, selectedObject, selectableObjects);
