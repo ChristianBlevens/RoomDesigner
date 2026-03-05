@@ -237,6 +237,18 @@ body {
 
 /* ============ Button Variants ============ */
 
+.btn-primary,
+.btn-secondary,
+.btn-danger {
+  padding: var(--btn-padding) var(--spacing-lg);
+  min-height: var(--btn-size);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-md);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
 .btn-primary {
   background: var(--accent-gradient) !important;
   color: var(--text-bright) !important;
@@ -267,6 +279,11 @@ body {
 
 .btn-danger:hover {
   background: var(--danger-hover) !important;
+}
+
+/* Full-width standalone buttons in entry editor */
+#generate-model-btn {
+  width: 100%;
 }
 
 /* ============ Gizmo Menu ============ */
