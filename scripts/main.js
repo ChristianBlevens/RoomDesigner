@@ -845,15 +845,13 @@ function getImageAspectRatio(blob) {
 // Show the 3D scene and UI controls
 function showScene() {
   document.getElementById('canvas-container').classList.remove('hidden');
-  document.getElementById('controls-left').classList.remove('hidden');
-  document.getElementById('controls-right').classList.remove('hidden');
+  document.getElementById('controls-bar').classList.remove('hidden');
 }
 
 // Hide the 3D scene and UI controls
 function hideScene() {
   document.getElementById('canvas-container').classList.add('hidden');
-  document.getElementById('controls-left').classList.add('hidden');
-  document.getElementById('controls-right').classList.add('hidden');
+  document.getElementById('controls-bar').classList.add('hidden');
   hideTabBar();
 }
 

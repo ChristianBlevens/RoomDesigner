@@ -1,5 +1,4 @@
 /* ============ Calendar CSS with Responsive Variables ============ */
-/* Inherits CSS custom properties from main.css */
 
 /* ============ Calendar Modal ============ */
 
@@ -38,44 +37,44 @@
   align-items: center;
   justify-content: center;
   background: none;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-sm);
   padding: var(--btn-padding);
   min-width: var(--btn-size);
   min-height: var(--btn-size);
   cursor: pointer;
   font-size: var(--font-lg);
-  color: #374151;
+  color: var(--text-primary);
   transition: all 0.2s;
 }
 
 .calendar-nav-btn:hover {
-  background: #f3f4f6;
-  border-color: #9ca3af;
+  background: var(--bg-surface-light);
+  border-color: var(--border-hover);
 }
 
 .calendar-month-year {
   font-size: var(--font-lg);
   font-weight: 600;
-  color: #111827;
+  color: var(--text-bright);
   min-width: clamp(140px, 25vw, 200px);
   text-align: center;
 }
 
 .calendar-today-btn {
   background: none;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-sm);
   padding: var(--btn-padding) var(--spacing-md);
   min-height: var(--btn-size);
   cursor: pointer;
   font-size: var(--font-md);
-  color: #374151;
+  color: var(--text-primary);
   transition: all 0.2s;
 }
 
 .calendar-today-btn:hover {
-  background: #f3f4f6;
+  background: var(--bg-surface-light);
 }
 
 #calendar-new-house-btn {
@@ -101,7 +100,7 @@
 .calendar-weekdays {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--border-subtle);
   padding-bottom: var(--spacing-sm);
   margin-bottom: var(--spacing-sm);
   flex-shrink: 0;
@@ -111,7 +110,7 @@
   text-align: center;
   font-size: var(--font-xs);
   font-weight: 600;
-  color: #6b7280;
+  color: var(--text-secondary);
   text-transform: uppercase;
 }
 
@@ -120,38 +119,44 @@
   grid-template-columns: repeat(7, 1fr);
   grid-auto-rows: min-content;
   gap: 1px;
-  background: #e5e7eb;
-  border: 1px solid #e5e7eb;
+  background: var(--border-subtle);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   overflow-y: auto;
   max-height: 100%;
 }
 
 .calendar-day {
-  background: #fff;
+  background: var(--bg-surface);
   padding: var(--spacing-xs);
   min-height: 60px;
   display: flex;
   flex-direction: column;
   position: relative;
   cursor: pointer;
+  transition: background 0.15s;
+}
+
+.calendar-day:hover {
+  background: var(--bg-surface-light);
 }
 
 .calendar-day.other-month {
-  background: #f9fafb;
+  background: var(--bg-secondary);
 }
 
 .calendar-day.other-month .day-number {
-  color: #9ca3af;
+  color: var(--text-secondary);
+  opacity: 0.5;
 }
 
 .calendar-day.today {
-  background: #eff6ff;
+  background: rgba(26, 159, 255, 0.08);
 }
 
 .calendar-day.today .day-number {
-  background: #3b82f6;
-  color: #fff;
+  background: var(--accent-primary);
+  color: var(--text-bright);
   border-radius: 50%;
   width: clamp(20px, 5vw, 28px);
   height: clamp(20px, 5vw, 28px);
@@ -163,7 +168,7 @@
 .day-number {
   font-size: var(--font-xs);
   font-weight: 500;
-  color: #374151;
+  color: var(--text-primary);
   margin-bottom: var(--spacing-xs);
 }
 
@@ -181,7 +186,7 @@
   padding: 2px var(--spacing-xs);
   min-height: 18px;
   border-radius: 3px;
-  color: #fff;
+  color: var(--text-bright);
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
@@ -194,7 +199,6 @@
   opacity: 0.85;
 }
 
-/* Event position classes for multi-week spanning */
 .house-event.event-start {
   border-top-left-radius: 3px;
   border-bottom-left-radius: 3px;
@@ -217,19 +221,19 @@
   border-radius: 3px;
 }
 
-/* House event colors (assigned dynamically) */
-.house-color-0 { background: #3b82f6; }
-.house-color-1 { background: #10b981; }
-.house-color-2 { background: #f59e0b; }
-.house-color-3 { background: #ef4444; }
-.house-color-4 { background: #8b5cf6; }
-.house-color-5 { background: #ec4899; }
-.house-color-6 { background: #06b6d4; }
-.house-color-7 { background: #84cc16; }
+/* House event colors */
+.house-color-0 { background: #1a9fff; }
+.house-color-1 { background: #2ecc71; }
+.house-color-2 { background: #f39c12; }
+.house-color-3 { background: #e74c3c; }
+.house-color-4 { background: #9b59b6; }
+.house-color-5 { background: #e91e8c; }
+.house-color-6 { background: #00bcd4; }
+.house-color-7 { background: #8bc34a; }
 
 /* Current house highlight */
 .house-event.current-house {
-  box-shadow: 0 0 0 2px #111827;
+  box-shadow: 0 0 0 2px var(--text-bright);
 }
 
 /* Empty state */
@@ -239,7 +243,7 @@
   left: 50%;
   transform: translate(-50%, -50%);
   text-align: center;
-  color: #6b7280;
+  color: var(--text-secondary);
   font-size: var(--font-md);
 }
 
@@ -252,16 +256,17 @@
 .calendar-legacy-notice {
   margin-top: var(--spacing-md);
   padding: var(--spacing-md);
-  background: #fef3c7;
+  background: rgba(243, 156, 18, 0.1);
+  border: 1px solid rgba(243, 156, 18, 0.2);
   border-radius: var(--radius-md);
   font-size: var(--font-md);
-  color: #92400e;
+  color: #f39c12;
 }
 
 .calendar-legacy-notice button {
   background: none;
   border: none;
-  color: #d97706;
+  color: #f39c12;
   text-decoration: underline;
   cursor: pointer;
   padding: 0;
@@ -277,7 +282,7 @@
 
 .day-houses-content h3 {
   font-size: var(--font-lg);
-  color: #111827;
+  color: var(--text-bright);
   margin-bottom: var(--spacing-md);
   text-align: center;
 }
@@ -293,24 +298,24 @@
   align-items: center;
   gap: var(--spacing-sm);
   padding: var(--spacing-md);
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
-  background: #fff;
+  background: var(--bg-input);
   cursor: pointer;
   text-align: left;
   font-size: var(--font-md);
-  color: #111827;
+  color: var(--text-primary);
   transition: all 0.2s;
   min-height: var(--btn-size);
 }
 
 .day-house-btn:hover {
-  background: #f9fafb;
-  border-color: #d1d5db;
+  background: var(--bg-surface-light);
+  border-color: var(--border-hover);
 }
 
 .day-house-btn:active {
-  background: #f3f4f6;
+  background: var(--bg-surface);
 }
 
 .day-house-color {
@@ -322,9 +327,10 @@
 
 .day-house-name {
   flex: 1;
+  color: var(--text-primary);
 }
 
 .day-house-dates {
   font-size: var(--font-xs);
-  color: #6b7280;
+  color: var(--text-secondary);
 }

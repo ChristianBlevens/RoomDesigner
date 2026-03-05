@@ -20,8 +20,8 @@
 </head>
 <body>
   <!-- Auth Modal (Sign In / Sign Up) -->
-  <div class="modal-overlay modal-hidden" id="auth-modal" style="z-index: 10000; background: var(--bg-primary, #1a1a2e);">
-    <div class="modal-content modal-small" style="margin-top: 20vh;">
+  <div class="modal-overlay modal-hidden auth-overlay" id="auth-modal" style="z-index: 10000;">
+    <div class="modal-content auth-card">
       <h2 id="auth-title">Sign In</h2>
       <form id="auth-form">
         <div class="form-group">
@@ -37,9 +37,9 @@
           <button type="submit" class="btn-primary" id="auth-submit-btn">Sign In</button>
         </div>
       </form>
-      <p style="text-align: center; margin-top: 1em;">
-        <a href="#" id="auth-toggle-link" style="color: var(--accent-primary, #4a9eff);">Don't have an account? Sign up</a>
-      </p>
+      <div class="auth-toggle">
+        <a href="#" id="auth-toggle-link">Don't have an account? Sign up</a>
+      </div>
     </div>
   </div>
 
@@ -49,8 +49,8 @@
   <!-- Three.js canvas container (hidden until orientation is set) -->
   <div id="canvas-container" class="hidden"></div>
 
-  <!-- Top-left: Undo/Redo/Lighting buttons -->
-  <div id="controls-left" class="hidden">
+  <!-- Controls Bar (above room tabs) -->
+  <div id="controls-bar" class="hidden">
     <button id="undo-btn" disabled title="Undo (Ctrl+Z)">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M3 10h10a5 5 0 0 1 5 5v2"></path>
@@ -92,6 +92,8 @@
         <line x1="12" y1="3" x2="12" y2="21"></line>
       </svg>
     </button>
+    <div class="controls-spacer"></div>
+    <button id="session-btn">House</button>
   </div>
 
   <!-- Lighting Controls Panel -->
@@ -127,11 +129,6 @@
       <input type="range" id="room-scale-slider" min="0.25" max="3.0" step="0.05" value="1.0">
       <span id="room-scale-value">1.0x</span>
     </div>
-  </div>
-
-  <!-- Top-right: House button -->
-  <div id="controls-right" class="hidden">
-    <button id="session-btn">House</button>
   </div>
 
   <!-- Room Processing Modal (progress display for MoGe-2 analysis) -->
