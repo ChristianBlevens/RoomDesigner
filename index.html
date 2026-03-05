@@ -19,6 +19,30 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
+  <!-- Auth Modal (Sign In / Sign Up) -->
+  <div class="modal-overlay modal-hidden" id="auth-modal" style="z-index: 10000; background: var(--bg-primary, #1a1a2e);">
+    <div class="modal-content modal-small" style="margin-top: 20vh;">
+      <h2 id="auth-title">Sign In</h2>
+      <form id="auth-form">
+        <div class="form-group">
+          <label for="auth-username">Username</label>
+          <input type="text" id="auth-username" required placeholder="Organization username" autocomplete="username">
+        </div>
+        <div class="form-group">
+          <label for="auth-password">Password</label>
+          <input type="password" id="auth-password" required placeholder="Password" autocomplete="current-password" minlength="6">
+        </div>
+        <p class="form-error hidden" id="auth-error"></p>
+        <div class="form-actions">
+          <button type="submit" class="btn-primary" id="auth-submit-btn">Sign In</button>
+        </div>
+      </form>
+      <p style="text-align: center; margin-top: 1em;">
+        <a href="#" id="auth-toggle-link" style="color: var(--accent-primary, #4a9eff);">Don't have an account? Sign up</a>
+      </p>
+    </div>
+  </div>
+
   <!-- Background image container -->
   <div id="background-container"></div>
 
@@ -184,9 +208,10 @@
         <p>You have rooms from a previous version. <button id="migrate-rooms-btn" class="btn-link">Assign to house</button></p>
       </div>
     </div>
-    <!-- Hidden file inputs for room image upload flow -->
-    <input type="file" id="image-file-input" accept="image/*" style="display: none;">
   </div>
+
+  <!-- File input for room image upload (body-level for cross-platform .click() compatibility) -->
+  <input type="file" id="image-file-input" accept="image/*" style="display: none;">
 
   <!-- House Editor Modal -->
   <div class="modal-overlay modal-hidden" id="house-editor-modal">
@@ -374,6 +399,14 @@
             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
           </svg>
           Delete House
+        </button>
+        <button id="signout-session-btn" class="btn-secondary">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+            <polyline points="16 17 21 12 16 7"></polyline>
+            <line x1="21" y1="12" x2="9" y2="12"></line>
+          </svg>
+          Sign Out
         </button>
       </div>
     </div>

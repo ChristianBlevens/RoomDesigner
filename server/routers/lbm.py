@@ -6,25 +6,33 @@ import sys
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from lbm_client import relight_image, LBMError
-from config import ROOM_BACKGROUNDS
+from db.connection import get_houses_db
 from utils import IMAGE_EXTENSIONS
+from routers.auth import verify_token
+import r2
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def find_background_file(room_id: str) -> Path | None:
-    """Find room background image file."""
-    for ext in IMAGE_EXTENSIONS:
-        path = ROOM_BACKGROUNDS / f"{room_id}.{ext}"
-        if path.exists():
-            return path
-    return None
+def get_background_bytes(room_id: str) -> bytes:
+    """Get room background image bytes from R2."""
+    db = get_houses_db()
+    row = db.execute(
+        "SELECT background_image_path FROM rooms WHERE id = ?", [room_id]
+    ).fetchone()
+    if not row or not row[0]:
+        raise HTTPException(404, f"Background image not found for room {room_id}")
+
+    data = r2.download_bytes(row[0])
+    if not data:
+        raise HTTPException(404, f"Background image not found in storage for room {room_id}")
+    return data
 
 
 class RelightRequest(BaseModel):
@@ -37,7 +45,7 @@ class RelightResponse(BaseModel):
 
 
 @router.post("/relight", response_model=RelightResponse)
-async def relight_screenshot(request: RelightRequest):
+async def relight_screenshot(request: RelightRequest, org_id: str = Depends(verify_token)):
     """
     Relight a room screenshot using LBM.
 
@@ -46,12 +54,7 @@ async def relight_screenshot(request: RelightRequest):
     """
     import base64
 
-    # Find background image for this room
-    background_path = find_background_file(request.room_id)
-    if not background_path:
-        raise HTTPException(404, f"Background image not found for room {request.room_id}")
-
-    background_bytes = background_path.read_bytes()
+    background_bytes = get_background_bytes(request.room_id)
 
     # Decode composite screenshot
     try:

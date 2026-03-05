@@ -7,6 +7,7 @@ import {
   invalidateHouseCache,
   invalidateRoomCache,
 } from './cache.js';
+import { getToken, logout } from './auth.js';
 
 // Detect base path from current URL (handles /room/ prefix when behind nginx proxy)
 // /room/ -> /room/api, / -> /api
@@ -14,23 +15,35 @@ const BASE_PATH = window.location.pathname.replace(/\/+$/, '').replace(/\/index\
 const API_BASE = `${BASE_PATH}/api`;
 
 // Adjust server-returned URLs for proxy prefix (e.g., /api/... -> /room/api/...)
+// R2 absolute URLs (https://...) are returned unchanged.
 export function adjustUrlForProxy(url) {
   if (!url) return url;
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
   return url.startsWith('/api') ? `${BASE_PATH}${url}` : url;
 }
 
 async function apiFetch(path, options = {}) {
+  const token = getToken();
+  const headers = {
+    'Content-Type': 'application/json',
+    ...options.headers,
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const response = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers
-    },
+    headers,
     ...options
   });
 
+  if (response.status === 401) {
+    logout();
+    return;
+  }
+
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
-    // Handle Pydantic validation errors (detail is an array)
     let message;
     if (Array.isArray(error.detail)) {
       message = error.detail.map(e => `${e.loc?.join('.')}: ${e.msg}`).join('; ');
@@ -50,13 +63,25 @@ async function fetchAsBlob(url) {
 }
 
 async function uploadFile(path, blob, filename = 'file') {
+  const token = getToken();
   const formData = new FormData();
   formData.append('file', blob, filename);
 
+  const headers = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const response = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
+    headers,
     body: formData
   });
+
+  if (response.status === 401) {
+    logout();
+    return;
+  }
 
   if (!response.ok) {
     throw new Error(`Upload failed: ${response.status}`);
@@ -190,15 +215,27 @@ export async function getOrphanRooms() {
  * Returns the completed room or throws error.
  */
 export async function createRoom(houseId, name, imageFile) {
+  const token = getToken();
   const formData = new FormData();
   formData.append('houseId', houseId);
   formData.append('name', name);
   formData.append('image', imageFile);
 
+  const headers = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const response = await fetch(`${API_BASE}/rooms/`, {
     method: 'POST',
+    headers,
     body: formData
   });
+
+  if (response.status === 401) {
+    logout();
+    return;
+  }
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
@@ -521,9 +558,6 @@ export async function saveFurnitureEntry(entry) {
   if (entry.image instanceof Blob) {
     await uploadFile(`/files/furniture/${entryId}/image`, entry.image, 'image.jpg');
   }
-  if (entry.preview3d instanceof Blob) {
-    await uploadFile(`/files/furniture/${entryId}/preview3d`, entry.preview3d, 'preview3d.png');
-  }
   if (entry.model instanceof Blob) {
     await uploadFile(`/files/furniture/${entryId}/model`, entry.model, 'model.glb');
   }
@@ -650,16 +684,6 @@ export function subscribeToEvents(callback) {
   if (!eventSource) {
     eventSource = new EventSource(`${API_BASE}/events`);
 
-    eventSource.addEventListener('preview3d_ready', (e) => {
-      const data = JSON.parse(e.data);
-      eventListeners.forEach((cb) => cb('preview3d_ready', data));
-    });
-
-    eventSource.addEventListener('preview3d_failed', (e) => {
-      const data = JSON.parse(e.data);
-      eventListeners.forEach((cb) => cb('preview3d_failed', data));
-    });
-
     eventSource.onerror = () => {
       // Reconnect on error after delay
       eventSource.close();
@@ -684,12 +708,6 @@ export function subscribeToEvents(callback) {
   };
 }
 
-export async function getFurniturePreview3d(id) {
-  const url = `${API_BASE}/files/furniture/${id}/preview3d`;
-  const response = await fetch(url);
-  if (!response.ok) return null;
-  return response.blob();
-}
 
 // ============ LBM Relighting ============
 

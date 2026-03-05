@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
 from typing import List
 import uuid
 import json
@@ -9,10 +9,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.connection import get_houses_db
 from models.room import RoomUpdate, RoomResponse
-from config import ROOM_BACKGROUNDS, ROOM_MESHES
-from utils import cleanup_entity_files
-from mesh_optimizer import optimize_room_mesh
 from moge_client import process_image_with_modal, MoGeError
+from routers.auth import verify_token
+import r2
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +24,26 @@ ROOM_SELECT = """
 router = APIRouter()
 
 
+def verify_house_ownership(house_id: str, org_id: str):
+    """Verify that the house belongs to the org."""
+    db = get_houses_db()
+    row = db.execute(
+        "SELECT id FROM houses WHERE id = ? AND org_id = ?", [house_id, org_id]
+    ).fetchone()
+    if not row:
+        raise HTTPException(404, "House not found")
+
+
+def verify_room_ownership(room_id: str, org_id: str):
+    """Verify that the room belongs to a house owned by the org. Returns house_id."""
+    db = get_houses_db()
+    row = db.execute("SELECT house_id FROM rooms WHERE id = ?", [room_id]).fetchone()
+    if not row:
+        raise HTTPException(404, "Room not found")
+    verify_house_ownership(row[0], org_id)
+    return row[0]
+
+
 def row_to_response(row) -> RoomResponse:
     room_id = row[0]
     status = row[3] or "ready"
@@ -35,7 +54,7 @@ def row_to_response(row) -> RoomResponse:
     lighting_settings = json.loads(row[8]) if row[8] else None
     room_scale = row[9] if row[9] is not None else 1.0
 
-    background_url = f"/api/files/room/{room_id}/background" if background_path else None
+    background_url = r2.get_public_url(background_path) if background_path else None
 
     return RoomResponse(
         id=room_id,
@@ -52,28 +71,32 @@ def row_to_response(row) -> RoomResponse:
 
 
 @router.get("/", response_model=List[RoomResponse])
-def get_all_rooms():
+def get_all_rooms(org_id: str = Depends(verify_token)):
     db = get_houses_db()
-    rows = db.execute(ROOM_SELECT).fetchall()
+    rows = db.execute(f"""
+        {ROOM_SELECT} WHERE house_id IN (SELECT id FROM houses WHERE org_id = ?)
+    """, [org_id]).fetchall()
     return [row_to_response(row) for row in rows]
 
 
 @router.get("/house/{house_id}", response_model=List[RoomResponse])
-def get_rooms_by_house(house_id: str):
+def get_rooms_by_house(house_id: str, org_id: str = Depends(verify_token)):
+    verify_house_ownership(house_id, org_id)
     db = get_houses_db()
     rows = db.execute(f"{ROOM_SELECT} WHERE house_id = ?", [house_id]).fetchall()
     return [row_to_response(row) for row in rows]
 
 
 @router.get("/orphans", response_model=List[RoomResponse])
-def get_orphan_rooms():
+def get_orphan_rooms(org_id: str = Depends(verify_token)):
     db = get_houses_db()
     rows = db.execute(f"{ROOM_SELECT} WHERE house_id IS NULL OR house_id = ''").fetchall()
     return [row_to_response(row) for row in rows]
 
 
 @router.get("/{room_id}", response_model=RoomResponse)
-def get_room(room_id: str):
+def get_room(room_id: str, org_id: str = Depends(verify_token)):
+    verify_room_ownership(room_id, org_id)
     db = get_houses_db()
     row = db.execute(f"{ROOM_SELECT} WHERE id = ?", [room_id]).fetchone()
     if not row:
@@ -85,25 +108,19 @@ def get_room(room_id: str):
 async def create_room(
     houseId: str = Form(...),
     name: str = Form(...),
-    image: UploadFile = File(...)
+    image: UploadFile = File(...),
+    org_id: str = Depends(verify_token)
 ):
     """
     Create a new room with background image.
-
     Synchronous: waits for Modal mesh generation (30-60 seconds).
-    Room is only created if mesh generation succeeds.
-    Returns error if mesh generation fails (no room created).
     """
+    verify_house_ownership(houseId, org_id)
     db = get_houses_db()
-
-    house = db.execute("SELECT id FROM houses WHERE id = ?", [houseId]).fetchone()
-    if not house:
-        raise HTTPException(status_code=404, detail="House not found")
 
     room_id = str(uuid.uuid4())
     image_bytes = await image.read()
 
-    # Process mesh with Modal FIRST (before creating room)
     logger.info(f"Processing room {room_id} with Modal...")
     try:
         result = await process_image_with_modal(image_bytes)
@@ -111,27 +128,20 @@ async def create_room(
         logger.error(f"Room {room_id} mesh generation failed: {e}")
         raise HTTPException(status_code=502, detail=f"Mesh generation failed: {str(e)}")
 
-    # Skip optimization for now (causes OOM on small containers)
-    # TODO: Move optimization to Modal where there's more memory
-    logger.info(f"Skipping mesh optimization for room {room_id} (disabled)")
-
-    # Save mesh
-    ROOM_MESHES.mkdir(parents=True, exist_ok=True)
-    mesh_path = ROOM_MESHES / f"{room_id}.glb"
-    mesh_path.write_bytes(result["mesh_bytes"])
-
-    # Save background image
-    ROOM_BACKGROUNDS.mkdir(parents=True, exist_ok=True)
     ext = "jpg"
     if image.content_type == "image/png":
         ext = "png"
     elif image.content_type == "image/webp":
         ext = "webp"
-    image_path = ROOM_BACKGROUNDS / f"{room_id}.{ext}"
-    image_path.write_bytes(image_bytes)
 
-    # Build moge data
-    mesh_url = f"/api/files/room/{room_id}/mesh"
+    mesh_key = f"rooms/meshes/{room_id}.glb"
+    r2.upload_bytes(mesh_key, result["mesh_bytes"], "model/gltf-binary")
+
+    bg_key = f"rooms/backgrounds/{room_id}.{ext}"
+    r2.upload_bytes(bg_key, image_bytes, image.content_type or "image/jpeg")
+
+    mesh_url = r2.get_public_url(mesh_key)
+
     image_size = result["imageSize"]
     image_aspect = image_size["width"] / image_size["height"]
     moge_data = {
@@ -140,13 +150,12 @@ async def create_room(
         "imageAspect": image_aspect
     }
 
-    # NOW create the room (mesh succeeded)
     db.execute(
         """
         INSERT INTO rooms (id, house_id, name, status, background_image_path, placed_furniture, moge_data, lighting_settings)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        [room_id, houseId, name, "ready", str(image_path), "[]", json.dumps(moge_data), None]
+        [room_id, houseId, name, "ready", bg_key, "[]", json.dumps(moge_data), None]
     )
 
     logger.info(f"Room {room_id} created successfully")
@@ -156,7 +165,7 @@ async def create_room(
         houseId=houseId,
         name=name,
         status="ready",
-        backgroundImageUrl=f"/api/files/room/{room_id}/background",
+        backgroundImageUrl=r2.get_public_url(bg_key),
         placedFurniture=[],
         mogeData=moge_data,
         lightingSettings=None
@@ -164,11 +173,9 @@ async def create_room(
 
 
 @router.put("/{room_id}", response_model=RoomResponse)
-def update_room(room_id: str, room: RoomUpdate):
+def update_room(room_id: str, room: RoomUpdate, org_id: str = Depends(verify_token)):
+    verify_room_ownership(room_id, org_id)
     db = get_houses_db()
-    existing = db.execute("SELECT id FROM rooms WHERE id = ?", [room_id]).fetchone()
-    if not existing:
-        raise HTTPException(404, "Room not found")
 
     updates = []
     values = []
@@ -193,18 +200,23 @@ def update_room(room_id: str, room: RoomUpdate):
         values.append(room_id)
         db.execute(f"UPDATE rooms SET {', '.join(updates)} WHERE id = ?", values)
 
-    return get_room(room_id)
+    return get_room(room_id, org_id)
 
 
 @router.delete("/{room_id}")
-def delete_room(room_id: str):
+def delete_room(room_id: str, org_id: str = Depends(verify_token)):
+    verify_room_ownership(room_id, org_id)
     db = get_houses_db()
+
+    row = db.execute(
+        "SELECT background_image_path FROM rooms WHERE id = ?", [room_id]
+    ).fetchone()
+
     db.execute("DELETE FROM rooms WHERE id = ?", [room_id])
 
-    cleanup_entity_files(
-        room_id,
-        image_dirs=[ROOM_BACKGROUNDS],
-        other_files=[ROOM_MESHES / f"{room_id}.glb"]
-    )
+    keys_to_delete = [f"rooms/meshes/{room_id}.glb"]
+    if row and row[0]:
+        keys_to_delete.append(row[0])
+    r2.delete_objects(keys_to_delete)
 
     return {"status": "deleted"}

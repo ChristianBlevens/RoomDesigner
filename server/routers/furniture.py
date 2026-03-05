@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Dict, Optional
 from pydantic import BaseModel
 import uuid
@@ -9,8 +9,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.connection import get_furniture_db
 from models.furniture import FurnitureCreate, FurnitureUpdate, FurnitureResponse
-from config import FURNITURE_IMAGES, FURNITURE_PREVIEWS_3D, FURNITURE_MODELS
-from utils import cleanup_entity_files
+from routers.auth import verify_token
+import r2
 
 router = APIRouter()
 
@@ -21,13 +21,16 @@ FURNITURE_SELECT = """
     FROM furniture
 """
 
+def _file_url(db_path: str) -> str | None:
+    """Build public URL for a furniture file stored in R2."""
+    if not db_path:
+        return None
+    return r2.get_public_url(db_path)
+
+
 def row_to_response(row) -> FurnitureResponse:
     furn_id = row[0]
     tags = json.loads(row[3]) if row[3] else None
-
-    image_url = f"/api/files/furniture/{furn_id}/image" if row[8] else None
-    preview_3d_url = f"/api/files/furniture/{furn_id}/preview3d" if row[9] else None
-    model_url = f"/api/files/furniture/{furn_id}/model" if row[10] else None
 
     return FurnitureResponse(
         id=furn_id,
@@ -38,27 +41,33 @@ def row_to_response(row) -> FurnitureResponse:
         dimensionX=row[5],
         dimensionY=row[6],
         dimensionZ=row[7],
-        imageUrl=image_url,
-        preview3dUrl=preview_3d_url,
-        modelUrl=model_url
+        imageUrl=_file_url(row[8]),
+        preview3dUrl=_file_url(row[9]),
+        modelUrl=_file_url(row[10])
     )
 
 @router.get("/", response_model=List[FurnitureResponse])
-def get_all_furniture():
+def get_all_furniture(org_id: str = Depends(verify_token)):
     db = get_furniture_db()
-    rows = db.execute(FURNITURE_SELECT).fetchall()
+    rows = db.execute(f"{FURNITURE_SELECT} WHERE org_id = ?", [org_id]).fetchall()
     return [row_to_response(row) for row in rows]
 
 @router.get("/categories")
-def get_categories():
+def get_categories(org_id: str = Depends(verify_token)):
     db = get_furniture_db()
-    rows = db.execute("SELECT DISTINCT category FROM furniture WHERE category IS NOT NULL").fetchall()
+    rows = db.execute(
+        "SELECT DISTINCT category FROM furniture WHERE category IS NOT NULL AND org_id = ?",
+        [org_id]
+    ).fetchall()
     return sorted([row[0] for row in rows])
 
 @router.get("/tags")
-def get_tags():
+def get_tags(org_id: str = Depends(verify_token)):
     db = get_furniture_db()
-    rows = db.execute("SELECT tags FROM furniture WHERE tags IS NOT NULL").fetchall()
+    rows = db.execute(
+        "SELECT tags FROM furniture WHERE tags IS NOT NULL AND org_id = ?",
+        [org_id]
+    ).fetchall()
     all_tags = set()
     for row in rows:
         tags = json.loads(row[0]) if row[0] else []
@@ -66,31 +75,35 @@ def get_tags():
     return sorted(list(all_tags))
 
 @router.get("/{furniture_id}", response_model=FurnitureResponse)
-def get_furniture(furniture_id: str):
+def get_furniture(furniture_id: str, org_id: str = Depends(verify_token)):
     db = get_furniture_db()
-    row = db.execute(f"{FURNITURE_SELECT} WHERE id = ?", [furniture_id]).fetchone()
+    row = db.execute(
+        f"{FURNITURE_SELECT} WHERE id = ? AND org_id = ?", [furniture_id, org_id]
+    ).fetchone()
     if not row:
         raise HTTPException(404, "Furniture not found")
     return row_to_response(row)
 
 @router.post("/", response_model=FurnitureResponse)
-def create_furniture(furniture: FurnitureCreate):
+def create_furniture(furniture: FurnitureCreate, org_id: str = Depends(verify_token)):
     db = get_furniture_db()
     furn_id = furniture.id or str(uuid.uuid4())
     tags_json = json.dumps(furniture.tags) if furniture.tags else None
 
     db.execute("""
-        INSERT INTO furniture (id, name, category, tags, quantity, dimension_x, dimension_y, dimension_z)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, [furn_id, furniture.name, furniture.category, tags_json,
+        INSERT INTO furniture (id, org_id, name, category, tags, quantity, dimension_x, dimension_y, dimension_z)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, [furn_id, org_id, furniture.name, furniture.category, tags_json,
           furniture.quantity, furniture.dimensionX, furniture.dimensionY, furniture.dimensionZ])
 
-    return get_furniture(furn_id)
+    return get_furniture(furn_id, org_id)
 
 @router.put("/{furniture_id}", response_model=FurnitureResponse)
-def update_furniture(furniture_id: str, furniture: FurnitureUpdate):
+def update_furniture(furniture_id: str, furniture: FurnitureUpdate, org_id: str = Depends(verify_token)):
     db = get_furniture_db()
-    existing = db.execute("SELECT id FROM furniture WHERE id = ?", [furniture_id]).fetchone()
+    existing = db.execute(
+        "SELECT id FROM furniture WHERE id = ? AND org_id = ?", [furniture_id, org_id]
+    ).fetchone()
     if not existing:
         raise HTTPException(404, "Furniture not found")
 
@@ -123,18 +136,23 @@ def update_furniture(furniture_id: str, furniture: FurnitureUpdate):
         values.append(furniture_id)
         db.execute(f"UPDATE furniture SET {', '.join(updates)} WHERE id = ?", values)
 
-    return get_furniture(furniture_id)
+    return get_furniture(furniture_id, org_id)
 
 @router.delete("/{furniture_id}")
-def delete_furniture(furniture_id: str):
+def delete_furniture(furniture_id: str, org_id: str = Depends(verify_token)):
     db = get_furniture_db()
+    existing = db.execute(
+        "SELECT id FROM furniture WHERE id = ? AND org_id = ?", [furniture_id, org_id]
+    ).fetchone()
+    if not existing:
+        raise HTTPException(404, "Furniture not found")
     db.execute("DELETE FROM furniture WHERE id = ?", [furniture_id])
 
-    cleanup_entity_files(
-        furniture_id,
-        image_dirs=[FURNITURE_IMAGES, FURNITURE_PREVIEWS_3D],
-        other_files=[FURNITURE_MODELS / f"{furniture_id}.zip"]
-    )
+    keys = [f"furniture/models/{furniture_id}.glb"]
+    for ext in ['jpg', 'jpeg', 'png', 'webp']:
+        keys.append(f"furniture/images/{furniture_id}.{ext}")
+        keys.append(f"furniture/previews_3d/{furniture_id}.{ext}")
+    r2.delete_objects(keys)
 
     return {"status": "deleted"}
 
@@ -151,10 +169,9 @@ class AvailabilityEntry(BaseModel):
     total: int
 
 @router.post("/availability", response_model=Dict[str, AvailabilityEntry])
-def get_batch_availability(request: AvailabilityRequest):
+def get_batch_availability(request: AvailabilityRequest, org_id: str = Depends(verify_token)):
     """
     Calculate availability for multiple furniture entries in a single request.
-
     Availability = total quantity - used in overlapping houses (excluding current room).
     """
     from db.connection import get_houses_db
@@ -164,29 +181,26 @@ def get_batch_availability(request: AvailabilityRequest):
 
     result = {}
 
-    # Get quantities for all requested entries
     if not request.entryIds:
         return result
 
     placeholders = ','.join(['?' for _ in request.entryIds])
     rows = furniture_db.execute(
-        f"SELECT id, quantity FROM furniture WHERE id IN ({placeholders})",
-        request.entryIds
+        f"SELECT id, quantity FROM furniture WHERE id IN ({placeholders}) AND org_id = ?",
+        request.entryIds + [org_id]
     ).fetchall()
 
     quantities = {row[0]: row[1] or 1 for row in rows}
 
-    # If no house context, all furniture is available
     if not request.currentHouseId:
         for entry_id in request.entryIds:
             total = quantities.get(entry_id, 0)
             result[entry_id] = AvailabilityEntry(available=total, total=total)
         return result
 
-    # Get current house dates
     current_house = houses_db.execute(
-        "SELECT start_date, end_date FROM houses WHERE id = ?",
-        [request.currentHouseId]
+        "SELECT start_date, end_date FROM houses WHERE id = ? AND org_id = ?",
+        [request.currentHouseId, org_id]
     ).fetchone()
 
     if not current_house:
@@ -197,13 +211,12 @@ def get_batch_availability(request: AvailabilityRequest):
 
     house_start, house_end = current_house
 
-    # Get all overlapping houses
     overlapping_houses = houses_db.execute(
         """
         SELECT id FROM houses
-        WHERE start_date <= ? AND end_date >= ?
+        WHERE org_id = ? AND start_date <= ? AND end_date >= ?
         """,
-        [house_end, house_start]
+        [org_id, house_end, house_start]
     ).fetchall()
 
     overlapping_house_ids = [h[0] for h in overlapping_houses]
@@ -214,7 +227,6 @@ def get_batch_availability(request: AvailabilityRequest):
             result[entry_id] = AvailabilityEntry(available=total, total=total)
         return result
 
-    # Get all rooms in overlapping houses (excluding current room)
     house_placeholders = ','.join(['?' for _ in overlapping_house_ids])
     rooms_query = f"""
         SELECT id, placed_furniture FROM rooms
@@ -228,19 +240,17 @@ def get_batch_availability(request: AvailabilityRequest):
 
     rooms = houses_db.execute(rooms_query, rooms_params).fetchall()
 
-    # Count placed furniture across all rooms
     placed_counts = {entry_id: 0 for entry_id in request.entryIds}
 
     for room_row in rooms:
         placed_furniture_json = room_row[1]
         if placed_furniture_json:
             placed_furniture = json.loads(placed_furniture_json)
-            for furniture in placed_furniture:
-                entry_id = furniture.get('entryId')
+            for furn in placed_furniture:
+                entry_id = furn.get('entryId')
                 if entry_id in placed_counts:
                     placed_counts[entry_id] += 1
 
-    # Calculate availability
     for entry_id in request.entryIds:
         total = quantities.get(entry_id, 0)
         used = placed_counts.get(entry_id, 0)

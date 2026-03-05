@@ -9,16 +9,18 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 import sys
 
-# Add current directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
 from db.connection import init_databases, close_databases
 from routers import houses, rooms, furniture, files, meshy, lbm
+from routers.auth import init_auth_secret
+from routers import auth
 from events import subscribe
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_databases()
+    init_auth_secret()
     meshy.start_polling()
     yield
     meshy.stop_polling()
@@ -34,7 +36,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# API routes
+# Auth routes (no auth required)
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+
+# Protected API routes
 app.include_router(houses.router, prefix="/api/houses", tags=["houses"])
 app.include_router(rooms.router, prefix="/api/rooms", tags=["rooms"])
 app.include_router(furniture.router, prefix="/api/furniture", tags=["furniture"])

@@ -1,1 +1,1 @@
-from . import houses, rooms, furniture, files
+from . import houses, rooms, furniture, files, auth

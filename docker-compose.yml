@@ -9,16 +9,19 @@ services:
     environment:
       - MESHY_API_KEY=${MESHY_API_KEY}
       - MOGE2_MODAL_ENDPOINT=${MOGE2_MODAL_ENDPOINT}
+      - R2_ACCOUNT_ID=${R2_ACCOUNT_ID}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+      - R2_BUCKET_NAME=${R2_BUCKET_NAME}
+      - R2_PUBLIC_URL=${R2_PUBLIC_URL}
     volumes:
       - roomdesigner_data:/app/server/data
-      - roomdesigner_storage:/app/server/storage
     restart: unless-stopped
     networks:
       - proxy-network
 
 volumes:
   roomdesigner_data:
-  roomdesigner_storage:
 
 networks:
   proxy-network:

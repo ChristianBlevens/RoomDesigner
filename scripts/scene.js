@@ -1261,6 +1261,9 @@ export function updateFurnitureHitBox(model) {
   const hitBox = model.userData.hitBox;
   if (!hitBox) return;
 
+  // Force matrix update before AABB computation (critical after gizmo rotation)
+  model.updateMatrixWorld(true);
+
   // Recompute AABB from current model state
   const box = new THREE.Box3().setFromObject(model);
   const size = new THREE.Vector3();
@@ -1308,66 +1311,6 @@ export function setFurnitureVisible(visible) {
       }
     });
   });
-}
-
-// Generate 3D preview image from an already-loaded Three.js model (client-side, unused - server generates previews)
-export async function generatePreview3dFromModel(model, width = 256, height = 256) {
-  // Create offscreen renderer
-  const offscreenRenderer = new THREE.WebGLRenderer({
-    antialias: true,
-    alpha: true,
-    preserveDrawingBuffer: true
-  });
-  offscreenRenderer.setSize(width, height);
-  offscreenRenderer.setClearColor(0x000000, 0);
-
-  // Create scene
-  const offscreenScene = new THREE.Scene();
-
-  // Create camera
-  const offscreenCamera = new THREE.PerspectiveCamera(50, width / height, 0.1, 1000);
-
-  // Add lighting
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-  offscreenScene.add(ambientLight);
-  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-  directionalLight.position.set(5, 10, 7.5);
-  offscreenScene.add(directionalLight);
-
-  // Clone the model so we don't affect the original
-  const modelClone = model.clone();
-  offscreenScene.add(modelClone);
-
-  // Center and fit model in view
-  const box = new THREE.Box3().setFromObject(modelClone);
-  const center = box.getCenter(new THREE.Vector3());
-  const size = box.getSize(new THREE.Vector3());
-
-  // Move model to center
-  modelClone.position.sub(center);
-
-  // Position camera to fit model tightly in frame
-  const maxDim = Math.max(size.x, size.y, size.z);
-  const fov = offscreenCamera.fov * (Math.PI / 180);
-  const cameraDistance = maxDim / (2 * Math.tan(fov / 2)) * 1.0;
-
-  offscreenCamera.position.set(cameraDistance * 0.8, cameraDistance * 0.5, cameraDistance * 0.8);
-  offscreenCamera.lookAt(0, 0, 0);
-
-  // Render
-  offscreenRenderer.render(offscreenScene, offscreenCamera);
-
-  // Get image as data URL
-  const dataUrl = offscreenRenderer.domElement.toDataURL('image/png');
-
-  // Convert to Blob
-  const response = await fetch(dataUrl);
-  const blob = await response.blob();
-
-  // Cleanup
-  offscreenRenderer.dispose();
-
-  return blob;
 }
 
 // Calculate furniture scale based on entry dimensions

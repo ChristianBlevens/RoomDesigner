@@ -103,6 +103,7 @@ import {
   debounce
 } from './utils.js';
 import { adjustUrlForProxy } from './api.js';
+import { isAuthenticated, signIn, signUp, logout, getUsername, getToken } from './auth.js';
 
 // Application state
 let currentHouseId = null;
@@ -208,6 +209,19 @@ function showConfirmDialog(message, onConfirm, onCancel = null) {
 
 // Initialize application
 async function init() {
+  // Check authentication first
+  if (!isAuthenticated()) {
+    setupAuthModal();
+    showAuthModal();
+    return;
+  }
+
+  // Hide auth modal if authenticated
+  const authModal = document.getElementById('auth-modal');
+  if (authModal) {
+    authModal.classList.add('modal-hidden');
+  }
+
   // Initialize Three.js scene
   initScene();
 
@@ -238,7 +252,9 @@ async function init() {
 
   // Check for active Meshy tasks on page load
   try {
-    const response = await fetch(adjustUrlForProxy('/api/meshy/tasks'));
+    const token = getToken();
+    const meshyHeaders = token ? { 'Authorization': `Bearer ${token}` } : {};
+    const response = await fetch(adjustUrlForProxy('/api/meshy/tasks'), { headers: meshyHeaders });
     if (response.ok) {
       meshyServerStatus = await response.json();
       if (meshyServerStatus.tasks.some(t => !['completed', 'failed'].includes(t.status))) {
@@ -251,6 +267,54 @@ async function init() {
 
   // Show calendar modal on startup
   await openCalendarModal();
+}
+
+// ============ Auth Modal ============
+
+function setupAuthModal() {
+  const form = document.getElementById('auth-form');
+  const toggleLink = document.getElementById('auth-toggle-link');
+  const title = document.getElementById('auth-title');
+  const submitBtn = document.getElementById('auth-submit-btn');
+  const errorEl = document.getElementById('auth-error');
+  let isSignUp = false;
+
+  toggleLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    isSignUp = !isSignUp;
+    title.textContent = isSignUp ? 'Create Organization' : 'Sign In';
+    submitBtn.textContent = isSignUp ? 'Create Account' : 'Sign In';
+    toggleLink.textContent = isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up";
+    errorEl.classList.add('hidden');
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const username = document.getElementById('auth-username').value.trim();
+    const password = document.getElementById('auth-password').value;
+
+    errorEl.classList.add('hidden');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Please wait...';
+
+    try {
+      if (isSignUp) {
+        await signUp(username, password);
+      } else {
+        await signIn(username, password);
+      }
+      window.location.reload();
+    } catch (err) {
+      errorEl.textContent = err.message;
+      errorEl.classList.remove('hidden');
+      submitBtn.disabled = false;
+      submitBtn.textContent = isSignUp ? 'Create Account' : 'Sign In';
+    }
+  });
+}
+
+function showAuthModal() {
+  document.getElementById('auth-modal').classList.remove('modal-hidden');
 }
 
 // ============ Debug Panel ============
@@ -1238,7 +1302,7 @@ async function loadCardImages(entryId, container) {
     // Fetch entry with images (but not model)
     const entry = await getFurnitureEntry(entryId, {
       includeImage: true,
-      includePreview3d: true,
+      includePreview3d: false,
       includeModel: false,
     });
 
@@ -1246,27 +1310,9 @@ async function loadCardImages(entryId, container) {
     const placeholder = container.querySelector('.placeholder');
     if (placeholder) placeholder.remove();
 
-    const has2dImage = entry.image !== null && entry.image !== undefined;
-    const has3dPreview = entry.preview3d !== null && entry.preview3d !== undefined;
-
-    if (has2dImage && has3dPreview) {
-      // Both exist: show 2D by default, 3D on hover
-      const img2d = document.createElement('img');
-      img2d.src = URL.createObjectURL(entry.image);
-      img2d.className = 'default-image';
-      container.insertBefore(img2d, container.firstChild);
-
-      const img3d = document.createElement('img');
-      img3d.src = URL.createObjectURL(entry.preview3d);
-      img3d.className = 'hover-image';
-      container.insertBefore(img3d, container.firstChild);
-    } else if (has2dImage) {
+    if (entry.image) {
       const img = document.createElement('img');
       img.src = URL.createObjectURL(entry.image);
-      container.insertBefore(img, container.firstChild);
-    } else if (has3dPreview) {
-      const img = document.createElement('img');
-      img.src = URL.createObjectURL(entry.preview3d);
       container.insertBefore(img, container.firstChild);
     } else {
       const noImage = document.createElement('span');
@@ -1519,8 +1565,11 @@ function setupEntryEditor() {
     showActionNotification('Starting 3D generation...');
 
     try {
+      const genToken = getToken();
+      const genHeaders = genToken ? { 'Authorization': `Bearer ${genToken}` } : {};
       const response = await fetch(adjustUrlForProxy(`/api/meshy/generate/${editingEntryId}`), {
-        method: 'POST'
+        method: 'POST',
+        headers: genHeaders
       });
 
       if (!response.ok) {
@@ -1975,7 +2024,9 @@ function stopMeshyPolling() {
 
 async function pollMeshyTasks() {
   try {
-    const response = await fetch(adjustUrlForProxy('/api/meshy/tasks'));
+    const token = getToken();
+    const meshyHeaders = token ? { 'Authorization': `Bearer ${token}` } : {};
+    const response = await fetch(adjustUrlForProxy('/api/meshy/tasks'), { headers: meshyHeaders });
     if (!response.ok) return;
 
     const data = await response.json();
@@ -2152,11 +2203,18 @@ function setupSessionModal() {
   const closeHouseBtn = document.getElementById('close-house-session-btn');
   const deleteHouseBtn = document.getElementById('delete-house-session-btn');
 
+  const signoutBtn = document.getElementById('signout-session-btn');
+
   sessionBtn.addEventListener('click', openSessionModal);
   editHouseBtn.addEventListener('click', handleEditHouseFromSession);
   exportBtn.addEventListener('click', handleExportHouse);
   closeHouseBtn.addEventListener('click', handleCloseHouseFromSession);
   deleteHouseBtn.addEventListener('click', handleDeleteHouseFromSession);
+  if (signoutBtn) {
+    signoutBtn.addEventListener('click', () => {
+      logout();
+    });
+  }
 
   // Export progress modal close button
   const exportProgressCloseBtn = document.getElementById('export-progress-close');

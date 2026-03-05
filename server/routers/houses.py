@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List
 import uuid
 import sys
@@ -7,16 +7,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.connection import get_houses_db
 from models.house import HouseCreate, HouseUpdate, HouseResponse
+from routers.auth import verify_token
 
 router = APIRouter()
 
 @router.get("/", response_model=List[HouseResponse])
-def get_all_houses():
+def get_all_houses(org_id: str = Depends(verify_token)):
     db = get_houses_db()
     rows = db.execute("""
         SELECT id, name, start_date, end_date, created_at
-        FROM houses ORDER BY start_date
-    """).fetchall()
+        FROM houses WHERE org_id = ? ORDER BY start_date
+    """, [org_id]).fetchall()
     return [
         HouseResponse(
             id=row[0], name=row[1],
@@ -26,11 +27,11 @@ def get_all_houses():
     ]
 
 @router.get("/{house_id}", response_model=HouseResponse)
-def get_house(house_id: str):
+def get_house(house_id: str, org_id: str = Depends(verify_token)):
     db = get_houses_db()
     row = db.execute(
-        "SELECT id, name, start_date, end_date, created_at FROM houses WHERE id = ?",
-        [house_id]
+        "SELECT id, name, start_date, end_date, created_at FROM houses WHERE id = ? AND org_id = ?",
+        [house_id, org_id]
     ).fetchone()
     if not row:
         raise HTTPException(404, "House not found")
@@ -41,19 +42,21 @@ def get_house(house_id: str):
     )
 
 @router.post("/", response_model=HouseResponse)
-def create_house(house: HouseCreate):
+def create_house(house: HouseCreate, org_id: str = Depends(verify_token)):
     db = get_houses_db()
     house_id = house.id or str(uuid.uuid4())
     db.execute(
-        "INSERT INTO houses (id, name, start_date, end_date) VALUES (?, ?, ?, ?)",
-        [house_id, house.name, house.start_date, house.end_date]
+        "INSERT INTO houses (id, org_id, name, start_date, end_date) VALUES (?, ?, ?, ?, ?)",
+        [house_id, org_id, house.name, house.start_date, house.end_date]
     )
-    return get_house(house_id)
+    return get_house(house_id, org_id)
 
 @router.put("/{house_id}", response_model=HouseResponse)
-def update_house(house_id: str, house: HouseUpdate):
+def update_house(house_id: str, house: HouseUpdate, org_id: str = Depends(verify_token)):
     db = get_houses_db()
-    existing = db.execute("SELECT id FROM houses WHERE id = ?", [house_id]).fetchone()
+    existing = db.execute(
+        "SELECT id FROM houses WHERE id = ? AND org_id = ?", [house_id, org_id]
+    ).fetchone()
     if not existing:
         raise HTTPException(404, "House not found")
 
@@ -73,12 +76,16 @@ def update_house(house_id: str, house: HouseUpdate):
         values.append(house_id)
         db.execute(f"UPDATE houses SET {', '.join(updates)} WHERE id = ?", values)
 
-    return get_house(house_id)
+    return get_house(house_id, org_id)
 
 @router.delete("/{house_id}")
-def delete_house(house_id: str):
+def delete_house(house_id: str, org_id: str = Depends(verify_token)):
     db = get_houses_db()
-    # Delete rooms first (cascade)
+    existing = db.execute(
+        "SELECT id FROM houses WHERE id = ? AND org_id = ?", [house_id, org_id]
+    ).fetchone()
+    if not existing:
+        raise HTTPException(404, "House not found")
     db.execute("DELETE FROM rooms WHERE house_id = ?", [house_id])
     db.execute("DELETE FROM houses WHERE id = ?", [house_id])
     return {"status": "deleted"}

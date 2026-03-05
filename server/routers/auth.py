@@ -1,0 +1,134 @@
+import uuid
+import logging
+from datetime import datetime, timedelta
+
+from fastapi import APIRouter, HTTPException, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel
+
+import jwt
+import bcrypt
+
+from db.connection import get_auth_db
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+security = HTTPBearer()
+
+JWT_SECRET = None
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRY_DAYS = 30
+
+
+def init_auth_secret():
+    """Initialize JWT secret from DB or generate new one."""
+    global JWT_SECRET
+    db = get_auth_db()
+    row = db.execute("SELECT value FROM settings WHERE key = 'jwt_secret'").fetchone()
+    if row:
+        JWT_SECRET = row[0]
+    else:
+        JWT_SECRET = uuid.uuid4().hex + uuid.uuid4().hex
+        db.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?)",
+            ['jwt_secret', JWT_SECRET]
+        )
+    logger.info("Auth secret initialized")
+
+
+def create_token(org_id: str) -> str:
+    """Create a JWT token for an org."""
+    payload = {
+        "org_id": org_id,
+        "exp": datetime.utcnow() + timedelta(days=JWT_EXPIRY_DAYS),
+        "iat": datetime.utcnow(),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
+    """Verify JWT token and return org_id. Use as FastAPI dependency."""
+    try:
+        payload = jwt.decode(
+            credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM]
+        )
+        org_id = payload.get("org_id")
+        if not org_id:
+            raise HTTPException(401, "Invalid token")
+        return org_id
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(401, "Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(401, "Invalid token")
+
+
+# ============ Schemas ============
+
+class SignUpRequest(BaseModel):
+    username: str
+    password: str
+
+class SignInRequest(BaseModel):
+    username: str
+    password: str
+
+class AuthResponse(BaseModel):
+    token: str
+    org_id: str
+    username: str
+
+
+# ============ Endpoints ============
+
+@router.post("/signup", response_model=AuthResponse)
+def sign_up(request: SignUpRequest):
+    db = get_auth_db()
+
+    username = request.username.strip()
+    if not username or len(username) < 2:
+        raise HTTPException(400, "Username must be at least 2 characters")
+    if len(request.password) < 6:
+        raise HTTPException(400, "Password must be at least 6 characters")
+
+    existing = db.execute(
+        "SELECT id FROM orgs WHERE username = ?", [username]
+    ).fetchone()
+    if existing:
+        raise HTTPException(409, "Username already taken")
+
+    org_id = str(uuid.uuid4())
+    password_hash = bcrypt.hashpw(
+        request.password.encode('utf-8'), bcrypt.gensalt()
+    ).decode('utf-8')
+
+    db.execute(
+        "INSERT INTO orgs (id, username, password_hash) VALUES (?, ?, ?)",
+        [org_id, username, password_hash]
+    )
+
+    token = create_token(org_id)
+    return AuthResponse(token=token, org_id=org_id, username=username)
+
+
+@router.post("/signin", response_model=AuthResponse)
+def sign_in(request: SignInRequest):
+    db = get_auth_db()
+
+    row = db.execute(
+        "SELECT id, username, password_hash FROM orgs WHERE username = ?",
+        [request.username.strip()]
+    ).fetchone()
+
+    if not row:
+        raise HTTPException(401, "Invalid username or password")
+
+    org_id, username, password_hash = row
+
+    if not bcrypt.checkpw(
+        request.password.encode('utf-8'), password_hash.encode('utf-8')
+    ):
+        raise HTTPException(401, "Invalid username or password")
+
+    token = create_token(org_id)
+    return AuthResponse(token=token, org_id=org_id, username=username)

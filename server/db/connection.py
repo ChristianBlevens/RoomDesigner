@@ -3,14 +3,14 @@ import sys
 import logging
 from pathlib import Path
 
-# Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import HOUSES_DB, FURNITURE_DB
+from config import HOUSES_DB, FURNITURE_DB, AUTH_DB
 
 logger = logging.getLogger(__name__)
 
 _houses_conn = None
 _furniture_conn = None
+_auth_conn = None
 
 
 def _safe_connect(db_path: Path):
@@ -29,19 +29,37 @@ def _safe_connect(db_path: Path):
         else:
             raise
 
-    # Ensure checkpoint happens on shutdown even if close() is called without explicit CHECKPOINT
     conn.execute("PRAGMA enable_checkpoint_on_shutdown")
     return conn
 
 
 def init_databases():
-    global _houses_conn, _furniture_conn
+    global _houses_conn, _furniture_conn, _auth_conn
+
+    # Auth database
+    _auth_conn = _safe_connect(AUTH_DB)
+    _auth_conn.execute("""
+        CREATE TABLE IF NOT EXISTS orgs (
+            id VARCHAR PRIMARY KEY,
+            username VARCHAR NOT NULL UNIQUE,
+            password_hash VARCHAR NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    _auth_conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_orgs_username ON orgs(username)")
+    _auth_conn.execute("""
+        CREATE TABLE IF NOT EXISTS settings (
+            key VARCHAR PRIMARY KEY,
+            value VARCHAR NOT NULL
+        )
+    """)
 
     # Houses database
     _houses_conn = _safe_connect(HOUSES_DB)
     _houses_conn.execute("""
         CREATE TABLE IF NOT EXISTS houses (
             id VARCHAR PRIMARY KEY,
+            org_id VARCHAR NOT NULL DEFAULT '',
             name VARCHAR NOT NULL,
             start_date DATE NOT NULL,
             end_date DATE NOT NULL,
@@ -49,6 +67,14 @@ def init_databases():
         )
     """)
     _houses_conn.execute("CREATE INDEX IF NOT EXISTS idx_houses_start_date ON houses(start_date)")
+    _houses_conn.execute("CREATE INDEX IF NOT EXISTS idx_houses_org_id ON houses(org_id)")
+
+    # Add org_id column if migrating from existing DB
+    try:
+        _houses_conn.execute("ALTER TABLE houses ADD COLUMN org_id VARCHAR NOT NULL DEFAULT ''")
+        logger.info("Added org_id column to houses table")
+    except Exception:
+        pass
 
     _houses_conn.execute("""
         CREATE TABLE IF NOT EXISTS rooms (
@@ -73,6 +99,7 @@ def init_databases():
     _furniture_conn.execute("""
         CREATE TABLE IF NOT EXISTS furniture (
             id VARCHAR PRIMARY KEY,
+            org_id VARCHAR NOT NULL DEFAULT '',
             name VARCHAR NOT NULL,
             category VARCHAR,
             tags JSON,
@@ -87,6 +114,14 @@ def init_databases():
         )
     """)
     _furniture_conn.execute("CREATE INDEX IF NOT EXISTS idx_furniture_category ON furniture(category)")
+    _furniture_conn.execute("CREATE INDEX IF NOT EXISTS idx_furniture_org_id ON furniture(org_id)")
+
+    # Add org_id column if migrating from existing DB
+    try:
+        _furniture_conn.execute("ALTER TABLE furniture ADD COLUMN org_id VARCHAR NOT NULL DEFAULT ''")
+        logger.info("Added org_id column to furniture table")
+    except Exception:
+        pass
 
     # Meshy generation tasks table
     _furniture_conn.execute("""
@@ -106,6 +141,9 @@ def init_databases():
     _furniture_conn.execute("CREATE INDEX IF NOT EXISTS idx_meshy_tasks_status ON meshy_tasks(status)")
     _furniture_conn.execute("CREATE INDEX IF NOT EXISTS idx_meshy_tasks_furniture ON meshy_tasks(furniture_id)")
 
+def get_auth_db():
+    return _auth_conn
+
 def get_houses_db():
     return _houses_conn
 
@@ -113,20 +151,14 @@ def get_furniture_db():
     return _furniture_conn
 
 def close_databases():
-    """Close database connections with explicit checkpoint to ensure WAL is flushed."""
-    global _houses_conn, _furniture_conn
-    if _houses_conn:
-        try:
-            _houses_conn.execute("CHECKPOINT")
-            logger.info("Houses database checkpointed successfully")
-        except Exception as e:
-            logger.warning(f"Failed to checkpoint houses database: {e}")
-        _houses_conn.close()
-    if _furniture_conn:
-        try:
-            _furniture_conn.execute("CHECKPOINT")
-            logger.info("Furniture database checkpointed successfully")
-        except Exception as e:
-            logger.warning(f"Failed to checkpoint furniture database: {e}")
-        _furniture_conn.close()
+    """Close database connections with explicit checkpoint."""
+    global _houses_conn, _furniture_conn, _auth_conn
+    for name, conn in [("Auth", _auth_conn), ("Houses", _houses_conn), ("Furniture", _furniture_conn)]:
+        if conn:
+            try:
+                conn.execute("CHECKPOINT")
+                logger.info(f"{name} database checkpointed successfully")
+            except Exception as e:
+                logger.warning(f"Failed to checkpoint {name} database: {e}")
+            conn.close()
     logger.info("Databases closed")

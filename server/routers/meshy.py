@@ -12,12 +12,12 @@ from uuid import uuid4
 from typing import Optional
 from dataclasses import dataclass
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 import httpx
 
-from config import FURNITURE_MODELS, FURNITURE_PREVIEWS_3D
 from model_processor import ModelProcessor
 from db.connection import get_furniture_db
+from routers.auth import verify_token
 
 logger = logging.getLogger(__name__)
 
@@ -297,6 +297,8 @@ async def download_and_process_glb(task: MeshyTask):
 
 def _process_glb_sync(glb_content: bytes, furniture_id: str) -> dict:
     """Synchronous GLB processing (for thread pool)."""
+    import r2 as r2_module
+
     processor = ModelProcessor()
     result = processor.process_glb(
         glb_content,
@@ -304,32 +306,28 @@ def _process_glb_sync(glb_content: bytes, furniture_id: str) -> dict:
         generate_preview=True
     )
 
-    # Save processed GLB
-    FURNITURE_MODELS.mkdir(parents=True, exist_ok=True)
-    model_path = FURNITURE_MODELS / f"{furniture_id}.glb"
-    model_path.write_bytes(result['glb'])
-
-    # Save 3D preview
-    preview_3d_path = None
-    if result['preview']:
-        FURNITURE_PREVIEWS_3D.mkdir(parents=True, exist_ok=True)
-        preview_3d_path = FURNITURE_PREVIEWS_3D / f"{furniture_id}.png"
-        preview_3d_path.write_bytes(result['preview'])
-
-    # Update furniture database
     conn = get_furniture_db()
-    if preview_3d_path:
+
+    model_key = f"furniture/models/{furniture_id}.glb"
+    r2_module.upload_bytes(model_key, result['glb'], 'model/gltf-binary')
+
+    preview_key = None
+    if result['preview']:
+        preview_key = f"furniture/previews_3d/{furniture_id}.png"
+        r2_module.upload_bytes(preview_key, result['preview'], 'image/png')
+
+    if preview_key:
         conn.execute(
             "UPDATE furniture SET model_path = ?, preview_3d_path = ? WHERE id = ?",
-            [str(model_path), str(preview_3d_path), furniture_id]
+            [model_key, preview_key, furniture_id]
         )
     else:
         conn.execute(
             "UPDATE furniture SET model_path = ? WHERE id = ?",
-            [str(model_path), furniture_id]
+            [model_key, furniture_id]
         )
 
-    return {"model_path": str(model_path), "preview_path": str(preview_3d_path) if preview_3d_path else None}
+    return {"model_key": model_key, "preview_key": preview_key}
 
 
 # ============ Background Polling Loop ============
@@ -432,12 +430,11 @@ def stop_polling():
 # ============ API Endpoints ============
 
 @router.post("/generate/{furniture_id}")
-async def generate_model(furniture_id: str):
+async def generate_model(furniture_id: str, org_id: str = Depends(verify_token)):
     """
     Start image-to-3D generation task.
     Returns immediately with task_id. Background loop handles the rest.
     """
-    # Check capacity
     active = count_active_tasks()
     if active >= MAX_CONCURRENT_TASKS:
         raise HTTPException(
@@ -445,10 +442,10 @@ async def generate_model(furniture_id: str):
             detail=f"Maximum concurrent tasks ({MAX_CONCURRENT_TASKS}) reached. Please wait."
         )
 
-    # Verify furniture entry exists and has an image
     conn = get_furniture_db()
     row = conn.execute(
-        "SELECT image_path FROM furniture WHERE id = ?", [furniture_id]
+        "SELECT image_path FROM furniture WHERE id = ? AND org_id = ?",
+        [furniture_id, org_id]
     ).fetchone()
 
     if not row:
@@ -464,12 +461,26 @@ async def generate_model(furniture_id: str):
 
 
 @router.get("/tasks")
-async def get_tasks():
+async def get_tasks(org_id: str = Depends(verify_token)):
     """
-    Get all active and recently completed/failed tasks.
-    Used by client to poll for status updates.
+    Get all active and recently completed/failed tasks for this org.
     """
-    tasks = get_all_tasks()
+    conn = get_furniture_db()
+    rows = conn.execute("""
+        SELECT t.id, t.furniture_id, t.status, t.progress, t.error_message,
+               COALESCE(f.name, 'Unknown') as furniture_name
+        FROM meshy_tasks t
+        LEFT JOIN furniture f ON t.furniture_id = f.id
+        WHERE f.org_id = ?
+        ORDER BY t.created_at DESC
+    """, [org_id]).fetchall()
+    tasks = [
+        {
+            "id": row[0], "furniture_id": row[1], "status": row[2],
+            "progress": row[3], "error_message": row[4], "furniture_name": row[5]
+        }
+        for row in rows
+    ]
     active = sum(1 for t in tasks if t['status'] in ('pending', 'creating', 'polling', 'downloading'))
 
     return {
@@ -480,7 +491,7 @@ async def get_tasks():
 
 
 @router.get("/status/{task_id}")
-async def get_task_status(task_id: str):
+async def get_task_status(task_id: str, org_id: str = Depends(verify_token)):
     """
     Get status of a specific task.
     """
@@ -506,7 +517,7 @@ async def get_task_status(task_id: str):
 
 
 @router.delete("/tasks/{task_id}")
-async def cancel_task(task_id: str):
+async def cancel_task(task_id: str, org_id: str = Depends(verify_token)):
     """
     Cancel a pending or in-progress task.
     Note: The Meshy task will continue on their servers, but we stop tracking it.

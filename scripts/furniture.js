@@ -312,11 +312,15 @@ function calculateBoundingBoxOffset(model, surfaceNormal) {
   const savedPosition = model.position.clone();
   model.position.set(0, 0, 0);
 
+  // Force matrix update after position change (stale matrixWorld causes wrong AABB)
+  model.updateMatrixWorld(true);
+
   // Compute bounding box with model at origin (gives us local-space bounds)
   const box = new THREE.Box3().setFromObject(model);
 
   // Restore position
   model.position.copy(savedPosition);
+  model.updateMatrixWorld(true);
 
   // Find the bounding box face that should touch the surface
   // If normal points positive on an axis, contact face is at box min
