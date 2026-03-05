@@ -2166,7 +2166,7 @@ function removeMeshyToast(toast) {
 
 let actionNotificationTimeout = null;
 
-export function showActionNotification(message) {
+export function showActionNotification(message, duration = 2000) {
   const el = document.getElementById('action-notification');
   if (!el) return;
 
@@ -2182,11 +2182,10 @@ export function showActionNotification(message) {
   el.offsetHeight;
   el.classList.add('visible');
 
-  // Auto-hide after 2 seconds
   actionNotificationTimeout = setTimeout(() => {
     el.classList.remove('visible');
     setTimeout(() => el.classList.add('hidden'), 200);
-  }, 2000);
+  }, duration);
 }
 
 // ============ Session Modal (House Operations) ============
@@ -3384,6 +3383,11 @@ async function loadRoomById(roomId) {
   // Show scene
   showScene();
   deselectFurniture();
+
+  // Hint for empty rooms
+  if (!room.placedFurniture || room.placedFurniture.length === 0) {
+    showActionNotification('Tap anywhere to place furniture', 30000);
+  }
 }
 
 async function saveCurrentRoom() {
