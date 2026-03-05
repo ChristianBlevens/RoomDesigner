@@ -4,6 +4,7 @@
 
 # Documentation
 *.md
+!tutorials/*.md
 docs/
 old_docs/
 

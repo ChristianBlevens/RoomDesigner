@@ -1,0 +1,23 @@
+[
+  { "id": "getting-started", "title": "Getting Started", "file": "getting-started.md" },
+  { "id": "controls-bar", "title": "Controls Bar", "file": "controls-bar.md" },
+  { "id": "undo-redo", "title": "Undo / Redo", "file": "undo-redo.md", "parent": "controls-bar" },
+  { "id": "lighting", "title": "Lighting", "file": "lighting.md", "parent": "controls-bar" },
+  { "id": "scale", "title": "Scale", "file": "scale.md", "parent": "controls-bar" },
+  { "id": "before-after", "title": "Before / After", "file": "before-after.md", "parent": "controls-bar" },
+  { "id": "meter-stick", "title": "Meter Stick", "file": "meter-stick.md", "parent": "controls-bar" },
+  { "id": "house-button", "title": "House Button", "file": "house-button.md", "parent": "controls-bar" },
+  { "id": "furniture", "title": "Furniture", "file": "furniture.md" },
+  { "id": "placing-furniture", "title": "Placing Furniture", "file": "placing-furniture.md", "parent": "furniture" },
+  { "id": "moving-rotating", "title": "Moving & Rotating", "file": "moving-rotating.md", "parent": "furniture" },
+  { "id": "furniture-database", "title": "Furniture Database", "file": "furniture-database.md", "parent": "furniture" },
+  { "id": "3d-generation", "title": "3D Model Generation", "file": "3d-generation.md", "parent": "furniture" },
+  { "id": "rooms", "title": "Rooms", "file": "rooms.md" },
+  { "id": "creating-room", "title": "Creating a Room", "file": "creating-room.md", "parent": "rooms" },
+  { "id": "switching-rooms", "title": "Switching Rooms", "file": "switching-rooms.md", "parent": "rooms" },
+  { "id": "deleting-room", "title": "Deleting a Room", "file": "deleting-room.md", "parent": "rooms" },
+  { "id": "houses", "title": "Houses", "file": "houses.md" },
+  { "id": "calendar", "title": "Calendar", "file": "calendar.md", "parent": "houses" },
+  { "id": "creating-house", "title": "Creating a House", "file": "creating-house.md", "parent": "houses" },
+  { "id": "exporting", "title": "Exporting", "file": "exporting.md", "parent": "houses" }
+]

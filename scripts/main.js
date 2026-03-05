@@ -260,6 +260,7 @@ async function init() {
   setupScaleControls();
   setupBeforeAfterToggle();
   setupMeterStick();
+  setupTutorials();
 
   // SSE available via subscribeToEvents() for future real-time features
 
@@ -2284,6 +2285,57 @@ function getMeterStickSaveData() {
       : null,
     visible: isMeterStickVisible()
   };
+}
+
+// ============ Tutorials ============
+
+let tutorialIndex = null;
+
+function setupTutorials() {
+  const btn = document.getElementById('tutorial-btn');
+  btn.addEventListener('click', openTutorialHub);
+}
+
+async function openTutorialHub() {
+  if (!tutorialIndex) {
+    try {
+      const response = await fetch(adjustUrlForProxy('/tutorials/index.json'));
+      tutorialIndex = await response.json();
+    } catch (err) {
+      showActionNotification('Failed to load tutorials');
+      return;
+    }
+  }
+
+  const list = document.getElementById('tutorial-hub-list');
+  list.innerHTML = '';
+
+  for (const entry of tutorialIndex) {
+    const item = document.createElement('button');
+    item.className = 'tutorial-hub-item' + (entry.parent ? ' child' : '');
+    item.textContent = entry.title;
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openTutorialContent(entry);
+    });
+    list.appendChild(item);
+  }
+
+  modalManager.openModal('tutorial-hub-modal');
+}
+
+async function openTutorialContent(entry) {
+  try {
+    const response = await fetch(adjustUrlForProxy(`/tutorials/${entry.file}`));
+    const markdown = await response.text();
+
+    const rendered = document.getElementById('tutorial-content-rendered');
+    rendered.innerHTML = marked.parse(markdown);
+
+    modalManager.openModal('tutorial-content-modal');
+  } catch (err) {
+    showActionNotification('Failed to load tutorial');
+  }
 }
 
 // ============ Action Notification (Bottom-Left Feedback) ============
