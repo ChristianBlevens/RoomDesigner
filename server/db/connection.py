@@ -69,13 +69,6 @@ def init_databases():
     _houses_conn.execute("CREATE INDEX IF NOT EXISTS idx_houses_start_date ON houses(start_date)")
     _houses_conn.execute("CREATE INDEX IF NOT EXISTS idx_houses_org_id ON houses(org_id)")
 
-    # Add org_id column if migrating from existing DB
-    try:
-        _houses_conn.execute("ALTER TABLE houses ADD COLUMN org_id VARCHAR NOT NULL DEFAULT ''")
-        logger.info("Added org_id column to houses table")
-    except Exception:
-        pass
-
     _houses_conn.execute("""
         CREATE TABLE IF NOT EXISTS rooms (
             id VARCHAR PRIMARY KEY,
@@ -115,13 +108,6 @@ def init_databases():
     """)
     _furniture_conn.execute("CREATE INDEX IF NOT EXISTS idx_furniture_category ON furniture(category)")
     _furniture_conn.execute("CREATE INDEX IF NOT EXISTS idx_furniture_org_id ON furniture(org_id)")
-
-    # Add org_id column if migrating from existing DB
-    try:
-        _furniture_conn.execute("ALTER TABLE furniture ADD COLUMN org_id VARCHAR NOT NULL DEFAULT ''")
-        logger.info("Added org_id column to furniture table")
-    except Exception:
-        pass
 
     # Meshy generation tasks table
     _furniture_conn.execute("""
