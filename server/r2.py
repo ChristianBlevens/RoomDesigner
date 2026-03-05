@@ -15,10 +15,10 @@ from botocore.config import Config
 logger = logging.getLogger(__name__)
 
 # R2 Configuration from environment
-R2_ACCOUNT_ID = os.environ.get("R2_ACCOUNT_ID", "")
 R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "")
 R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY", "")
-R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME", "roomdesigner")
+R2_ENDPOINT_URL = os.environ.get("R2_ENDPOINT_URL", "")
+R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME", "room-designer")
 R2_PUBLIC_URL = os.environ.get("R2_PUBLIC_URL", "")
 
 _client = None
@@ -28,14 +28,14 @@ def get_client():
     """Get or create S3 client for R2."""
     global _client
     if _client is None:
-        if not (R2_ACCOUNT_ID and R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY):
+        if not (R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and R2_ENDPOINT_URL):
             raise RuntimeError(
-                "R2 credentials not configured. Set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY."
+                "R2 credentials not configured. Set R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT_URL."
             )
 
         _client = boto3.client(
             's3',
-            endpoint_url=f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
+            endpoint_url=R2_ENDPOINT_URL,
             aws_access_key_id=R2_ACCESS_KEY_ID,
             aws_secret_access_key=R2_SECRET_ACCESS_KEY,
             config=Config(
@@ -107,9 +107,7 @@ def delete_objects(keys: list[str]):
 
 def get_public_url(key: str) -> str:
     """Get public URL for an R2 object."""
-    if R2_PUBLIC_URL:
-        return f"{R2_PUBLIC_URL.rstrip('/')}/{key}"
-    return f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com/{R2_BUCKET_NAME}/{key}"
+    return f"{R2_PUBLIC_URL.rstrip('/')}/{key}"
 
 
 def object_exists(key: str) -> bool:
