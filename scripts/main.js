@@ -112,7 +112,7 @@ import {
   debounce
 } from './utils.js';
 import { adjustUrlForProxy } from './api.js';
-import { isAuthenticated, signIn, signUp, logout, getUsername, getToken } from './auth.js';
+import { isAuthenticated, signIn, signUp, logout, getUsername, getToken, isAdmin } from './auth.js';
 
 // Application state
 let currentHouseId = null;
@@ -315,7 +315,11 @@ function setupAuthModal() {
       if (isSignUp) {
         await signUp(username, password);
       } else {
-        await signIn(username, password);
+        const result = await signIn(username, password);
+        if (result.admin) {
+          window.location.href = `${window.location.pathname.replace(/\/+$/, '').replace(/\/index\.html$/i, '')}/admin.html`;
+          return;
+        }
       }
       window.location.reload();
     } catch (err) {

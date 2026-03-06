@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RoomDesigner Admin</title>
+  <link rel="stylesheet" href="styles/main.css">
+  <link rel="stylesheet" href="styles/admin.css">
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+
+  <div class="admin-layout">
+    <!-- Header -->
+    <header class="admin-header">
+      <h1 class="admin-title">RoomDesigner Admin</h1>
+      <button id="admin-signout-btn" class="btn-secondary">Sign Out</button>
+    </header>
+
+    <!-- Tab Navigation -->
+    <nav class="admin-tabs">
+      <button class="admin-tab active" data-tab="orgs">Orgs</button>
+      <button class="admin-tab" data-tab="houses">Houses</button>
+      <button class="admin-tab" data-tab="rooms">Rooms</button>
+      <button class="admin-tab" data-tab="furniture">Furniture</button>
+      <button class="admin-tab" data-tab="meshy">Meshy Tasks</button>
+    </nav>
+
+    <!-- Search & Filters -->
+    <div class="admin-toolbar">
+      <input type="text" id="admin-search" class="admin-search" placeholder="Search...">
+      <select id="admin-filter-org" class="admin-filter">
+        <option value="">All Orgs</option>
+      </select>
+      <div id="admin-extra-filters"></div>
+    </div>
+
+    <!-- Data Table -->
+    <div class="admin-table-container">
+      <table class="admin-table">
+        <thead id="admin-thead"></thead>
+        <tbody id="admin-tbody"></tbody>
+      </table>
+      <div id="admin-empty" class="admin-empty hidden">No results found</div>
+    </div>
+
+    <!-- Detail Panel (slides in from right) -->
+    <div id="admin-detail" class="admin-detail hidden">
+      <div class="admin-detail-header">
+        <h2 id="admin-detail-title">Detail</h2>
+        <button id="admin-detail-close" class="admin-detail-close">&times;</button>
+      </div>
+      <div id="admin-detail-content" class="admin-detail-content"></div>
+    </div>
+
+    <!-- 3D Viewer Modal -->
+    <div id="admin-viewer-modal" class="admin-viewer-modal hidden">
+      <div class="admin-viewer-container">
+        <div class="admin-viewer-header">
+          <span id="admin-viewer-title">3D Viewer</span>
+          <button id="admin-viewer-close" class="admin-detail-close">&times;</button>
+        </div>
+        <canvas id="admin-viewer-canvas"></canvas>
+        <div id="admin-viewer-info" class="admin-viewer-info"></div>
+      </div>
+    </div>
+
+    <!-- Confirm Dialog -->
+    <div id="admin-confirm" class="admin-confirm hidden">
+      <div class="admin-confirm-card">
+        <p id="admin-confirm-message">Are you sure?</p>
+        <div class="admin-confirm-actions">
+          <button id="admin-confirm-cancel" class="btn-secondary">Cancel</button>
+          <button id="admin-confirm-ok" class="btn-danger">Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status toast -->
+    <div id="admin-toast" class="admin-toast hidden"></div>
+  </div>
+
+  <script type="module" src="scripts/admin.js"></script>
+</body>
+</html>

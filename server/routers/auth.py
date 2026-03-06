@@ -1,3 +1,4 @@
+import os
 import uuid
 import logging
 from datetime import datetime, timedelta
@@ -52,6 +53,35 @@ def create_token(org_id: str) -> str:
         "iat": datetime.utcnow(),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def create_admin_token() -> str:
+    """Create a JWT token for the admin."""
+    payload = {
+        "admin": True,
+        "jti": uuid.uuid4().hex,
+        "exp": datetime.utcnow() + timedelta(days=1),
+        "iat": datetime.utcnow(),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def verify_admin(credentials: HTTPAuthorizationCredentials = Depends(security)) -> bool:
+    """Verify JWT token has admin claim. Use as FastAPI dependency."""
+    try:
+        payload = jwt.decode(
+            credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM]
+        )
+        if not payload.get("admin"):
+            raise HTTPException(403, "Admin access required")
+        jti = payload.get("jti")
+        if jti and jti in _revoked_tokens:
+            raise HTTPException(401, "Token revoked")
+        return True
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(401, "Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(401, "Invalid token")
 
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
@@ -122,9 +152,20 @@ def sign_up(request: SignUpRequest, req: Request):
     return AuthResponse(token=token, org_id=org_id, username=username)
 
 
-@router.post("/signin", response_model=AuthResponse)
+@router.post("/signin")
 @limiter.limit("10/minute")
 def sign_in(request: SignInRequest, req: Request):
+    admin_username = os.environ.get("ADMIN_USERNAME")
+    admin_password = os.environ.get("ADMIN_PASSWORD")
+
+    # Check admin credentials first
+    if (admin_username and admin_password
+        and request.username.strip() == admin_username
+        and request.password == admin_password):
+        token = create_admin_token()
+        return {"token": token, "org_id": "admin", "username": admin_username, "admin": True}
+
+    # Normal org sign-in
     db = get_auth_db()
 
     row = db.execute(

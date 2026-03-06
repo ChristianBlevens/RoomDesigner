@@ -38,7 +38,8 @@ export async function logout() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(ORG_KEY);
   localStorage.removeItem(USERNAME_KEY);
-  window.location.reload();
+  localStorage.removeItem('roomdesigner_admin');
+  window.location.href = window.location.pathname.replace(/\/admin\.html$/i, '/');
 }
 
 async function authFetch(path, body) {
@@ -64,10 +65,17 @@ export async function signUp(username, password) {
   return result;
 }
 
+export function isAdmin() {
+  return localStorage.getItem('roomdesigner_admin') === 'true';
+}
+
 export async function signIn(username, password) {
   const result = await authFetch('/auth/signin', { username, password });
   localStorage.setItem(TOKEN_KEY, result.token);
   localStorage.setItem(ORG_KEY, result.org_id);
   localStorage.setItem(USERNAME_KEY, result.username);
+  if (result.admin) {
+    localStorage.setItem('roomdesigner_admin', 'true');
+  }
   return result;
 }
