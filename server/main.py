@@ -41,9 +41,14 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
         content={"detail": "Too many requests. Please try again later."}
     )
 
-# CORS: restrict to configured origins (defaults to same-origin only)
-cors_origins = os.environ.get("CORS_ORIGINS", "").split(",")
-cors_origins = [o.strip() for o in cors_origins if o.strip()]
+# CORS: derive allowed origin from SERVER_BASE_URL
+_server_url = os.environ.get("SERVER_BASE_URL", "")
+if _server_url:
+    from urllib.parse import urlparse
+    _parsed = urlparse(_server_url)
+    cors_origins = [f"{_parsed.scheme}://{_parsed.netloc}"]
+else:
+    cors_origins = []
 
 app.add_middleware(
     CORSMiddleware,
