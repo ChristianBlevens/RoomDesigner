@@ -273,6 +273,10 @@
   font-size: inherit;
 }
 
+#calendar-modal {
+  flex-direction: column;
+}
+
 .calendar-footer {
   display: flex;
   justify-content: flex-end;

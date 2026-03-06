@@ -57,7 +57,7 @@ async function apiFetch(path, options = {}) {
 }
 
 async function fetchAsBlob(url) {
-  const response = await fetch(adjustUrlForProxy(url));
+  const response = await fetch(adjustUrlForProxy(url), { cache: 'no-store' });
   if (!response.ok) return null;
   return response.blob();
 }
