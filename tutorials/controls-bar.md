@@ -10,6 +10,7 @@ The controls bar is the fixed strip of buttons above the room tabs. It contains 
 - **Scale** — open the room-wide scale slider
 - **Before/After** — toggle furniture visibility for comparison
 - **Meter Stick** — place a 1-meter reference for scale calibration
+- **Layouts** — save and load furniture arrangements
 - **?** — open this tutorial hub
 - **House** — open house options (edit, export, close, delete, sign out)
 

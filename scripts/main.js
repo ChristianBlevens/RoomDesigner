@@ -736,9 +736,9 @@ function setupLayoutControls() {
   document.getElementById('layout-name-cancel').addEventListener('click', () => {
     modalManager.closeModal();
   });
-  document.getElementById('layout-name-save').addEventListener('click', confirmSaveLayout);
-  document.getElementById('layout-name-input').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') confirmSaveLayout();
+  document.getElementById('layout-name-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    confirmSaveLayout();
   });
 
   document.getElementById('layout-replace-cancel').addEventListener('click', () => {

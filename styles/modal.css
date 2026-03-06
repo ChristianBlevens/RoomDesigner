@@ -518,6 +518,9 @@
 /* Z-index overrides */
 #house-editor-modal { z-index: 550; }
 #room-name-modal { z-index: 560; }
+#layout-name-modal { z-index: 560; }
+#layout-replace-modal { z-index: 560; }
+#layout-missing-modal { z-index: 570; }
 #confirm-delete-modal { z-index: 600; }
 
 /* ============ Form Error ============ */

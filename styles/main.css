@@ -1160,44 +1160,25 @@ select option {
   gap: var(--spacing-sm);
 }
 
-.layouts-panel > * {
-  pointer-events: auto;
+.layouts-panel.hidden {
+  display: none;
 }
 
 .layouts-panel-header {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: var(--spacing-sm);
-  font-size: var(--font-sm);
+  margin-bottom: var(--spacing-xs);
+  font-weight: 500;
+  font-size: var(--font-md);
   color: var(--text-bright);
-  font-weight: 600;
 }
 
 .layouts-count {
   color: var(--text-secondary);
   font-weight: 400;
-}
-
-.layouts-close-btn {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: calc(var(--btn-size) * 0.75);
-  height: calc(var(--btn-size) * 0.75);
-  background: none;
-  border: none;
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  font-size: var(--font-lg);
-  cursor: pointer;
-  padding: 0;
-  line-height: 1;
-}
-
-.layouts-close-btn:hover {
-  background: var(--bg-surface-light);
-  color: var(--text-primary);
+  font-size: var(--font-xs);
+  margin-left: var(--spacing-xs);
 }
 
 .layouts-container {
@@ -1207,7 +1188,7 @@ select option {
   overflow-y: hidden;
   padding: var(--spacing-xs) 0;
   scrollbar-width: thin;
-  scrollbar-color: var(--border-default) transparent;
+  scrollbar-color: var(--bg-surface-light) transparent;
 }
 
 @media (max-width: 500px) {
@@ -1221,19 +1202,20 @@ select option {
 
 .layout-card {
   flex-shrink: 0;
-  width: 140px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-default);
+  width: var(--card-size, clamp(120px, 28vw, 150px));
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   overflow: hidden;
   cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: all 0.2s;
   position: relative;
 }
 
 .layout-card:hover {
   border-color: var(--accent-primary);
   box-shadow: var(--shadow-glow);
+  transform: translateY(-2px);
 }
 
 .layout-card-thumbnail {
@@ -1241,12 +1223,14 @@ select option {
   aspect-ratio: 16 / 9;
   object-fit: cover;
   display: block;
-  background: var(--bg-primary);
+  background: var(--bg-surface);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
 }
 
 .layout-card-name {
-  padding: 6px 8px;
+  padding: var(--spacing-xs) var(--spacing-sm);
   font-size: var(--font-xs);
+  font-weight: 500;
   color: var(--text-primary);
   text-align: center;
   white-space: nowrap;
@@ -1256,15 +1240,17 @@ select option {
 
 .layout-card-delete {
   position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 22px;
-  height: 22px;
+  top: var(--spacing-xs);
+  right: var(--spacing-xs);
+  width: calc(var(--btn-size) * 0.5);
+  height: calc(var(--btn-size) * 0.5);
+  min-width: 22px;
+  min-height: 22px;
   background: rgba(0, 0, 0, 0.6);
   border: none;
   border-radius: 50%;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--font-sm);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1289,7 +1275,25 @@ select option {
 
 .layouts-empty {
   color: var(--text-secondary);
-  font-size: var(--font-xs);
+  font-size: var(--font-sm);
   text-align: center;
   padding: var(--spacing-md) var(--spacing-lg);
+}
+
+/* Layout missing furniture list */
+.layout-missing-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--spacing-lg) 0;
+}
+
+.layout-missing-list li {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: var(--font-sm);
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.layout-missing-list li:last-child {
+  border-bottom: none;
 }
