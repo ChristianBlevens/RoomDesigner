@@ -4,6 +4,13 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
+async function fetchBlobUrl(url) {
+  const response = await fetch(url, { cache: 'no-store' });
+  if (!response.ok) return null;
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
+}
+
 let currentRenderer = null;
 let currentScene = null;
 let currentCamera = null;
@@ -65,7 +72,7 @@ function startRenderLoop() {
  * Load a room mesh with background photo — replicates debug mode view.
  * Green wireframe mesh over the room photo, with MoGe-aligned camera.
  */
-export function loadRoom(canvas, meshUrl, backgroundUrl, mogeData) {
+export async function loadRoom(canvas, meshUrl, backgroundUrl, mogeData) {
   const { renderer, width, height } = setupRenderer(canvas);
   const infoEl = document.getElementById('admin-viewer-info');
 
@@ -97,10 +104,18 @@ export function loadRoom(canvas, meshUrl, backgroundUrl, mogeData) {
   // Ambient light
   scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 
-  const loader = new GLTFLoader();
+  // Fetch mesh as blob to avoid CORS cache issues
+  const meshBlobUrl = await fetchBlobUrl(meshUrl);
+  if (!meshBlobUrl) {
+    if (infoEl) infoEl.textContent = 'Failed to fetch mesh';
+    startRenderLoop();
+    return;
+  }
 
-  // Load mesh as green wireframe
-  loader.load(meshUrl, (gltf) => {
+  const loader = new GLTFLoader();
+  loader.load(meshBlobUrl, async (gltf) => {
+    URL.revokeObjectURL(meshBlobUrl);
+
     gltf.scene.traverse(child => {
       if (child.isMesh) {
         child.material = new THREE.MeshBasicMaterial({
@@ -124,24 +139,28 @@ export function loadRoom(canvas, meshUrl, backgroundUrl, mogeData) {
 
     // Place background image behind mesh
     if (backgroundUrl) {
-      const texLoader = new THREE.TextureLoader();
-      texLoader.load(backgroundUrl, (texture) => {
-        texture.colorSpace = THREE.SRGBColorSpace;
-        const depth = box.max.z < 0 ? box.min.z - 1 : box.max.z + 1;
-        const planeHeight = 2 * Math.abs(depth) * Math.tan(THREE.MathUtils.degToRad(fov / 2));
-        const planeWidth = planeHeight * aspect;
+      const bgBlobUrl = await fetchBlobUrl(backgroundUrl);
+      if (bgBlobUrl) {
+        const texLoader = new THREE.TextureLoader();
+        texLoader.load(bgBlobUrl, (texture) => {
+          URL.revokeObjectURL(bgBlobUrl);
+          texture.colorSpace = THREE.SRGBColorSpace;
+          const depth = box.max.z < 0 ? box.min.z - 1 : box.max.z + 1;
+          const planeHeight = 2 * Math.abs(depth) * Math.tan(THREE.MathUtils.degToRad(fov / 2));
+          const planeWidth = planeHeight * aspect;
 
-        const planeGeo = new THREE.PlaneGeometry(planeWidth, planeHeight);
-        const planeMat = new THREE.MeshBasicMaterial({
-          map: texture,
-          toneMapped: false,
-          depthWrite: false,
+          const planeGeo = new THREE.PlaneGeometry(planeWidth, planeHeight);
+          const planeMat = new THREE.MeshBasicMaterial({
+            map: texture,
+            toneMapped: false,
+            depthWrite: false,
+          });
+          const plane = new THREE.Mesh(planeGeo, planeMat);
+          plane.position.set(0, 0, depth);
+          plane.renderOrder = -1;
+          scene.add(plane);
         });
-        const plane = new THREE.Mesh(planeGeo, planeMat);
-        plane.position.set(0, 0, depth);
-        plane.renderOrder = -1;
-        scene.add(plane);
-      });
+      }
     }
 
     // Frame the view
@@ -149,6 +168,7 @@ export function loadRoom(canvas, meshUrl, backgroundUrl, mogeData) {
     camera.position.set(center.x, center.y, center.z + size.length() * 0.5);
     controls.update();
   }, undefined, (err) => {
+    URL.revokeObjectURL(meshBlobUrl);
     if (infoEl) infoEl.textContent = `Failed to load mesh: ${err.message}`;
   });
 
@@ -158,7 +178,7 @@ export function loadRoom(canvas, meshUrl, backgroundUrl, mogeData) {
 /**
  * Load a furniture GLB model with auto-framing.
  */
-export function loadFurniture(canvas, modelUrl) {
+export async function loadFurniture(canvas, modelUrl) {
   const { renderer, width, height } = setupRenderer(canvas);
   const infoEl = document.getElementById('admin-viewer-info');
 
@@ -182,9 +202,17 @@ export function loadFurniture(canvas, modelUrl) {
   const grid = new THREE.GridHelper(4, 20, 0x444444, 0x333333);
   scene.add(grid);
 
-  // Load model
+  // Fetch model as blob to avoid CORS cache issues
+  const blobUrl = await fetchBlobUrl(modelUrl);
+  if (!blobUrl) {
+    if (infoEl) infoEl.textContent = 'Failed to fetch model';
+    startRenderLoop();
+    return;
+  }
+
   const loader = new GLTFLoader();
-  loader.load(modelUrl, (gltf) => {
+  loader.load(blobUrl, (gltf) => {
+    URL.revokeObjectURL(blobUrl);
     scene.add(gltf.scene);
 
     const box = new THREE.Box3().setFromObject(gltf.scene);
@@ -202,6 +230,7 @@ export function loadFurniture(canvas, modelUrl) {
     camera.position.set(center.x + dist * 0.5, center.y + dist * 0.3, center.z + dist * 0.5);
     controls.update();
   }, undefined, (err) => {
+    URL.revokeObjectURL(blobUrl);
     if (infoEl) infoEl.textContent = `Failed to load model: ${err.message}`;
   });
 
