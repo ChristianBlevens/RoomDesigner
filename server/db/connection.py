@@ -81,6 +81,7 @@ def init_databases():
             moge_data JSON,
             lighting_settings JSON,
             room_scale DOUBLE DEFAULT 1.0,
+            meter_stick JSON,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)

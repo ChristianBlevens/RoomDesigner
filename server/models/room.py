@@ -38,6 +38,7 @@ class RoomUpdate(BaseModel):
     mogeData: Optional[MogeData] = None
     lightingSettings: Optional[LightingSettings] = None
     roomScale: Optional[float] = None
+    meterStick: Optional[dict] = None
 
 class RoomResponse(BaseModel):
     id: str
@@ -50,3 +51,4 @@ class RoomResponse(BaseModel):
     mogeData: Optional[dict] = None
     lightingSettings: Optional[dict] = None
     roomScale: Optional[float] = None
+    meterStick: Optional[dict] = None

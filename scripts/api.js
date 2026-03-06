@@ -312,6 +312,17 @@ export async function saveRoom(roomState, previousState = null) {
     }
   }
 
+  // Meter stick - compare if previousState provided
+  if (roomState.meterStick !== undefined) {
+    const currentJson = JSON.stringify(roomState.meterStick || null);
+    const previousJson = previousState ? JSON.stringify(previousState.meterStick || null) : null;
+
+    if (!previousState || currentJson !== previousJson) {
+      payload.meterStick = roomState.meterStick || null;
+      hasChanges = true;
+    }
+  }
+
   // NOTE: mogeData intentionally NOT included - it never changes after creation
 
   // Skip request if nothing changed
@@ -346,7 +357,9 @@ function transformRoomResponse(room) {
     backgroundImageUrl: room.backgroundImageUrl,
     placedFurniture: room.placedFurniture || [],
     mogeData: room.mogeData,
-    lightingSettings: room.lightingSettings
+    lightingSettings: room.lightingSettings,
+    roomScale: room.roomScale,
+    meterStick: room.meterStick
   };
 }
 

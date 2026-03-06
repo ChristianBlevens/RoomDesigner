@@ -134,6 +134,7 @@ let previousRoomState = null;
 
 // Meter stick state
 let meterStickPlacementMode = false;
+let savedMeterStickData = null;
 
 // Pending state for multi-step room creation flow
 let pendingRoomImage = null;
@@ -886,6 +887,7 @@ async function applyLayout(layout) {
     // Remember meter stick state before clearing
     const meterStick = getMeterStick();
     const hadMeterStick = !!meterStick;
+    const hadSavedMeterStickData = !!savedMeterStickData;
     let meterStickState = null;
     if (hadMeterStick) {
       meterStickState = {
@@ -907,23 +909,12 @@ async function applyLayout(layout) {
 
     clearAllFurniture();
 
-    // Restore meter stick
+    // Restore meter stick (either from scene or from deferred saved data)
     if (hadMeterStick && meterStickState) {
-      const stick = createMeterStick();
-      stick.position.set(meterStickState.position.x, meterStickState.position.y, meterStickState.position.z);
-      stick.rotation.set(meterStickState.rotation.x, meterStickState.rotation.y, meterStickState.rotation.z);
-      if (meterStickState.surfaceNormal) {
-        stick.userData.surfaceNormal = new THREE.Vector3(
-          meterStickState.surfaceNormal.x, meterStickState.surfaceNormal.y, meterStickState.surfaceNormal.z
-        );
+      restoreMeterStickFromData(meterStickState);
+      if (!meterStickState.visible) {
+        setMeterStickVisible(false);
       }
-      if (meterStickState.contactAxis) {
-        stick.userData.contactAxis = new THREE.Vector3(
-          meterStickState.contactAxis.x, meterStickState.contactAxis.y, meterStickState.contactAxis.z
-        );
-      }
-      addMeterStickToScene(stick);
-      setMeterStickVisible(meterStickState.visible);
     }
 
     const missingItems = [];
@@ -2492,6 +2483,15 @@ function handleMeterStickButtonClick() {
   }
 
   if (!stick) {
+    // Restore from saved data if available (deferred load)
+    if (savedMeterStickData) {
+      restoreMeterStickFromData(savedMeterStickData);
+      savedMeterStickData = null;
+      updateMeterStickButton();
+      showActionNotification('Meter stick shown');
+      return;
+    }
+
     meterStickPlacementMode = true;
     updateMeterStickButton();
     showActionNotification('Tap a surface to place meter stick', 10000);
@@ -2554,6 +2554,23 @@ function placeMeterStickAtSurface(position, surfaceNormal) {
   meterStickPlacementMode = false;
   updateMeterStickButton();
   showActionNotification('Meter stick placed');
+}
+
+function restoreMeterStickFromData(data) {
+  const stick = createMeterStick();
+  stick.position.set(data.position.x, data.position.y, data.position.z);
+  stick.rotation.set(data.rotation.x, data.rotation.y, data.rotation.z);
+  if (data.surfaceNormal) {
+    stick.userData.surfaceNormal = new THREE.Vector3(
+      data.surfaceNormal.x, data.surfaceNormal.y, data.surfaceNormal.z
+    );
+  }
+  if (data.contactAxis) {
+    stick.userData.contactAxis = new THREE.Vector3(
+      data.contactAxis.x, data.contactAxis.y, data.contactAxis.z
+    );
+  }
+  addMeterStickToScene(stick);
 }
 
 export function isMeterStickPlacementMode() {
@@ -3845,28 +3862,10 @@ async function loadRoomById(roomId) {
   updateScaleUIFromRoom();
   console.log('Room scale:', getRoomScale());
 
-  // Load meter stick
+  // Store meter stick data for deferred creation (hidden until button pressed)
   clearMeterStick();
   meterStickPlacementMode = false;
-  if (room.meterStick) {
-    const stick = createMeterStick();
-    stick.position.set(room.meterStick.position.x, room.meterStick.position.y, room.meterStick.position.z);
-    stick.rotation.set(room.meterStick.rotation.x, room.meterStick.rotation.y, room.meterStick.rotation.z);
-    if (room.meterStick.surfaceNormal) {
-      stick.userData.surfaceNormal = new THREE.Vector3(
-        room.meterStick.surfaceNormal.x, room.meterStick.surfaceNormal.y, room.meterStick.surfaceNormal.z
-      );
-    }
-    if (room.meterStick.contactAxis) {
-      stick.userData.contactAxis = new THREE.Vector3(
-        room.meterStick.contactAxis.x, room.meterStick.contactAxis.y, room.meterStick.contactAxis.z
-      );
-    }
-    addMeterStickToScene(stick);
-    if (!room.meterStick.visible) {
-      setMeterStickVisible(false);
-    }
-  }
+  savedMeterStickData = room.meterStick || null;
   updateMeterStickButton();
 
   // Store initial state for selective saves (only save changed fields)
@@ -3936,6 +3935,7 @@ async function closeHouse() {
 
   clearMeterStick();
   meterStickPlacementMode = false;
+  savedMeterStickData = null;
 
   document.getElementById('background-container').style.backgroundImage = '';
   clearAllFurniture();

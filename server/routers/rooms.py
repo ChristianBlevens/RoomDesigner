@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 ROOM_SELECT = """
     SELECT id, house_id, name, status, error_message, background_image_path,
-           placed_furniture, moge_data, lighting_settings, room_scale
+           placed_furniture, moge_data, lighting_settings, room_scale, meter_stick
     FROM rooms
 """
 
@@ -53,6 +53,7 @@ def row_to_response(row) -> RoomResponse:
     moge_data = json.loads(row[7]) if row[7] else None
     lighting_settings = json.loads(row[8]) if row[8] else None
     room_scale = row[9] if row[9] is not None else 1.0
+    meter_stick = json.loads(row[10]) if row[10] else None
 
     background_url = r2.get_public_url(background_path) if background_path else None
 
@@ -66,7 +67,8 @@ def row_to_response(row) -> RoomResponse:
         placedFurniture=placed_furniture,
         mogeData=moge_data,
         lightingSettings=lighting_settings,
-        roomScale=room_scale
+        roomScale=room_scale,
+        meterStick=meter_stick
     )
 
 
@@ -202,6 +204,9 @@ def update_room(room_id: str, room: RoomUpdate, org_id: str = Depends(verify_tok
     if room.roomScale is not None:
         updates.append("room_scale = ?")
         values.append(room.roomScale)
+    if room.meterStick is not None:
+        updates.append("meter_stick = ?")
+        values.append(json.dumps(room.meterStick))
 
     if updates:
         values.append(room_id)
