@@ -123,13 +123,13 @@ class AuthResponse(BaseModel):
 
 @router.post("/signup", response_model=AuthResponse)
 @limiter.limit("5/minute")
-def sign_up(request: SignUpRequest, req: Request):
+def sign_up(request: Request, body: SignUpRequest):
     db = get_auth_db()
 
-    username = request.username.strip()
+    username = body.username.strip()
     if not username or len(username) < 2:
         raise HTTPException(400, "Username must be at least 2 characters")
-    if len(request.password) < 6:
+    if len(body.password) < 6:
         raise HTTPException(400, "Password must be at least 6 characters")
 
     existing = db.execute(
@@ -140,7 +140,7 @@ def sign_up(request: SignUpRequest, req: Request):
 
     org_id = str(uuid.uuid4())
     password_hash = bcrypt.hashpw(
-        request.password.encode('utf-8'), bcrypt.gensalt()
+        body.password.encode('utf-8'), bcrypt.gensalt()
     ).decode('utf-8')
 
     db.execute(
