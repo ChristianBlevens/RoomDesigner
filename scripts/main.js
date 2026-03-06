@@ -315,6 +315,12 @@ async function init() {
 
   // Show calendar modal on startup
   await openCalendarModal();
+
+  // Show tutorial hub on first visit
+  if (!localStorage.getItem('tutorialShown')) {
+    localStorage.setItem('tutorialShown', '1');
+    await openTutorialHub();
+  }
 }
 
 // ============ Auth Modal ============
