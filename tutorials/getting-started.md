@@ -18,3 +18,5 @@ Welcome to Room Furniture Planner! This app helps interior design firms stage ho
 - **Rooms** are individual spaces within a house, each with its own photo and furniture layout
 - **Furniture entries** are stored in a shared database with quantities tracked across houses
 - The app uses AI to extract 3D surfaces from your room photo, so furniture can be placed on floors, walls, and ceilings
+
+Press off of modals to close them
