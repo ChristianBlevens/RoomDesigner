@@ -90,7 +90,14 @@ def get_rooms_by_house(house_id: str, org_id: str = Depends(verify_token)):
 @router.get("/orphans", response_model=List[RoomResponse])
 def get_orphan_rooms(org_id: str = Depends(verify_token)):
     db = get_houses_db()
-    rows = db.execute(f"{ROOM_SELECT} WHERE house_id IS NULL OR house_id = ''").fetchall()
+    rows = db.execute(f"""
+        {ROOM_SELECT} WHERE (house_id IS NULL OR house_id = '')
+        AND id IN (
+            SELECT r.id FROM rooms r
+            LEFT JOIN houses h ON r.house_id = h.id
+            WHERE h.id IS NULL OR h.org_id = ?
+        )
+    """, [org_id]).fetchall()
     return [row_to_response(row) for row in rows]
 
 

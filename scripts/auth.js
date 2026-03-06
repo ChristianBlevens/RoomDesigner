@@ -23,7 +23,18 @@ export function isAuthenticated() {
   return !!getToken();
 }
 
-export function logout() {
+export async function logout() {
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (token) {
+    try {
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+    } catch (_) {
+      // Best-effort server-side revocation
+    }
+  }
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(ORG_KEY);
   localStorage.removeItem(USERNAME_KEY);

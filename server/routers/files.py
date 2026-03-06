@@ -71,7 +71,8 @@ async def upload_furniture_image(
     )
 
 @router.get("/furniture/{furniture_id}/image")
-def get_furniture_image(furniture_id: str):
+def get_furniture_image(furniture_id: str, org_id: str = Depends(verify_token)):
+    verify_furniture_ownership(furniture_id, org_id)
     db = get_furniture_db()
     row = db.execute("SELECT image_path FROM furniture WHERE id = ?", [furniture_id]).fetchone()
     if not row or not row[0]:
@@ -89,7 +90,8 @@ async def upload_furniture_preview3d(
     )
 
 @router.get("/furniture/{furniture_id}/preview3d")
-def get_furniture_preview3d(furniture_id: str):
+def get_furniture_preview3d(furniture_id: str, org_id: str = Depends(verify_token)):
+    verify_furniture_ownership(furniture_id, org_id)
     db = get_furniture_db()
     row = db.execute("SELECT preview_3d_path FROM furniture WHERE id = ?", [furniture_id]).fetchone()
     if not row or not row[0]:
@@ -134,7 +136,8 @@ async def upload_furniture_model(
     return {"status": "uploaded", "url": r2.get_public_url(model_key)}
 
 @router.get("/furniture/{furniture_id}/model")
-def get_furniture_model(furniture_id: str):
+def get_furniture_model(furniture_id: str, org_id: str = Depends(verify_token)):
+    verify_furniture_ownership(furniture_id, org_id)
     db = get_furniture_db()
     row = db.execute("SELECT model_path FROM furniture WHERE id = ?", [furniture_id]).fetchone()
     if not row or not row[0]:
@@ -154,7 +157,8 @@ async def upload_room_background(
     )
 
 @router.get("/room/{room_id}/background")
-def get_room_background(room_id: str):
+def get_room_background(room_id: str, org_id: str = Depends(verify_token)):
+    verify_room_ownership(room_id, org_id)
     db = get_houses_db()
     row = db.execute(
         "SELECT background_image_path FROM rooms WHERE id = ?", [room_id]
@@ -164,7 +168,8 @@ def get_room_background(room_id: str):
     return RedirectResponse(r2.get_public_url(row[0]), status_code=302)
 
 @router.get("/room/{room_id}/mesh")
-def get_room_mesh(room_id: str):
+def get_room_mesh(room_id: str, org_id: str = Depends(verify_token)):
+    verify_room_ownership(room_id, org_id)
     mesh_key = f"rooms/meshes/{room_id}.glb"
     if r2.object_exists(mesh_key):
         return RedirectResponse(r2.get_public_url(mesh_key), status_code=302)

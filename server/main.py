@@ -1,13 +1,15 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI
+import os
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from contextlib import asynccontextmanager
 from pathlib import Path
 import sys
+from slowapi.errors import RateLimitExceeded
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -28,9 +30,24 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="RoomDesigner API", lifespan=lifespan)
 
+# Rate limiting
+from routers.auth import limiter
+app.state.limiter = limiter
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Too many requests. Please try again later."}
+    )
+
+# CORS: restrict to configured origins (defaults to same-origin only)
+cors_origins = os.environ.get("CORS_ORIGINS", "").split(",")
+cors_origins = [o.strip() for o in cors_origins if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

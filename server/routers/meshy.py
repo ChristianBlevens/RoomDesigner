@@ -185,11 +185,15 @@ def get_meshy_headers() -> dict:
 
 async def create_meshy_task(furniture_id: str) -> str:
     """Create a Meshy.ai generation task and return the meshy_task_id."""
+    import r2 as r2_module
     headers = get_meshy_headers()
 
-    # Build image URL - need the server's external URL
-    base_url = os.environ.get("SERVER_BASE_URL", "http://localhost:8000")
-    image_url = f"{base_url}/api/files/furniture/{furniture_id}/image"
+    # Get R2 public URL directly (file endpoints require auth now)
+    conn = get_furniture_db()
+    row = conn.execute("SELECT image_path FROM furniture WHERE id = ?", [furniture_id]).fetchone()
+    if not row or not row[0]:
+        raise PermanentError("Furniture has no image")
+    image_url = r2_module.get_public_url(row[0])
 
     payload = {
         "image_url": image_url,
@@ -501,17 +505,19 @@ async def get_task_status(task_id: str, org_id: str = Depends(verify_token)):
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # Get furniture name
+    # Verify task belongs to this org via furniture ownership
     conn = get_furniture_db()
     row = conn.execute(
-        "SELECT name FROM furniture WHERE id = ?", [task.furniture_id]
+        "SELECT name FROM furniture WHERE id = ? AND org_id = ?",
+        [task.furniture_id, org_id]
     ).fetchone()
-    furniture_name = row[0] if row else "Unknown"
+    if not row:
+        raise HTTPException(status_code=404, detail="Task not found")
 
     return {
         "id": task.id,
         "furniture_id": task.furniture_id,
-        "furniture_name": furniture_name,
+        "furniture_name": row[0],
         "status": task.status,
         "progress": task.progress,
         "error_message": task.error_message
@@ -526,6 +532,15 @@ async def cancel_task(task_id: str, org_id: str = Depends(verify_token)):
     """
     task = get_task(task_id)
     if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Verify task belongs to this org via furniture ownership
+    conn = get_furniture_db()
+    row = conn.execute(
+        "SELECT id FROM furniture WHERE id = ? AND org_id = ?",
+        [task.furniture_id, org_id]
+    ).fetchone()
+    if not row:
         raise HTTPException(status_code=404, detail="Task not found")
 
     if task.status in ('completed', 'failed'):

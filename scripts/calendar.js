@@ -2,6 +2,7 @@
 
 import { getAllHouses } from './api.js';
 import { formatDateRange } from './houses.js';
+import { logout } from './auth.js';
 
 // Calendar state
 let currentYear = new Date().getFullYear();
@@ -91,6 +92,11 @@ function setupCalendarControls() {
 
   newHouseBtn?.addEventListener('click', () => {
     if (onNewHouse) onNewHouse();
+  });
+
+  const signoutBtn = document.getElementById('calendar-signout-btn');
+  signoutBtn?.addEventListener('click', () => {
+    logout();
   });
 }
 

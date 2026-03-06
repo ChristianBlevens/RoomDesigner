@@ -20,12 +20,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def get_background_bytes(room_id: str) -> bytes:
-    """Get room background image bytes from R2."""
+def get_background_bytes(room_id: str, org_id: str) -> bytes:
+    """Get room background image bytes from R2. Verifies org ownership."""
     db = get_houses_db()
-    row = db.execute(
-        "SELECT background_image_path FROM rooms WHERE id = ?", [room_id]
-    ).fetchone()
+    row = db.execute("""
+        SELECT r.background_image_path FROM rooms r
+        JOIN houses h ON r.house_id = h.id
+        WHERE r.id = ? AND h.org_id = ?
+    """, [room_id, org_id]).fetchone()
     if not row or not row[0]:
         raise HTTPException(404, f"Background image not found for room {room_id}")
 
@@ -54,7 +56,7 @@ async def relight_screenshot(request: RelightRequest, org_id: str = Depends(veri
     """
     import base64
 
-    background_bytes = get_background_bytes(request.room_id)
+    background_bytes = get_background_bytes(request.room_id, org_id)
 
     # Decode composite screenshot
     try:
