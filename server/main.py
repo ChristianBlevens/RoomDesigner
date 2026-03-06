@@ -14,7 +14,7 @@ from slowapi.errors import RateLimitExceeded
 sys.path.insert(0, str(Path(__file__).parent))
 
 from db.connection import init_databases, close_databases
-from routers import houses, rooms, furniture, files, meshy, lbm, admin
+from routers import houses, rooms, furniture, files, meshy, lbm, admin, layouts
 from routers.auth import init_auth_secret
 from routers import auth
 from events import subscribe
@@ -64,6 +64,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 # Protected API routes
 app.include_router(houses.router, prefix="/api/houses", tags=["houses"])
 app.include_router(rooms.router, prefix="/api/rooms", tags=["rooms"])
+app.include_router(layouts.router, prefix="/api", tags=["layouts"])
 app.include_router(furniture.router, prefix="/api/furniture", tags=["furniture"])
 app.include_router(files.router, prefix="/api/files", tags=["files"])
 app.include_router(meshy.router, prefix="/api/meshy", tags=["meshy"])

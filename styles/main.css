@@ -1137,3 +1137,159 @@ select option {
   color: var(--accent-hover);
   text-decoration: underline;
 }
+
+/* ============ Layouts Panel ============ */
+
+.layouts-panel {
+  position: fixed;
+  bottom: calc(var(--tab-height) + var(--btn-size) + var(--spacing-sm) * 2 + var(--spacing-md));
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--spacing-md);
+  z-index: 100;
+  max-width: 90vw;
+  max-height: 50vh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.layouts-panel > * {
+  pointer-events: auto;
+}
+
+.layouts-panel-header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-size: var(--font-sm);
+  color: var(--text-bright);
+  font-weight: 600;
+}
+
+.layouts-count {
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.layouts-close-btn {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(var(--btn-size) * 0.75);
+  height: calc(var(--btn-size) * 0.75);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-lg);
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.layouts-close-btn:hover {
+  background: var(--bg-surface-light);
+  color: var(--text-primary);
+}
+
+.layouts-container {
+  display: flex;
+  gap: var(--spacing-sm);
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: var(--spacing-xs) 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-default) transparent;
+}
+
+@media (max-width: 500px) {
+  .layouts-container {
+    flex-direction: column;
+    overflow-x: hidden;
+    overflow-y: auto;
+    max-height: 35vh;
+  }
+}
+
+.layout-card {
+  flex-shrink: 0;
+  width: 140px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  position: relative;
+}
+
+.layout-card:hover {
+  border-color: var(--accent-primary);
+  box-shadow: var(--shadow-glow);
+}
+
+.layout-card-thumbnail {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  display: block;
+  background: var(--bg-primary);
+}
+
+.layout-card-name {
+  padding: 6px 8px;
+  font-size: var(--font-xs);
+  color: var(--text-primary);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.layout-card-delete {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  background: rgba(0, 0, 0, 0.6);
+  border: none;
+  border-radius: 50%;
+  color: var(--text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.layout-card:hover .layout-card-delete {
+  opacity: 1;
+}
+
+.layout-card-delete:hover {
+  color: var(--text-danger);
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.layouts-panel-footer {
+  display: flex;
+  justify-content: center;
+}
+
+.layouts-empty {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  text-align: center;
+  padding: var(--spacing-md) var(--spacing-lg);
+}

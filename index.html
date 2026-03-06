@@ -102,6 +102,14 @@
         <path d="m17.5 15.5 2-2"></path>
       </svg>
     </button>
+    <button id="layouts-btn" title="Room Layouts">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="3" width="7" height="7" rx="1"></rect>
+        <rect x="15" y="3" width="7" height="7" rx="1"></rect>
+        <rect x="2" y="14" width="7" height="7" rx="1"></rect>
+        <rect x="15" y="14" width="7" height="7" rx="1"></rect>
+      </svg>
+    </button>
     <div class="controls-spacer"></div>
     <button id="tutorial-btn" title="Tutorials">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -145,6 +153,55 @@
       <label>Scale</label>
       <input type="range" id="room-scale-slider" min="0.25" max="3.0" step="0.05" value="1.0">
       <span id="room-scale-value">1.0x</span>
+    </div>
+  </div>
+
+  <!-- Layouts Panel (above controls bar) -->
+  <div id="layouts-panel" class="layouts-panel hidden">
+    <div class="layouts-panel-header">
+      <span>Layouts</span>
+      <span id="layouts-count" class="layouts-count"></span>
+      <button id="layouts-close-btn" class="layouts-close-btn">&times;</button>
+    </div>
+    <div id="layouts-container" class="layouts-container"></div>
+    <div class="layouts-panel-footer">
+      <button id="save-layout-btn" class="btn-primary">Save Layout</button>
+    </div>
+  </div>
+
+  <!-- Layout Name Input Modal -->
+  <div class="modal-overlay modal-hidden" id="layout-name-modal">
+    <div class="modal-content" style="max-width: 360px;">
+      <h3>Save Layout</h3>
+      <input type="text" id="layout-name-input" placeholder="Layout name" maxlength="50" />
+      <div class="modal-buttons">
+        <button id="layout-name-cancel" class="btn-secondary">Cancel</button>
+        <button id="layout-name-save" class="btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Layout Replace Warning Modal -->
+  <div class="modal-overlay modal-hidden" id="layout-replace-modal">
+    <div class="modal-content" style="max-width: 400px;">
+      <h3>Replace Current Furniture?</h3>
+      <p>This will remove all currently placed furniture and load the selected layout.</p>
+      <div class="modal-buttons">
+        <button id="layout-replace-cancel" class="btn-secondary">Cancel</button>
+        <button id="layout-replace-confirm" class="btn-primary">Replace</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Layout Missing Furniture Modal -->
+  <div class="modal-overlay modal-hidden" id="layout-missing-modal">
+    <div class="modal-content" style="max-width: 440px;">
+      <h3>Some Furniture Unavailable</h3>
+      <p>The following furniture items are not available and will be skipped:</p>
+      <ul id="layout-missing-list"></ul>
+      <div class="modal-buttons">
+        <button id="layout-missing-ok" class="btn-primary">OK</button>
+      </div>
     </div>
   </div>
 

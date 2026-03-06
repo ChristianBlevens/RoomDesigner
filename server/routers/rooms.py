@@ -219,11 +219,18 @@ def delete_room(room_id: str, org_id: str = Depends(verify_token)):
         "SELECT background_image_path FROM rooms WHERE id = ?", [room_id]
     ).fetchone()
 
+    layout_rows = db.execute(
+        "SELECT screenshot_path FROM layouts WHERE room_id = ?", [room_id]
+    ).fetchall()
+    db.execute("DELETE FROM layouts WHERE room_id = ?", [room_id])
     db.execute("DELETE FROM rooms WHERE id = ?", [room_id])
 
     keys_to_delete = [f"rooms/meshes/{room_id}.glb"]
     if row and row[0]:
         keys_to_delete.append(row[0])
+    for lr in layout_rows:
+        if lr[0]:
+            keys_to_delete.append(lr[0])
     r2.delete_objects(keys_to_delete)
 
     return {"status": "deleted"}

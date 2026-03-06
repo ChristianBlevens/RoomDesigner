@@ -49,7 +49,11 @@ import {
   setMeterStickVisible,
   getMeterStick,
   isMeterStickVisible,
-  clearMeterStick
+  clearMeterStick,
+  getScene,
+  getCamera,
+  getRenderer,
+  applyRoomScaleToAllFurniture
 } from './scene.js';
 import {
   saveFurnitureEntry,
@@ -70,11 +74,16 @@ import {
   createRoom,
   getBatchAvailability,
   getLbmStatus,
-  relightScreenshot
+  relightScreenshot,
+  getLayouts,
+  createLayout,
+  getLayout,
+  deleteLayout
 } from './api.js';
 import {
   captureRoomScreenshot,
-  disposeScreenshotRenderer
+  disposeScreenshotRenderer,
+  captureThumbnail
 } from './screenshot.js';
 import {
   getCurrentHouse,
@@ -258,6 +267,7 @@ async function init() {
   setupDebugPanel();
   setupLightingControls();
   setupScaleControls();
+  setupLayoutControls();
   setupBeforeAfterToggle();
   setupMeterStick();
   setupTutorials();
@@ -476,8 +486,9 @@ function setupLightingControls() {
   lightingCloseBtn.addEventListener('click', closeLightingPanel);
 
   function openLightingPanel() {
-    // Close scale panel if open (only one can be open at a time)
+    // Close other panels if open (only one can be open at a time)
     closeScalePanelIfOpen();
+    closeLayoutsPanelIfOpen();
 
     lightingPanelOpen = true;
     lightingPanel.classList.remove('hidden');
@@ -704,6 +715,279 @@ function setupLightingControls() {
   });
 }
 
+// ============ Room Layouts ============
+
+let layoutsPanelOpen = false;
+let pendingLayoutLoad = null;
+const MAX_LAYOUTS_PER_ROOM = 10;
+
+function setupLayoutControls() {
+  const layoutsBtn = document.getElementById('layouts-btn');
+  const layoutsCloseBtn = document.getElementById('layouts-close-btn');
+  const saveLayoutBtn = document.getElementById('save-layout-btn');
+
+  layoutsBtn.addEventListener('click', () => {
+    layoutsPanelOpen ? closeLayoutsPanel() : openLayoutsPanel();
+  });
+
+  layoutsCloseBtn.addEventListener('click', closeLayoutsPanel);
+  saveLayoutBtn.addEventListener('click', startSaveLayout);
+
+  document.getElementById('layout-name-cancel').addEventListener('click', () => {
+    modalManager.closeModal();
+  });
+  document.getElementById('layout-name-save').addEventListener('click', confirmSaveLayout);
+  document.getElementById('layout-name-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') confirmSaveLayout();
+  });
+
+  document.getElementById('layout-replace-cancel').addEventListener('click', () => {
+    pendingLayoutLoad = null;
+    modalManager.closeModal();
+  });
+  document.getElementById('layout-replace-confirm').addEventListener('click', () => {
+    modalManager.closeModal();
+    if (pendingLayoutLoad) {
+      applyLayout(pendingLayoutLoad);
+      pendingLayoutLoad = null;
+    }
+  });
+
+  document.getElementById('layout-missing-ok').addEventListener('click', () => {
+    modalManager.closeModal();
+  });
+}
+
+function openLayoutsPanel() {
+  closeLightingPanelIfOpen();
+  closeScalePanelIfOpen();
+  closeLayoutsPanelIfOpen();
+  layoutsPanelOpen = true;
+  document.getElementById('layouts-panel').classList.remove('hidden');
+  document.getElementById('layouts-btn').classList.add('active');
+  renderLayoutCards();
+}
+
+function closeLayoutsPanel() {
+  layoutsPanelOpen = false;
+  document.getElementById('layouts-panel').classList.add('hidden');
+  document.getElementById('layouts-btn').classList.remove('active');
+}
+
+function closeLayoutsPanelIfOpen() {
+  if (layoutsPanelOpen) closeLayoutsPanel();
+}
+
+async function renderLayoutCards() {
+  const container = document.getElementById('layouts-container');
+  const countEl = document.getElementById('layouts-count');
+  const saveBtn = document.getElementById('save-layout-btn');
+
+  if (!currentRoomId) {
+    container.innerHTML = '<div class="layouts-empty">No room loaded</div>';
+    countEl.textContent = '';
+    return;
+  }
+
+  try {
+    const layouts = await getLayouts(currentRoomId);
+    countEl.textContent = `(${layouts.length}/${MAX_LAYOUTS_PER_ROOM})`;
+    saveBtn.disabled = layouts.length >= MAX_LAYOUTS_PER_ROOM;
+
+    if (layouts.length === 0) {
+      container.innerHTML = '<div class="layouts-empty">No saved layouts</div>';
+      return;
+    }
+
+    container.innerHTML = '';
+    layouts.forEach(layout => {
+      const card = document.createElement('div');
+      card.className = 'layout-card';
+      card.innerHTML = `
+        ${layout.screenshotUrl
+          ? `<img class="layout-card-thumbnail" src="${layout.screenshotUrl}" alt="${layout.name}" />`
+          : `<div class="layout-card-thumbnail"></div>`
+        }
+        <div class="layout-card-name" title="${layout.name}">${layout.name}</div>
+        <button class="layout-card-delete" title="Delete layout">&times;</button>
+      `;
+
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.layout-card-delete')) return;
+        loadLayoutFromCard(layout);
+      });
+
+      card.querySelector('.layout-card-delete').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        try {
+          await deleteLayout(currentRoomId, layout.id);
+          showActionNotification('Layout deleted');
+          renderLayoutCards();
+        } catch (err) {
+          showActionNotification('Failed to delete layout');
+        }
+      });
+
+      container.appendChild(card);
+    });
+  } catch (err) {
+    container.innerHTML = '<div class="layouts-empty">Failed to load layouts</div>';
+  }
+}
+
+function startSaveLayout() {
+  const input = document.getElementById('layout-name-input');
+  input.value = '';
+  modalManager.openModal('layout-name-modal');
+  setTimeout(() => input.focus(), 100);
+}
+
+async function confirmSaveLayout() {
+  const input = document.getElementById('layout-name-input');
+  const name = input.value.trim();
+  if (!name) return;
+
+  modalManager.closeModal();
+  showActionNotification('Saving layout...');
+
+  try {
+    const placedFurniture = collectPlacedFurniture();
+    const base64Screenshot = await captureThumbnail(
+      getRenderer(), getScene(), getCamera()
+    );
+    await createLayout(currentRoomId, name, placedFurniture, base64Screenshot);
+    showActionNotification('Layout saved');
+    renderLayoutCards();
+  } catch (err) {
+    showActionNotification('Failed to save layout');
+  }
+}
+
+function loadLayoutFromCard(layout) {
+  const currentFurniture = collectPlacedFurniture();
+  if (currentFurniture.length > 0) {
+    pendingLayoutLoad = layout;
+    modalManager.openModal('layout-replace-modal');
+    return;
+  }
+  applyLayout(layout);
+}
+
+async function applyLayout(layout) {
+  closeLayoutsPanelIfOpen();
+  showActionNotification('Loading layout...');
+
+  try {
+    let layoutData = layout;
+    if (!layoutData.placedFurniture || layoutData.placedFurniture.length === 0) {
+      layoutData = await getLayout(currentRoomId, layout.id);
+    }
+
+    // Remember meter stick state before clearing
+    const meterStick = getMeterStick();
+    const hadMeterStick = !!meterStick;
+    let meterStickState = null;
+    if (hadMeterStick) {
+      meterStickState = {
+        position: { x: meterStick.position.x, y: meterStick.position.y, z: meterStick.position.z },
+        rotation: { x: meterStick.rotation.x, y: meterStick.rotation.y, z: meterStick.rotation.z },
+        visible: isMeterStickVisible(),
+        surfaceNormal: meterStick.userData.surfaceNormal ? {
+          x: meterStick.userData.surfaceNormal.x,
+          y: meterStick.userData.surfaceNormal.y,
+          z: meterStick.userData.surfaceNormal.z
+        } : null,
+        contactAxis: meterStick.userData.contactAxis ? {
+          x: meterStick.userData.contactAxis.x,
+          y: meterStick.userData.contactAxis.y,
+          z: meterStick.userData.contactAxis.z
+        } : null
+      };
+    }
+
+    clearAllFurniture();
+
+    // Restore meter stick
+    if (hadMeterStick && meterStickState) {
+      const stick = createMeterStick();
+      stick.position.set(meterStickState.position.x, meterStickState.position.y, meterStickState.position.z);
+      stick.rotation.set(meterStickState.rotation.x, meterStickState.rotation.y, meterStickState.rotation.z);
+      if (meterStickState.surfaceNormal) {
+        stick.userData.surfaceNormal = new THREE.Vector3(
+          meterStickState.surfaceNormal.x, meterStickState.surfaceNormal.y, meterStickState.surfaceNormal.z
+        );
+      }
+      if (meterStickState.contactAxis) {
+        stick.userData.contactAxis = new THREE.Vector3(
+          meterStickState.contactAxis.x, meterStickState.contactAxis.y, meterStickState.contactAxis.z
+        );
+      }
+      addMeterStickToScene(stick);
+      setMeterStickVisible(meterStickState.visible);
+    }
+
+    const missingItems = [];
+    for (const furniture of layoutData.placedFurniture) {
+      try {
+        const entry = await getFurnitureEntry(furniture.entryId);
+        if (!entry || !entry.model) {
+          missingItems.push({ name: entry?.name || furniture.entryId, reason: 'No 3D model' });
+          continue;
+        }
+
+        const extractedData = await extractModelFromZip(entry.model);
+        const model = await loadModelFromExtractedZip(extractedData);
+        model.position.set(furniture.position.x, furniture.position.y, furniture.position.z);
+        model.rotation.set(furniture.rotation.x, furniture.rotation.y, furniture.rotation.z);
+
+        if (typeof furniture.scale === 'number') {
+          model.scale.setScalar(furniture.scale);
+        } else if (furniture.scale && typeof furniture.scale === 'object') {
+          model.scale.set(furniture.scale.x, furniture.scale.y, furniture.scale.z);
+        }
+
+        if (furniture.surfaceNormal) {
+          model.userData.surfaceNormal = new THREE.Vector3(
+            furniture.surfaceNormal.x, furniture.surfaceNormal.y, furniture.surfaceNormal.z
+          );
+        }
+        if (furniture.contactAxis) {
+          model.userData.contactAxis = new THREE.Vector3(
+            furniture.contactAxis.x, furniture.contactAxis.y, furniture.contactAxis.z
+          );
+        }
+        if (typeof furniture.uprightRotation === 'number') {
+          model.userData.uprightRotation = furniture.uprightRotation;
+        }
+        if (typeof furniture.rotationAroundNormal === 'number') {
+          model.userData.rotationAroundNormal = furniture.rotationAroundNormal;
+        }
+        if (furniture.baseScale) {
+          model.userData.baseScale = new THREE.Vector3(
+            furniture.baseScale.x, furniture.baseScale.y, furniture.baseScale.z
+          );
+        }
+
+        addFurnitureToScene(model, furniture.entryId);
+      } catch (err) {
+        missingItems.push({ name: furniture.entryId, reason: err.message });
+      }
+    }
+
+    applyRoomScaleToAllFurniture();
+
+    if (missingItems.length > 0) {
+      const list = document.getElementById('layout-missing-list');
+      list.innerHTML = missingItems.map(m => `<li>${m.name} — ${m.reason}</li>`).join('');
+      modalManager.openModal('layout-missing-modal');
+    }
+
+    showActionNotification('Layout loaded');
+  } catch (err) {
+    showActionNotification('Failed to load layout');
+  }
+}
+
 // ============ Room Scale Controls ============
 
 let scalePanelOpen = false;
@@ -730,8 +1014,9 @@ function setupScaleControls() {
   });
 
   function openScalePanel() {
-    // Close lighting panel if open (only one can be open at a time)
+    // Close other panels if open (only one can be open at a time)
     closeLightingPanelIfOpen();
+    closeLayoutsPanelIfOpen();
 
     scalePanelOpen = true;
     scalePanel.classList.remove('hidden');
@@ -3258,6 +3543,7 @@ async function handleRoomImageUpload(event) {
   // Close panels if open
   closeLightingPanelIfOpen();
   closeScalePanelIfOpen();
+  closeLayoutsPanelIfOpen();
 
   // Store pending image
   pendingRoomImage = file;
@@ -3335,6 +3621,7 @@ async function switchRoom(roomId) {
   // Close panels before switching
   closeLightingPanelIfOpen();
   closeScalePanelIfOpen();
+  closeLayoutsPanelIfOpen();
 
   // Save current room first
   if (currentRoomId) {
@@ -3634,6 +3921,7 @@ async function closeHouse() {
   // Close panels
   closeLightingPanelIfOpen();
   closeScalePanelIfOpen();
+  closeLayoutsPanelIfOpen();
 
   currentHouseId = null;
   currentRoomId = null;

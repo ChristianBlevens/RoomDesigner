@@ -709,6 +709,35 @@ export function subscribeToEvents(callback) {
 }
 
 
+// ============ Layouts ============
+
+export async function getLayouts(roomId) {
+  const response = await apiFetch(`/rooms/${roomId}/layouts`);
+  return response.json();
+}
+
+export async function createLayout(roomId, name, placedFurniture, screenshotBase64) {
+  const response = await apiFetch(`/rooms/${roomId}/layouts`, {
+    method: 'POST',
+    body: JSON.stringify({
+      name,
+      placedFurniture,
+      screenshot: screenshotBase64
+    })
+  });
+  return response.json();
+}
+
+export async function getLayout(roomId, layoutId) {
+  const response = await apiFetch(`/rooms/${roomId}/layouts/${layoutId}`);
+  return response.json();
+}
+
+export async function deleteLayout(roomId, layoutId) {
+  await apiFetch(`/rooms/${roomId}/layouts/${layoutId}`, { method: 'DELETE' });
+}
+
+
 // ============ LBM Relighting ============
 
 export async function getLbmStatus() {

@@ -568,3 +568,40 @@ export async function captureRoomScreenshot(roomData, furnitureEntries, options 
 
   return screenshot;
 }
+
+/**
+ * Capture a thumbnail from a live scene renderer.
+ * Returns a base64 PNG string (without data URL prefix) at reduced resolution.
+ *
+ * @param {THREE.WebGLRenderer} renderer - The main scene renderer
+ * @param {THREE.Scene} scene - The main scene
+ * @param {THREE.Camera} camera - The main camera
+ * @param {number} maxWidth - Maximum thumbnail width in pixels
+ * @returns {Promise<string>} Base64-encoded PNG string
+ */
+export async function captureThumbnail(renderer, scene, camera, maxWidth = 400) {
+  const aspect = camera.aspect || (renderer.domElement.width / renderer.domElement.height);
+  const width = maxWidth;
+  const height = Math.round(width / aspect);
+
+  const thumbRenderer = new THREE.WebGLRenderer({
+    antialias: true,
+    alpha: true,
+    preserveDrawingBuffer: true
+  });
+  thumbRenderer.setSize(width, height);
+  thumbRenderer.setClearColor(0x000000, 0);
+  thumbRenderer.shadowMap.enabled = renderer.shadowMap.enabled;
+  thumbRenderer.shadowMap.type = renderer.shadowMap.type;
+
+  thumbRenderer.render(scene, camera);
+  await new Promise(resolve => setTimeout(resolve, 50));
+  thumbRenderer.render(scene, camera);
+
+  const dataUrl = thumbRenderer.domElement.toDataURL('image/png');
+  const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+
+  thumbRenderer.dispose();
+
+  return base64;
+}

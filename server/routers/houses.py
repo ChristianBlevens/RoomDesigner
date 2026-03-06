@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.connection import get_houses_db
 from models.house import HouseCreate, HouseUpdate, HouseResponse
 from routers.auth import verify_token
+import r2
 
 router = APIRouter()
 
@@ -86,6 +87,21 @@ def delete_house(house_id: str, org_id: str = Depends(verify_token)):
     ).fetchone()
     if not existing:
         raise HTTPException(404, "House not found")
+
+    layout_rows = db.execute("""
+        SELECT screenshot_path FROM layouts
+        WHERE room_id IN (SELECT id FROM rooms WHERE house_id = ?)
+    """, [house_id]).fetchall()
+    layout_r2_keys = [lr[0] for lr in layout_rows if lr[0]]
+
+    db.execute("""
+        DELETE FROM layouts
+        WHERE room_id IN (SELECT id FROM rooms WHERE house_id = ?)
+    """, [house_id])
     db.execute("DELETE FROM rooms WHERE house_id = ?", [house_id])
     db.execute("DELETE FROM houses WHERE id = ?", [house_id])
+
+    if layout_r2_keys:
+        r2.delete_objects(layout_r2_keys)
+
     return {"status": "deleted"}

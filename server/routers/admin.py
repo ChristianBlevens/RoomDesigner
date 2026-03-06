@@ -101,6 +101,25 @@ def delete_org(org_id: str, is_admin: bool = Depends(verify_admin)):
             r2_keys.append(row[1])
         r2_keys.append(f"rooms/meshes/{room_id}.glb")
 
+    layout_rows = houses_db.execute("""
+        SELECT screenshot_path FROM layouts
+        WHERE room_id IN (
+            SELECT id FROM rooms WHERE house_id IN (
+                SELECT id FROM houses WHERE org_id = ?
+            )
+        )
+    """, [org_id]).fetchall()
+    for lr in layout_rows:
+        if lr[0]:
+            r2_keys.append(lr[0])
+    houses_db.execute("""
+        DELETE FROM layouts
+        WHERE room_id IN (
+            SELECT id FROM rooms WHERE house_id IN (
+                SELECT id FROM houses WHERE org_id = ?
+            )
+        )
+    """, [org_id])
     houses_db.execute("""
         DELETE FROM rooms WHERE house_id IN (SELECT id FROM houses WHERE org_id = ?)
     """, [org_id])
@@ -247,6 +266,17 @@ def delete_house(house_id: str, is_admin: bool = Depends(verify_admin)):
             r2_keys.append(room[1])
         r2_keys.append(f"rooms/meshes/{room[0]}.glb")
 
+    layout_rows = db.execute("""
+        SELECT screenshot_path FROM layouts
+        WHERE room_id IN (SELECT id FROM rooms WHERE house_id = ?)
+    """, [house_id]).fetchall()
+    for lr in layout_rows:
+        if lr[0]:
+            r2_keys.append(lr[0])
+    db.execute("""
+        DELETE FROM layouts
+        WHERE room_id IN (SELECT id FROM rooms WHERE house_id = ?)
+    """, [house_id])
     db.execute("DELETE FROM rooms WHERE house_id = ?", [house_id])
     db.execute("DELETE FROM houses WHERE id = ?", [house_id])
 
@@ -363,6 +393,13 @@ def delete_room(room_id: str, is_admin: bool = Depends(verify_admin)):
     if row[1]:
         r2_keys.append(row[1])
 
+    layout_rows = db.execute(
+        "SELECT screenshot_path FROM layouts WHERE room_id = ?", [room_id]
+    ).fetchall()
+    for lr in layout_rows:
+        if lr[0]:
+            r2_keys.append(lr[0])
+    db.execute("DELETE FROM layouts WHERE room_id = ?", [room_id])
     db.execute("DELETE FROM rooms WHERE id = ?", [room_id])
     r2.delete_objects(r2_keys)
 

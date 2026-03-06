@@ -87,6 +87,18 @@ def init_databases():
 
     _houses_conn.execute("CREATE INDEX IF NOT EXISTS idx_rooms_house_id ON rooms(house_id)")
 
+    _houses_conn.execute("""
+        CREATE TABLE IF NOT EXISTS layouts (
+            id VARCHAR PRIMARY KEY,
+            room_id VARCHAR NOT NULL,
+            name VARCHAR NOT NULL,
+            placed_furniture JSON,
+            screenshot_path VARCHAR,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    _houses_conn.execute("CREATE INDEX IF NOT EXISTS idx_layouts_room_id ON layouts(room_id)")
+
     # Furniture database
     _furniture_conn = _safe_connect(FURNITURE_DB)
     _furniture_conn.execute("""
