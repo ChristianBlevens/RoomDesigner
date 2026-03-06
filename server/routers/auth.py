@@ -154,14 +154,14 @@ def sign_up(request: SignUpRequest, req: Request):
 
 @router.post("/signin")
 @limiter.limit("10/minute")
-def sign_in(request: SignInRequest, req: Request):
+def sign_in(request: Request, body: SignInRequest):
     admin_username = os.environ.get("ADMIN_USERNAME")
     admin_password = os.environ.get("ADMIN_PASSWORD")
 
     # Check admin credentials first
     if (admin_username and admin_password
-        and request.username.strip() == admin_username
-        and request.password == admin_password):
+        and body.username.strip() == admin_username
+        and body.password == admin_password):
         token = create_admin_token()
         return {"token": token, "org_id": "admin", "username": admin_username, "admin": True}
 
@@ -170,7 +170,7 @@ def sign_in(request: SignInRequest, req: Request):
 
     row = db.execute(
         "SELECT id, username, password_hash FROM orgs WHERE username = ?",
-        [request.username.strip()]
+        [body.username.strip()]
     ).fetchone()
 
     if not row:
@@ -179,7 +179,7 @@ def sign_in(request: SignInRequest, req: Request):
     org_id, username, password_hash = row
 
     if not bcrypt.checkpw(
-        request.password.encode('utf-8'), password_hash.encode('utf-8')
+        body.password.encode('utf-8'), password_hash.encode('utf-8')
     ):
         raise HTTPException(401, "Invalid username or password")
 
