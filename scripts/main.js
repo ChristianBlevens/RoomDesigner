@@ -1833,9 +1833,50 @@ function setupEntryEditor() {
       showError('A 3D model already exists for this entry');
       return;
     }
+
+    // Auto-save new entry before generating
     if (!editingEntryId) {
-      showError('Please save the entry first, then generate the 3D model');
-      return;
+      const nameInput = document.getElementById('entry-name');
+      const name = nameInput.value.trim();
+      if (!name) {
+        showError('Please enter a name before generating');
+        return;
+      }
+      if (!validateDimensions()) {
+        showError('Enter one dimension (scale reference) or all three (exact size)');
+        return;
+      }
+
+      showActionNotification('Saving entry...');
+      try {
+        const dimXVal = document.getElementById('entry-dimension-x').value.trim();
+        const dimYVal = document.getElementById('entry-dimension-y').value.trim();
+        const dimZVal = document.getElementById('entry-dimension-z').value.trim();
+        const quantity = parseInt(document.getElementById('entry-quantity').value, 10) || 1;
+        const categoryInput = document.getElementById('entry-category');
+
+        const entry = {
+          id: null,
+          name: name,
+          category: categoryInput.value.trim() || null,
+          tags: entryTags.length > 0 ? entryTags : null,
+          image: entryImageBlob,
+          model: null,
+          quantity: Math.max(1, quantity),
+          dimensionX: dimXVal !== '' ? parseFloat(dimXVal) : null,
+          dimensionY: dimYVal !== '' ? parseFloat(dimYVal) : null,
+          dimensionZ: dimZVal !== '' ? parseFloat(dimZVal) : null
+        };
+
+        const newId = await saveFurnitureEntry(entry);
+        await refreshFurnitureModal();
+
+        // Re-open as edit modal and continue to generation
+        await openEntryEditor(newId);
+      } catch (err) {
+        showError(`Failed to save entry: ${err.message}`);
+        return;
+      }
     }
 
     // Check if already generating (from server status)

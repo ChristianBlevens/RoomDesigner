@@ -1962,6 +1962,7 @@ export function createMeterStick() {
   mesh.userData.isFurniture = true;
   mesh.userData.isDraggable = true;
   mesh.userData.isMeterStick = true;
+  mesh.userData.baseScale = new THREE.Vector3(1, 1, 1);
   return mesh;
 }
 
