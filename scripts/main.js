@@ -241,6 +241,7 @@ async function init() {
   if (!isAuthenticated()) {
     setupAuthModal();
     showAuthModal();
+    showFirstVisitTutorial();
     return;
   }
 
@@ -315,12 +316,6 @@ async function init() {
 
   // Show calendar modal on startup
   await openCalendarModal();
-
-  // Show tutorial hub on first visit
-  if (!localStorage.getItem('tutorialShown')) {
-    localStorage.setItem('tutorialShown', '1');
-    await openTutorialHub();
-  }
 }
 
 // ============ Auth Modal ============
@@ -373,6 +368,36 @@ function setupAuthModal() {
 
 function showAuthModal() {
   document.getElementById('auth-modal').classList.remove('modal-hidden');
+}
+
+async function showFirstVisitTutorial() {
+  if (localStorage.getItem('tutorialShown')) return;
+  localStorage.setItem('tutorialShown', '1');
+
+  try {
+    const basePath = window.location.pathname.replace(/\/+$/, '').replace(/\/index\.html$/i, '');
+    const response = await fetch(`${basePath}/tutorials/getting-started.md`);
+    if (!response.ok) return;
+    const markdown = await response.text();
+
+    const modal = document.getElementById('tutorial-content-modal');
+    const rendered = document.getElementById('tutorial-content-rendered');
+    rendered.innerHTML = marked.parse(markdown);
+
+    // Show above auth modal
+    modal.style.zIndex = '10001';
+    modal.classList.remove('modal-hidden');
+
+    // Close on click outside content
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        modal.classList.add('modal-hidden');
+        modal.style.zIndex = '';
+      }
+    });
+  } catch (err) {
+    console.warn('Failed to load getting started tutorial:', err);
+  }
 }
 
 // ============ Debug Panel ============
