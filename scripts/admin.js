@@ -414,7 +414,7 @@ async function showRoomDetail(roomId) {
           ${data.placedFurniture.map(f => `
             <div class="detail-item">
               <span>Entry: ${f.entryId || 'unknown'}</span>
-              <span class="detail-sub">Pos: [${(f.position || []).map(v => v.toFixed(2)).join(', ')}]</span>
+              <span class="detail-sub">Pos: [${f.position ? [f.position.x, f.position.y, f.position.z].map(v => (v || 0).toFixed(2)).join(', ') : 'unknown'}]</span>
             </div>
           `).join('')}
         </div>
