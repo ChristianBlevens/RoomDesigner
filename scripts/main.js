@@ -171,6 +171,12 @@ let meshyServerStatus = { tasks: [], active: 0, max: 10 };
 // Polling interval ID
 let meshyPollInterval = null;
 
+// Autosave state
+let autosaveInterval = null;
+let lastSavedHash = null;
+let lastSavedState = null;
+let saveInProgress = false;
+
 // ============ Utility Functions ============
 
 /**
@@ -272,6 +278,23 @@ async function init() {
   setupBeforeAfterToggle();
   setupMeterStick();
   setupTutorials();
+
+  // Warn about unsaved changes on page unload
+  window.addEventListener('beforeunload', (e) => {
+    if (!currentRoomId || !currentBackgroundImage || !lastSavedHash) return;
+    // Synchronous check using last known state — can't do async hash here
+    // Instead, serialize current state and compare to last saved hash synchronously
+    const state = JSON.stringify({
+      placedFurniture: collectPlacedFurniture(),
+      lightingSettings: getLightingSettings(),
+      roomScale: getRoomScale(),
+      meterStick: getMeterStickSaveData()
+    });
+    // Quick length check as heuristic — if state string changed, warn
+    if (state !== lastSavedState) {
+      e.preventDefault();
+    }
+  });
 
   // SSE available via subscribeToEvents() for future real-time features
 
@@ -1275,7 +1298,11 @@ async function processRoomAutomatically() {
     // Brief pause to show success
     await new Promise(resolve => setTimeout(resolve, 800));
 
-    // Show scene and close modal
+    // Transition to room workspace
+    setCurrentLoadedHouse(currentHouseId);
+    resetFurnitureVisibility();
+    await updateSavedHash();
+    startAutosave();
     showScene();
     await renderTabBar();
     modalManager.closeAllModals();
@@ -2766,6 +2793,10 @@ function setupSessionModal() {
  * Returns true if user wants LBM, false otherwise.
  */
 async function showLbmConfirmation() {
+  // LBM relighting disabled — current model doesn't produce good results.
+  // Re-enable by removing this early return when a better model is available.
+  return false;
+
   // Check if LBM is configured
   try {
     const status = await getLbmStatus();
@@ -2855,7 +2886,7 @@ async function handleExportHouse() {
     }
 
     // Export screenshots (with optional LBM relighting)
-    const zipBlob = await exportHouseScreenshotsWithProgress(
+    const { zip: zipBlob, results: exportResults } = await exportHouseScreenshotsWithProgress(
       house,
       rooms,
       furnitureEntries,
@@ -2873,8 +2904,8 @@ async function handleExportHouse() {
     link.click();
     URL.revokeObjectURL(link.href);
 
-    // Show completion
-    showExportComplete(rooms.length);
+    // Show completion with error details
+    showExportComplete(exportResults);
 
   } catch (err) {
     console.error('Export failed:', err);
@@ -2905,10 +2936,12 @@ async function exportHouseScreenshotsWithProgress(house, rooms, furnitureEntries
       if (!room.backgroundImage) {
         console.warn(`Skipping room "${roomName}": no background image`);
         results.push({ room: roomName, success: false, error: 'No background image', screenshot: null });
+        onProgress(i + 1, rooms.length, roomName, 'error');
         continue;
       }
 
       let screenshot;
+      let lbmFallback = false;
 
       if (useLbm && room.id) {
         // LBM mode: capture naive paste (no lighting/shadows), then send to LBM
@@ -2927,9 +2960,8 @@ async function exportHouseScreenshotsWithProgress(house, rooms, furnitureEntries
           console.log(`LBM: Converted to blob, size: ${screenshot.size} bytes`);
         } catch (lbmErr) {
           console.error(`LBM relighting failed for "${roomName}":`, lbmErr);
-          // Fallback: capture with normal lighting/shadows
-          console.log(`LBM: Falling back to normal render for "${roomName}"`);
           screenshot = await captureRoomScreenshot(room, furnitureEntries);
+          lbmFallback = true;
         }
       } else {
         // Normal mode: capture with lighting and shadows
@@ -2940,9 +2972,9 @@ async function exportHouseScreenshotsWithProgress(house, rooms, furnitureEntries
       const filename = `${safeName}.png`;
 
       zip.file(filename, screenshot);
-      results.push({ room: roomName, success: true, filename, screenshot });
+      results.push({ room: roomName, success: true, filename, screenshot, lbmFallback });
 
-      onProgress(i + 1, rooms.length, roomName, 'complete');
+      onProgress(i + 1, rooms.length, roomName, lbmFallback ? 'lbm-fallback' : 'complete');
     } catch (err) {
       console.error(`Failed to capture screenshot for "${roomName}":`, err);
       results.push({ room: roomName, success: false, error: err.message, screenshot: null });
@@ -2985,11 +3017,13 @@ async function exportHouseScreenshotsWithProgress(house, rooms, furnitureEntries
   zip.file('staging_report.pdf', pdf);
 
   // Generate ZIP
-  return zip.generateAsync({
+  const zipBlob = await zip.generateAsync({
     type: 'blob',
     compression: 'DEFLATE',
     compressionOptions: { level: 6 }
   });
+
+  return { zip: zipBlob, results };
 }
 
 /**
@@ -3046,6 +3080,19 @@ async function generateExportPDF(house, rooms, results, furnitureEntries) {
       // Scale to fit page width (170mm), auto height maintains aspect ratio
       doc.addImage(imgData, 'PNG', 20, yPos, 170, 0);
       yPos = 140;
+      if (result.lbmFallback) {
+        doc.setFontSize(9);
+        doc.setTextColor(200, 150, 50);
+        doc.text('Note: AI relighting was unavailable for this room', 20, yPos);
+        doc.setTextColor(0, 0, 0);
+        yPos += 7;
+      }
+    } else if (!result.success) {
+      doc.setFontSize(10);
+      doc.setTextColor(200, 50, 50);
+      doc.text(`Screenshot failed: ${result.error || 'Unknown error'}`, 20, yPos);
+      doc.setTextColor(0, 0, 0);
+      yPos += 10;
     }
 
     // Furniture list below image
@@ -3183,21 +3230,44 @@ function updateExportProgress(current, total, roomName, status = 'loading') {
   } else if (status === 'error') {
     textEl.textContent = `Failed: "${roomName}"`;
     detailEl.textContent = `Room ${current} of ${total} (error)`;
+  } else if (status === 'lbm-fallback') {
+    textEl.textContent = `Captured "${roomName}" (without relighting)`;
+    detailEl.textContent = `Room ${current} of ${total} complete`;
   }
 }
 
 /**
  * Show export completion and enable close button.
  */
-function showExportComplete(roomCount) {
+function showExportComplete(results) {
   const textEl = document.getElementById('export-progress-text');
   const fillEl = document.getElementById('export-progress-fill');
   const detailEl = document.getElementById('export-progress-detail');
   const actions = document.getElementById('export-progress-actions');
 
-  textEl.textContent = 'Export Complete!';
+  const succeeded = results.filter(r => r.success);
+  const failed = results.filter(r => !r.success);
+  const lbmFallbacks = results.filter(r => r.lbmFallback);
+
   fillEl.style.width = '100%';
-  detailEl.textContent = `${roomCount} room${roomCount !== 1 ? 's' : ''} exported`;
+
+  if (failed.length === 0) {
+    textEl.textContent = 'Export Complete!';
+    let detail = `${succeeded.length} room${succeeded.length !== 1 ? 's' : ''} exported`;
+    if (lbmFallbacks.length > 0) {
+      detail += ` (${lbmFallbacks.length} without AI relighting)`;
+    }
+    detailEl.textContent = detail;
+  } else {
+    textEl.textContent = `Export Complete (${failed.length} failed)`;
+    const failList = failed.map(r => `${r.room}: ${r.error}`).join('; ');
+    let detail = `${succeeded.length} exported, ${failed.length} failed — ${failList}`;
+    if (lbmFallbacks.length > 0) {
+      detail += ` | ${lbmFallbacks.length} without AI relighting`;
+    }
+    detailEl.textContent = detail;
+  }
+
   actions.classList.remove('hidden');
 }
 
@@ -3922,6 +3992,10 @@ async function loadRoomById(roomId) {
   showScene();
   deselectFurniture();
 
+  // Start autosave for this room
+  await updateSavedHash();
+  startAutosave();
+
   // Hint for empty rooms
   if (!room.placedFurniture || room.placedFurniture.length === 0) {
     showActionNotification('Tap anywhere to place furniture', 30000);
@@ -3955,9 +4029,69 @@ async function saveCurrentRoom() {
     roomScale: roomState.roomScale,
     meterStick: roomState.meterStick,
   };
+
+  // Update autosave hash so next interval doesn't re-save
+  await updateSavedHash();
+}
+
+async function computeRoomHash() {
+  const state = {
+    placedFurniture: collectPlacedFurniture(),
+    lightingSettings: getLightingSettings(),
+    roomScale: getRoomScale(),
+    meterStick: getMeterStickSaveData()
+  };
+  const json = JSON.stringify(state);
+  const data = new TextEncoder().encode(json);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function startAutosave() {
+  stopAutosave();
+  autosaveInterval = setInterval(async () => {
+    if (!currentRoomId || !currentBackgroundImage || saveInProgress) return;
+    try {
+      const hash = await computeRoomHash();
+      if (hash !== lastSavedHash) {
+        saveInProgress = true;
+        await saveCurrentRoom();
+        lastSavedHash = hash;
+        saveInProgress = false;
+      }
+    } catch (err) {
+      console.warn('Autosave failed:', err);
+      saveInProgress = false;
+    }
+  }, 60000);
+}
+
+function stopAutosave() {
+  if (autosaveInterval) {
+    clearInterval(autosaveInterval);
+    autosaveInterval = null;
+  }
+  lastSavedHash = null;
+  lastSavedState = null;
+}
+
+async function updateSavedHash() {
+  if (currentRoomId && currentBackgroundImage) {
+    lastSavedHash = await computeRoomHash();
+    lastSavedState = JSON.stringify({
+      placedFurniture: collectPlacedFurniture(),
+      lightingSettings: getLightingSettings(),
+      roomScale: getRoomScale(),
+      meterStick: getMeterStickSaveData()
+    });
+  }
 }
 
 async function closeHouse() {
+  // Stop autosave
+  stopAutosave();
+
   // Close panels
   closeLightingPanelIfOpen();
   closeScalePanelIfOpen();

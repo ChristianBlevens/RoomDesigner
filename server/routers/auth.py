@@ -24,8 +24,19 @@ JWT_SECRET = None
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_DAYS = 30
 
-# Token revocation: set of revoked JTIs (JWT IDs)
-_revoked_tokens: set = set()
+def _is_token_revoked(jti: str) -> bool:
+    """Check if a JTI has been revoked (persisted in auth.db)."""
+    db = get_auth_db()
+    row = db.execute("SELECT 1 FROM revoked_tokens WHERE jti = ?", [jti]).fetchone()
+    return row is not None
+
+
+def _revoke_token(jti: str):
+    """Revoke a token by storing its JTI in auth.db."""
+    db = get_auth_db()
+    db.execute(
+        "INSERT INTO revoked_tokens (jti) VALUES (?) ON CONFLICT DO NOTHING", [jti]
+    )
 
 
 def init_auth_secret():
@@ -75,7 +86,7 @@ def verify_admin(credentials: HTTPAuthorizationCredentials = Depends(security)) 
         if not payload.get("admin"):
             raise HTTPException(403, "Admin access required")
         jti = payload.get("jti")
-        if jti and jti in _revoked_tokens:
+        if jti and _is_token_revoked(jti):
             raise HTTPException(401, "Token revoked")
         return True
     except jwt.ExpiredSignatureError:
@@ -94,7 +105,7 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) 
         if not org_id:
             raise HTTPException(401, "Invalid token")
         jti = payload.get("jti")
-        if jti and jti in _revoked_tokens:
+        if jti and _is_token_revoked(jti):
             raise HTTPException(401, "Token revoked")
         return org_id
     except jwt.ExpiredSignatureError:
@@ -196,7 +207,7 @@ def log_out(credentials: HTTPAuthorizationCredentials = Depends(security)):
         )
         jti = payload.get("jti")
         if jti:
-            _revoked_tokens.add(jti)
+            _revoke_token(jti)
     except jwt.InvalidTokenError:
         pass
     return {"status": "logged out"}

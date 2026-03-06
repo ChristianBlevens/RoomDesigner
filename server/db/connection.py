@@ -53,6 +53,12 @@ def init_databases():
             value VARCHAR NOT NULL
         )
     """)
+    _auth_conn.execute("""
+        CREATE TABLE IF NOT EXISTS revoked_tokens (
+            jti VARCHAR PRIMARY KEY,
+            revoked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
     # Houses database
     _houses_conn = _safe_connect(HOUSES_DB)

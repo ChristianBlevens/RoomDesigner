@@ -758,10 +758,47 @@ function init() {
   // Sign out
   document.getElementById('admin-signout-btn').addEventListener('click', logout);
 
+  // R2 orphan cleanup
+  document.getElementById('admin-r2-cleanup').addEventListener('click', handleR2Cleanup);
+
   // Load initial data
   loadOrgFilter();
   updateExtraFilters();
   loadTabData();
+}
+
+async function handleR2Cleanup() {
+  const btn = document.getElementById('admin-r2-cleanup');
+  const origText = btn.textContent;
+
+  try {
+    btn.disabled = true;
+    btn.textContent = 'Scanning...';
+
+    const scan = await apiPost('/r2/scan');
+
+    if (scan.orphanedCount === 0) {
+      showToast(`No orphaned objects found (${scan.totalR2} total in R2, ${scan.totalExpected} referenced)`);
+      btn.textContent = origText;
+      btn.disabled = false;
+      return;
+    }
+
+    const doDelete = await confirm(
+      `Found ${scan.orphanedCount} orphaned R2 objects out of ${scan.totalR2} total. Delete them?`
+    );
+
+    if (doDelete) {
+      btn.textContent = 'Deleting...';
+      const result = await apiPost('/r2/cleanup');
+      showToast(`Deleted ${result.deletedCount} orphaned R2 objects`);
+    }
+  } catch (err) {
+    showToast(`R2 cleanup error: ${err.message}`, 5000);
+  }
+
+  btn.textContent = origText;
+  btn.disabled = false;
 }
 
 init();

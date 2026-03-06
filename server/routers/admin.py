@@ -784,6 +784,81 @@ def list_meshy_tasks(
     } for row in rows]
 
 
+# ============ R2 Cleanup ============
+
+@router.post("/r2/scan")
+def scan_r2_orphans(is_admin: bool = Depends(verify_admin)):
+    """Scan R2 for objects not referenced by any DB record."""
+    houses_db = get_houses_db()
+    furniture_db = get_furniture_db()
+
+    # Collect all expected R2 keys from DB
+    expected = set()
+
+    # Room backgrounds
+    rows = houses_db.execute(
+        "SELECT background_image_path FROM rooms WHERE background_image_path IS NOT NULL"
+    ).fetchall()
+    for row in rows:
+        if row[0]:
+            expected.add(row[0])
+
+    # Room meshes (implicit key for rooms with moge_data)
+    rows = houses_db.execute(
+        "SELECT id FROM rooms WHERE moge_data IS NOT NULL"
+    ).fetchall()
+    for row in rows:
+        expected.add(f"rooms/meshes/{row[0]}.glb")
+
+    # Layout screenshots
+    rows = houses_db.execute(
+        "SELECT screenshot_path FROM layouts WHERE screenshot_path IS NOT NULL"
+    ).fetchall()
+    for row in rows:
+        if row[0]:
+            expected.add(row[0])
+
+    # Furniture assets
+    rows = furniture_db.execute(
+        "SELECT image_path, preview_3d_path, model_path FROM furniture"
+    ).fetchall()
+    for row in rows:
+        for path in row:
+            if path:
+                expected.add(path)
+
+    # List all R2 objects
+    client = r2.get_client()
+    all_keys = set()
+    paginator = client.get_paginator('list_objects_v2')
+    for page in paginator.paginate(Bucket=r2.R2_BUCKET_NAME):
+        for obj in page.get('Contents', []):
+            all_keys.add(obj['Key'])
+
+    orphaned = sorted(all_keys - expected)
+
+    logger.info(f"R2 scan: {len(all_keys)} total, {len(expected)} expected, {len(orphaned)} orphaned")
+    return {
+        "totalR2": len(all_keys),
+        "totalExpected": len(expected),
+        "orphanedCount": len(orphaned),
+        "orphanedKeys": orphaned,
+    }
+
+
+@router.post("/r2/cleanup")
+def cleanup_r2_orphans(is_admin: bool = Depends(verify_admin)):
+    """Delete orphaned R2 objects (runs scan then deletes)."""
+    scan = scan_r2_orphans(is_admin)
+    keys = scan["orphanedKeys"]
+
+    if keys:
+        r2.delete_objects(keys)
+        logger.info(f"R2 cleanup: deleted {len(keys)} orphaned objects")
+
+    return {"deletedCount": len(keys)}
+
+
 @router.delete("/meshy-tasks/{task_id}")
 def delete_meshy_task(task_id: str, is_admin: bool = Depends(verify_admin)):
     db = get_furniture_db()
