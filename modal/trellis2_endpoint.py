@@ -64,11 +64,18 @@ image = (
     .pip_install("wheel", "setuptools", "packaging")
     # Flash attention (required by TRELLIS.2 DiT backbone)
     .pip_install("flash-attn", extra_options="--no-build-isolation")
-    # Clone TRELLIS.2 and run its setup script (compiles CUDA kernels)
+    # Clone TRELLIS.2 and install CUDA extensions individually
+    # (setup.sh requires GPU detection which fails at image build time)
     .run_commands(
         "git clone --depth 1 https://github.com/microsoft/TRELLIS.2 /opt/trellis2",
-        "cd /opt/trellis2 && bash setup.sh",
         "cd /opt/trellis2 && pip install -e .",
+    )
+    .run_commands(
+        "cd /opt/trellis2 && bash setup.sh --basic",
+        "cd /opt/trellis2 && bash setup.sh --cumesh",
+        "cd /opt/trellis2 && bash setup.sh --nvdiffrast",
+        "cd /opt/trellis2 && bash setup.sh --nvdiffrec",
+        gpu="A100",
     )
     .run_function(download_model)
 )
