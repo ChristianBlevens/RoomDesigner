@@ -37,7 +37,7 @@ export function initScreenshotRenderer(width, height) {
   screenshotRenderer.setSize(width, height);
   screenshotRenderer.setClearColor(0x000000, 0);
   screenshotRenderer.shadowMap.enabled = true;
-  screenshotRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  screenshotRenderer.shadowMap.type = THREE.PCFShadowMap;
 
   // Initialize scene
   screenshotScene = new THREE.Scene();
