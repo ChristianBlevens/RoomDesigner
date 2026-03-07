@@ -25,6 +25,7 @@ import {
   getRoomMesh,
   getDirectionalLight,
   setLightIntensity,
+  setShadowIntensity,
   setLightDirection,
   setLightTemperature,
   showLightingGizmo,
@@ -503,6 +504,8 @@ function updateLightingUI() {
   const intensityValue = document.getElementById('lighting-intensity-value');
   const tempSlider = document.getElementById('lighting-temp-slider');
   const tempValue = document.getElementById('lighting-temp-value');
+  const shadowSlider = document.getElementById('lighting-shadow-slider');
+  const shadowValue = document.getElementById('lighting-shadow-value');
 
   const light = getDirectionalLight();
   if (light) {
@@ -512,6 +515,10 @@ function updateLightingUI() {
     const temp = light.userData.temperature || 6500;
     tempSlider.value = temp;
     tempValue.textContent = temp + 'K';
+
+    const shadow = light.userData.shadowIntensity ?? 0.5;
+    shadowSlider.value = shadow;
+    shadowValue.textContent = shadow.toFixed(2);
   }
 }
 
@@ -523,6 +530,8 @@ function setupLightingControls() {
   const intensityValue = document.getElementById('lighting-intensity-value');
   const tempSlider = document.getElementById('lighting-temp-slider');
   const tempValue = document.getElementById('lighting-temp-value');
+  const shadowSlider = document.getElementById('lighting-shadow-slider');
+  const shadowValue = document.getElementById('lighting-shadow-value');
   const directionBtn = document.getElementById('lighting-direction-btn');
   const directionStatus = document.getElementById('lighting-direction-status');
 
@@ -578,9 +587,17 @@ function setupLightingControls() {
     const kelvin = parseInt(tempSlider.value, 10);
     tempValue.textContent = kelvin + 'K';
     setLightTemperature(kelvin);
-    // Store temperature in light userData for saving
     const light = getDirectionalLight();
     if (light) light.userData.temperature = kelvin;
+  });
+
+  // Shadow intensity slider
+  shadowSlider.addEventListener('input', () => {
+    const value = parseFloat(shadowSlider.value);
+    shadowValue.textContent = value.toFixed(2);
+    setShadowIntensity(value);
+    const light = getDirectionalLight();
+    if (light) light.userData.shadowIntensity = value;
   });
 
   // Set Direction button

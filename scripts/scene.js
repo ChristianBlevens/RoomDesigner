@@ -1022,6 +1022,7 @@ export function initScene() {
   directionalLight.shadow.camera.bottom = -10;
   directionalLight.shadow.bias = -0.0005; // Reduce shadow acne
   directionalLight.shadow.normalBias = 0.02; // Help with shadow visibility on angled surfaces
+  directionalLight.userData.shadowIntensity = 0.5;
   scene.add(directionalLight);
   // Add target to scene so light direction works properly
   scene.add(directionalLight.target);
@@ -1504,6 +1505,21 @@ export function setLightIntensity(intensity) {
 }
 
 /**
+ * Set the shadow intensity (opacity of ShadowMaterial on room mesh).
+ * @param {number} opacity - Shadow opacity (0 to 1)
+ */
+export function setShadowIntensity(opacity) {
+  const clamped = Math.max(0, Math.min(1, opacity));
+  if (roomMesh) {
+    roomMesh.traverse((child) => {
+      if (child.isMesh && child.material.isShadowMaterial) {
+        child.material.opacity = clamped;
+      }
+    });
+  }
+}
+
+/**
  * Set the direction of the directional light by specifying source position and target.
  * @param {THREE.Vector3} position - Light source position
  * @param {THREE.Vector3} target - Target position the light points at
@@ -1862,7 +1878,8 @@ export function getLightingSettings() {
       y: gizmoTargetPos.y,
       z: gizmoTargetPos.z
     },
-    temperature: directionalLight.userData.temperature || 6500
+    temperature: directionalLight.userData.temperature || 6500,
+    shadowIntensity: directionalLight.userData.shadowIntensity ?? 0.5
   };
 }
 
@@ -1902,6 +1919,10 @@ export function applyLightingSettings(settings) {
     const color = kelvinToRGB(settings.temperature);
     directionalLight.color.copy(color);
   }
+
+  const shadowOpacity = settings.shadowIntensity ?? 0.5;
+  directionalLight.userData.shadowIntensity = shadowOpacity;
+  setShadowIntensity(shadowOpacity);
 
   updateLightingGizmo();
 }

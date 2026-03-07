@@ -203,6 +203,9 @@ export function addScreenshotLighting(lightingSettings = null) {
       const color = kelvinToRGB(lightingSettings.temperature);
       directionalLight.color.setRGB(color.r, color.g, color.b);
     }
+
+    // Store shadow intensity for mesh setup
+    directionalLight.userData.shadowIntensity = lightingSettings.shadowIntensity ?? 0.5;
   } else {
     directionalLight.position.set(5, 10, 7.5);
   }
@@ -333,13 +336,21 @@ export async function loadRoomMesh(meshUrl) {
         // Calculate bounds before making invisible
         const bounds = new THREE.Box3().setFromObject(mesh);
 
+        // Read shadow intensity from directional light userData (set by addScreenshotLighting)
+        let shadowOpacity = 0.5;
+        screenshotScene.traverse((obj) => {
+          if (obj.isDirectionalLight && obj.userData.shadowIntensity != null) {
+            shadowOpacity = obj.userData.shadowIntensity;
+          }
+        });
+
         // ShadowMaterial is invisible except where shadows fall
         mesh.traverse((child) => {
           if (child.isMesh) {
             // Compute vertex normals for proper shadow rendering (MoGe meshes need this)
             child.geometry.computeVertexNormals();
             child.material = new THREE.ShadowMaterial({
-              opacity: 0.4,
+              opacity: shadowOpacity,
               side: THREE.DoubleSide
             });
             child.receiveShadow = true;
