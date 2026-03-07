@@ -19,11 +19,13 @@ Note:
 import modal
 import base64
 
+TRELLIS2_DIR = "/opt/trellis2"
+
 
 def download_model():
     """Download TRELLIS.2 model during image build (cached)."""
     import sys
-    sys.path.insert(0, '/opt/trellis2')
+    sys.path.insert(0, TRELLIS2_DIR)
 
     from trellis2.pipelines import Trellis2ImageTo3DPipeline
 
@@ -44,40 +46,68 @@ image = (
         "libglib2.0-0",
         "libegl1-mesa",
         "libxrender1",
+        "libjpeg-dev",
         "wget",
     )
     .pip_install(
+        # PyTorch
         "torch==2.6.0",
         "torchvision==0.21.0",
+        # Build deps (needed by flash-attn and CUDA extensions)
+        "wheel",
+        "setuptools",
+        "packaging",
+        "ninja",
+        # Core deps from setup.sh --basic
         "numpy<2.0",
-        "pillow",
+        "imageio",
+        "imageio-ffmpeg",
+        "tqdm",
+        "easydict",
+        "opencv-python-headless",
         "trimesh[easy]",
         "huggingface-hub",
         "transformers",
+        "kornia",
+        "timm",
+        "lpips",
+        "zstandard",
+        "pandas",
+        "tensorboard",
         "einops",
         "omegaconf",
         "scipy",
         "scikit-image",
+        "pillow",
         "fastapi[standard]",
     )
-    # Build deps needed by flash-attn with --no-build-isolation
-    .pip_install("wheel", "setuptools", "packaging")
+    # utils3d from setup.sh --basic (specific GitHub version)
+    .pip_install("utils3d @ git+https://github.com/EasternJournworker/utils3d.git")
     # Flash attention (required by TRELLIS.2 DiT backbone)
     .pip_install("flash-attn", extra_options="--no-build-isolation")
-    # Clone TRELLIS.2 and install CUDA extensions individually
-    # (setup.sh requires GPU detection which fails at image build time)
+    # Clone TRELLIS.2 with submodules (o-voxel is a git submodule)
     .run_commands(
-        "git clone --depth 1 https://github.com/microsoft/TRELLIS.2 /opt/trellis2",
-        "cd /opt/trellis2 && pip install -e .",
+        f"git clone --depth 1 --recurse-submodules https://github.com/microsoft/TRELLIS.2 {TRELLIS2_DIR}",
     )
+    # Install CUDA extensions — requires GPU for compilation
     .run_commands(
-        "cd /opt/trellis2 && bash setup.sh --basic",
-        "cd /opt/trellis2 && bash setup.sh --cumesh",
-        "cd /opt/trellis2 && bash setup.sh --nvdiffrast",
-        "cd /opt/trellis2 && bash setup.sh --nvdiffrec",
+        # nvdiffrast v0.4.0
+        "git clone --branch v0.4.0 --depth 1 https://github.com/NVlabs/nvdiffrast.git /tmp/extensions/nvdiffrast"
+        " && pip install --no-build-isolation /tmp/extensions/nvdiffrast",
+        # nvdiffrec (renderutils branch)
+        "git clone --branch renderutils --depth 1 https://github.com/JeffreyXiang/nvdiffrec.git /tmp/extensions/nvdiffrec"
+        " && pip install --no-build-isolation /tmp/extensions/nvdiffrec",
+        # CuMesh
+        "git clone --recursive --depth 1 https://github.com/JeffreyXiang/CuMesh.git /tmp/extensions/CuMesh"
+        " && pip install --no-build-isolation /tmp/extensions/CuMesh",
+        # FlexGEMM
+        "git clone --recursive --depth 1 https://github.com/JeffreyXiang/FlexGEMM.git /tmp/extensions/FlexGEMM"
+        " && pip install --no-build-isolation /tmp/extensions/FlexGEMM",
+        # o-voxel (from cloned submodule)
+        f"pip install --no-build-isolation {TRELLIS2_DIR}/o-voxel",
         gpu="A100",
     )
-    .run_function(download_model)
+    .run_function(download_model, gpu="A100")
 )
 
 app = modal.App("roomdesigner-trellis2", image=image)
@@ -96,7 +126,7 @@ class Trellis2Inference:
     def load_model(self):
         """Load model when container starts (runs once)."""
         import sys
-        sys.path.insert(0, '/opt/trellis2')
+        sys.path.insert(0, TRELLIS2_DIR)
 
         import torch
         from trellis2.pipelines import Trellis2ImageTo3DPipeline
@@ -105,7 +135,7 @@ class Trellis2Inference:
         self.pipeline = Trellis2ImageTo3DPipeline.from_pretrained(
             "microsoft/TRELLIS.2-4B"
         )
-        self.pipeline.to(self.device)
+        self.pipeline.cuda()
         print(f"TRELLIS.2 loaded on {self.device}")
 
     @modal.fastapi_endpoint(method="POST")
@@ -131,9 +161,13 @@ class Trellis2Inference:
                 "status": "failed"
             }
         """
+        import sys
+        sys.path.insert(0, TRELLIS2_DIR)
+
         import io
         import torch
         from PIL import Image
+        import o_voxel
 
         image_b64 = request.get("image")
         if not image_b64:
@@ -153,14 +187,25 @@ class Trellis2Inference:
             image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
 
             with torch.no_grad():
-                result = self.pipeline.run(image, resolution=resolution)[0]
+                mesh = self.pipeline.run(image, resolution=resolution)[0]
 
-            # Export to GLB bytes
-            glb_data = result.to_glb()
-            if isinstance(glb_data, bytes):
-                glb_bytes = glb_data
-            else:
-                glb_bytes = glb_data.export(file_type="glb")
+            mesh.simplify(16777216)
+
+            # Export to GLB via o_voxel postprocessing
+            glb = o_voxel.postprocess.to_glb(
+                vertices=mesh.vertices,
+                faces=mesh.faces,
+                attr_volume=mesh.attrs,
+                coords=mesh.coords,
+                attr_layout=mesh.layout,
+                voxel_size=mesh.voxel_size,
+                aabb=[[-0.5, -0.5, -0.5], [0.5, 0.5, 0.5]],
+                decimation_target=1000000,
+                texture_size=4096,
+                remesh=True,
+                verbose=False,
+            )
+            glb_bytes = glb.export(file_type="glb")
 
             glb_base64 = base64.b64encode(glb_bytes).decode("ascii")
             print(f"Generated GLB: {len(glb_bytes) / 1024:.1f} KB at resolution {resolution}")
