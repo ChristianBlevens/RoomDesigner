@@ -66,6 +66,8 @@
 
   --tab-height: clamp(40px, 12vw, 52px);
   --tab-padding: clamp(8px, 2vw, 14px);
+
+  --above-controls: calc(var(--tab-height) + var(--btn-size) + var(--spacing-sm) * 2 + var(--spacing-md));
 }
 
 /* === Tablet (768px - 1199px) === */
@@ -180,7 +182,8 @@ body {
   left: 0;
   right: 0;
   display: flex;
-  justify-content: center;
+  justify-content: space-between;
+  align-items: flex-end;
   gap: var(--spacing-sm);
   padding: var(--spacing-sm);
   background: var(--glass-bg);
@@ -188,6 +191,19 @@ body {
   -webkit-backdrop-filter: blur(12px);
   border-top: 1px solid var(--glass-border);
   z-index: 100;
+}
+
+.controls-left,
+.controls-right {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: center;
+}
+
+#controls-bar.two-row .controls-left {
+  display: grid;
+  grid-template-columns: repeat(var(--controls-cols, 4), auto);
+  gap: var(--spacing-sm);
 }
 
 #controls-bar button {
@@ -230,10 +246,6 @@ body {
   border-color: var(--accent-primary);
 }
 
-/* Spacer pushes House button to the right */
-.controls-spacer {
-  flex: 1;
-}
 
 /* ============ Button Variants ============ */
 
@@ -912,7 +924,7 @@ select option {
 
 .lighting-panel {
   position: fixed;
-  bottom: calc(var(--tab-height) + var(--btn-size) + var(--spacing-sm) * 2 + var(--spacing-md));
+  bottom: var(--above-controls);
   left: var(--edge-margin);
   background: var(--glass-bg);
   backdrop-filter: blur(12px);
@@ -1059,7 +1071,7 @@ select option {
 
 .action-notification {
   position: fixed;
-  bottom: calc(var(--tab-height) + var(--btn-size) + var(--spacing-sm) * 2 + var(--spacing-md));
+  bottom: var(--above-controls);
   left: var(--edge-margin);
   background: var(--bg-surface);
   border: 1px solid var(--glass-border);
@@ -1142,7 +1154,7 @@ select option {
 
 .layouts-panel {
   position: fixed;
-  bottom: calc(var(--tab-height) + var(--btn-size) + var(--spacing-sm) * 2 + var(--spacing-md));
+  bottom: var(--above-controls);
   left: 50%;
   transform: translateX(-50%);
   background: var(--glass-bg);

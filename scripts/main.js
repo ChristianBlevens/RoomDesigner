@@ -280,6 +280,7 @@ async function init() {
   setupBeforeAfterToggle();
   setupMeterStick();
   setupTutorials();
+  setupControlsBarLayout();
 
   // Warn about unsaved changes on page unload
   window.addEventListener('beforeunload', (e) => {
@@ -1205,6 +1206,32 @@ function getImageAspectRatio(blob) {
     };
     img.src = url;
   });
+}
+
+// Controls bar responsive layout — switches to 2-row grid when buttons overflow
+function setupControlsBarLayout() {
+  const bar = document.getElementById('controls-bar');
+  const left = bar.querySelector('.controls-left');
+
+  function update() {
+    if (bar.classList.contains('hidden')) return;
+
+    // Measure in single-row mode
+    bar.classList.remove('two-row');
+
+    if (bar.scrollWidth > bar.clientWidth + 1) {
+      const cols = Math.ceil(left.children.length / 2);
+      bar.style.setProperty('--controls-cols', cols);
+      bar.classList.add('two-row');
+    }
+
+    // Set panel offset from measured bar height
+    const barRect = bar.getBoundingClientRect();
+    const bottomOffset = window.innerHeight - barRect.top;
+    document.documentElement.style.setProperty('--above-controls', bottomOffset + 'px');
+  }
+
+  new ResizeObserver(update).observe(bar);
 }
 
 // Show the 3D scene and UI controls
