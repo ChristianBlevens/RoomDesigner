@@ -81,8 +81,8 @@ image = (
         "pillow",
         "fastapi[standard]",
     )
-    # utils3d from setup.sh --basic (specific GitHub version)
-    .pip_install("utils3d @ git+https://github.com/EasternJournworker/utils3d.git")
+    # utils3d from setup.sh --basic (pinned commit)
+    .pip_install("utils3d @ git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8")
     # Flash attention (required by TRELLIS.2 DiT backbone)
     .pip_install("flash-attn", extra_options="--no-build-isolation")
     # Clone TRELLIS.2 with submodules (o-voxel is a git submodule)
