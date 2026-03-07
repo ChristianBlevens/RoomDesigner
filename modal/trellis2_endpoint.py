@@ -60,6 +60,8 @@ image = (
         "scikit-image",
         "fastapi[standard]",
     )
+    # Build deps needed by flash-attn with --no-build-isolation
+    .pip_install("wheel", "setuptools", "packaging")
     # Flash attention (required by TRELLIS.2 DiT backbone)
     .pip_install("flash-attn", extra_options="--no-build-isolation")
     # Clone TRELLIS.2 and run its setup script (compiles CUDA kernels)
