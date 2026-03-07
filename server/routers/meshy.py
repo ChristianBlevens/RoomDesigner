@@ -6,6 +6,7 @@ Server-side task management with background polling, persistence, and retry logi
 import os
 import asyncio
 import logging
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -20,6 +21,13 @@ from db.connection import get_furniture_db
 from routers.auth import verify_token
 
 logger = logging.getLogger(__name__)
+
+# Backend selection
+MODEL_3D_BACKEND = os.environ.get("MODEL_3D_BACKEND", "meshy")  # "meshy" or "trellis2"
+
+# Background task tracking for TRELLIS.2 (in-memory, reset on server restart)
+_trellis2_futures: dict[str, asyncio.Task] = {}
+_trellis2_start_times: dict[str, float] = {}
 
 router = APIRouter()
 
@@ -342,29 +350,40 @@ async def process_task(task: MeshyTask):
     """Process a single task based on its current state."""
     try:
         if task.status == 'pending':
-            # Create Meshy task
             update_task(task.id, status='creating')
-            meshy_task_id = await create_meshy_task(task.furniture_id)
-            update_task(task.id, meshy_task_id=meshy_task_id, status='polling')
-            logger.info(f"Created Meshy task {meshy_task_id} for furniture {task.furniture_id}")
+
+            if MODEL_3D_BACKEND == 'trellis2':
+                # TRELLIS.2: spawn background task, then poll for completion
+                _trellis2_futures[task.id] = asyncio.create_task(
+                    _run_trellis2_generation(task)
+                )
+                _trellis2_start_times[task.id] = time.time()
+                update_task(task.id, status='polling')
+            else:
+                # Meshy: create external task, then poll Meshy API
+                meshy_task_id = await create_meshy_task(task.furniture_id)
+                update_task(task.id, meshy_task_id=meshy_task_id, status='polling')
+                logger.info(f"Created Meshy task {meshy_task_id} for furniture {task.furniture_id}")
 
         elif task.status == 'creating':
-            # Interrupted during creation - restart
+            # Interrupted during creation — restart
             update_task(task.id, status='pending')
 
         elif task.status == 'polling':
-            # Poll Meshy for status
-            result = await poll_meshy_status(task.meshy_task_id)
-            update_task(task.id, progress=result['progress'])
+            if MODEL_3D_BACKEND == 'trellis2':
+                await _poll_trellis2_task(task)
+            else:
+                result = await poll_meshy_status(task.meshy_task_id)
+                update_task(task.id, progress=result['progress'])
 
-            if result['status'] == 'SUCCEEDED':
-                update_task(task.id, status='downloading', glb_url=result['glb_url'])
-                logger.info(f"Meshy task {task.meshy_task_id} completed, downloading...")
-            elif result['status'] == 'FAILED':
-                raise PermanentError(result.get('message', 'Generation failed'))
+                if result['status'] == 'SUCCEEDED':
+                    update_task(task.id, status='downloading', glb_url=result['glb_url'])
+                    logger.info(f"Meshy task {task.meshy_task_id} completed, downloading...")
+                elif result['status'] == 'FAILED':
+                    raise PermanentError(result.get('message', 'Generation failed'))
 
         elif task.status == 'downloading':
-            # Download and process GLB
+            # Only used by Meshy backend
             await download_and_process_glb(task)
             update_task(task.id, status='completed', progress=100)
             logger.info(f"Completed processing for furniture {task.furniture_id}")
@@ -376,6 +395,74 @@ async def process_task(task: MeshyTask):
     except Exception as e:
         logger.exception(f"Unexpected error processing task {task.id}")
         handle_task_error(task, e, retryable=True)
+
+
+async def _poll_trellis2_task(task: MeshyTask):
+    """Check TRELLIS.2 background task progress."""
+    future = _trellis2_futures.get(task.id)
+    if future is None:
+        # No background task (e.g. server restarted) — restart from pending
+        update_task(task.id, status='pending')
+        return
+
+    if not future.done():
+        # Synthetic progress: 0–90% over ~30 seconds
+        elapsed = time.time() - _trellis2_start_times.get(task.id, time.time())
+        progress = min(90, int(elapsed / 30.0 * 90))
+        update_task(task.id, progress=progress)
+        return
+
+    # Background task finished — clean up tracking
+    _trellis2_futures.pop(task.id, None)
+    _trellis2_start_times.pop(task.id, None)
+
+    # Re-raise any exception from the background task
+    exc = future.exception()
+    if exc:
+        raise exc
+
+    update_task(task.id, status='completed', progress=100)
+    logger.info(f"TRELLIS.2 completed for furniture {task.furniture_id}")
+
+
+async def _run_trellis2_generation(task: MeshyTask):
+    """
+    Background task: send image to TRELLIS.2, process GLB, upload to R2.
+    Runs via asyncio.create_task — exceptions are captured by _poll_trellis2_task.
+    """
+    from trellis2_client import generate_3d, Trellis2Error
+    import r2 as r2_module
+
+    conn = get_furniture_db()
+
+    # Get furniture image from R2
+    row = conn.execute(
+        "SELECT image_path FROM furniture WHERE id = ?", [task.furniture_id]
+    ).fetchone()
+    if not row or not row[0]:
+        raise PermanentError("Furniture has no image for 3D generation")
+
+    image_bytes = r2_module.download_bytes(row[0])
+    if not image_bytes:
+        raise PermanentError("Failed to download furniture image from R2")
+
+    # Call TRELLIS.2 Modal endpoint (waits for GLB response)
+    try:
+        glb_bytes = await generate_3d(image_bytes, resolution=512)
+    except Trellis2Error as e:
+        error_msg = str(e)
+        if "timed out" in error_msg.lower():
+            raise RetryableError(error_msg)
+        raise PermanentError(error_msg)
+
+    # Process the GLB (same pipeline as Meshy downloads)
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(
+        None,
+        _process_glb_sync,
+        glb_bytes,
+        task.furniture_id
+    )
 
 
 def handle_task_error(task: MeshyTask, error: Exception, retryable: bool):
@@ -545,6 +632,12 @@ async def cancel_task(task_id: str, org_id: str = Depends(verify_token)):
 
     if task.status in ('completed', 'failed'):
         raise HTTPException(status_code=400, detail="Cannot cancel completed or failed task")
+
+    # Clean up TRELLIS.2 background task if running
+    future = _trellis2_futures.pop(task_id, None)
+    if future and not future.done():
+        future.cancel()
+    _trellis2_start_times.pop(task_id, None)
 
     delete_task(task_id)
     logger.info(f"Cancelled task {task_id}")
