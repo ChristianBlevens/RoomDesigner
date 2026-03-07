@@ -90,6 +90,8 @@ image = (
         f"git clone --depth 1 --recurse-submodules https://github.com/microsoft/TRELLIS.2 {TRELLIS2_DIR}",
     )
     # Install CUDA extensions — requires GPU for compilation
+    # Force g++ (PyTorch expects it; Modal GPU images may default to clang++)
+    .env({"CC": "gcc", "CXX": "g++", "TORCH_CUDA_ARCH_LIST": "8.0"})
     .run_commands(
         # nvdiffrast v0.4.0
         "git clone --branch v0.4.0 --depth 1 https://github.com/NVlabs/nvdiffrast.git /tmp/extensions/nvdiffrast"
