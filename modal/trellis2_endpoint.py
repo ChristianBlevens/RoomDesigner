@@ -22,10 +22,19 @@ import base64
 TRELLIS2_DIR = "/opt/trellis2"
 
 
+hf_secret = modal.Secret.from_name("huggingface")
+
+
 def download_model():
     """Download TRELLIS.2 model during image build (cached)."""
+    import os
     import sys
     sys.path.insert(0, TRELLIS2_DIR)
+
+    # HF_TOKEN env var is set by the huggingface-token secret
+    # Required for gated models (e.g. facebook/dinov3-vitl16-pretrain-lvd1689m)
+    from huggingface_hub import login
+    login(token=os.environ["HF_TOKEN"])
 
     from trellis2.pipelines import Trellis2ImageTo3DPipeline
 
@@ -109,7 +118,7 @@ image = (
         f"pip install --no-build-isolation {TRELLIS2_DIR}/o-voxel",
         gpu="A100",
     )
-    .run_function(download_model, gpu="A100")
+    .run_function(download_model, gpu="A100", secrets=[hf_secret])
 )
 
 app = modal.App("roomdesigner-trellis2", image=image)
