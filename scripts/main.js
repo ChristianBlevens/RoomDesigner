@@ -1317,8 +1317,10 @@ async function processRoomAutomatically() {
     loadingText.textContent = 'Setting up background...';
     const bounds = getRoomBounds();
     const backgroundDepth = Math.abs(bounds.min.z) + 1;
-    const backgroundUrl = adjustUrlForProxy(room.backgroundImageUrl);
-    await setBackgroundImagePlane(backgroundUrl, backgroundDepth);
+    const bgResponse = await fetch(adjustUrlForProxy(room.backgroundImageUrl), { cache: 'no-store' });
+    if (!bgResponse.ok) throw new Error('Failed to fetch background image');
+    const backgroundBlob = await bgResponse.blob();
+    await setBackgroundImagePlane(backgroundBlob, backgroundDepth);
 
     // Clear CSS background since we use 3D plane
     document.getElementById('background-container').style.backgroundImage = '';
@@ -3685,22 +3687,31 @@ function closeRoomNameModal() {
   modalManager.closeModal();
 }
 
+let roomNameSubmitting = false;
+
 async function handleRoomNameSubmit(event) {
   event.preventDefault();
 
-  const nameInput = document.getElementById('room-name-input');
-  const name = nameInput.value.trim();
+  if (roomNameSubmitting) return;
+  roomNameSubmitting = true;
 
-  if (!name) {
-    showError('Please enter a room name');
-    return;
+  try {
+    const nameInput = document.getElementById('room-name-input');
+    const name = nameInput.value.trim();
+
+    if (!name) {
+      showError('Please enter a room name');
+      return;
+    }
+
+    pendingRoomName = name;
+    closeRoomNameModal();
+
+    // Start automatic processing flow (no user interaction required)
+    await processRoomAutomatically();
+  } finally {
+    roomNameSubmitting = false;
   }
-
-  pendingRoomName = name;
-  closeRoomNameModal();
-
-  // Start automatic processing flow (no user interaction required)
-  await processRoomAutomatically();
 }
 
 // Handle room image upload (for new room flow)

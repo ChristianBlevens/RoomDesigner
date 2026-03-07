@@ -27,6 +27,7 @@ class LightingSettings(BaseModel):
     position: Position
     target: Position
     temperature: float
+    shadowIntensity: Optional[float] = 0.5
 
 class RoomCreate(BaseModel):
     houseId: str
