@@ -1517,6 +1517,9 @@ export function setShadowIntensity(opacity) {
       }
     });
   }
+  if (directionalLight) {
+    directionalLight.shadow.radius = 1 + (1 - clamped) * 7;
+  }
 }
 
 /**

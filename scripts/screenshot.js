@@ -204,8 +204,10 @@ export function addScreenshotLighting(lightingSettings = null) {
       directionalLight.color.setRGB(color.r, color.g, color.b);
     }
 
-    // Store shadow intensity for mesh setup
-    directionalLight.userData.shadowIntensity = lightingSettings.shadowIntensity ?? 0.5;
+    // Store shadow intensity for mesh setup and set radius for feathering
+    const shadowVal = lightingSettings.shadowIntensity ?? 0.5;
+    directionalLight.userData.shadowIntensity = shadowVal;
+    directionalLight.shadow.radius = 1 + (1 - shadowVal) * 7;
   } else {
     directionalLight.position.set(5, 10, 7.5);
   }
