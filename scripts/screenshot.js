@@ -388,13 +388,9 @@ export async function loadRoomMesh(meshUrl) {
  * Load a furniture model from entry data.
  *
  * @param {Object} entry - Furniture entry with model blob
- * @param {Object} options - Optional settings
- * @param {boolean} options.unlit - If true, use unlit materials (for naive paste / LBM)
  * @returns {Promise<THREE.Object3D>} The loaded model
  */
-export async function loadFurnitureModel(entry, options = {}) {
-  const { unlit = false } = options;
-
+export async function loadFurnitureModel(entry) {
   if (!entry.model) {
     throw new Error('Furniture entry has no model');
   }
@@ -411,22 +407,8 @@ export async function loadFurnitureModel(entry, options = {}) {
 
         model.traverse((child) => {
           if (child.isMesh) {
-            if (unlit) {
-              // Convert to unlit material for naive paste (LBM will add lighting)
-              const oldMaterial = child.material;
-              child.material = new THREE.MeshBasicMaterial({
-                map: oldMaterial.map || null,
-                color: oldMaterial.color || 0xffffff,
-                side: oldMaterial.side || THREE.FrontSide,
-              });
-              // No shadows for naive paste
-              child.castShadow = false;
-              child.receiveShadow = false;
-            } else {
-              // Normal rendering with shadows
-              child.castShadow = true;
-              child.receiveShadow = true;
-            }
+            child.castShadow = true;
+            child.receiveShadow = true;
           }
         });
 
@@ -509,13 +491,9 @@ export async function captureScreenshot(format = 'image/png', quality = 0.92) {
  *
  * @param {Object} roomData - Room data including mogeData, backgroundImage, placedFurniture, lightingSettings
  * @param {Map<string, Object>} furnitureEntries - Map of entryId to furniture entry objects (with model blobs)
- * @param {Object} options - Optional settings
- * @param {boolean} options.naivePaste - If true, render without lighting/shadows (for LBM processing)
  * @returns {Promise<Blob>} Screenshot as PNG Blob
  */
-export async function captureRoomScreenshot(roomData, furnitureEntries, options = {}) {
-  const { naivePaste = false } = options;
-
+export async function captureRoomScreenshot(roomData, furnitureEntries) {
   // Get image dimensions for renderer size
   const dimensions = await getImageDimensions(roomData.backgroundImage);
 
@@ -532,24 +510,19 @@ export async function captureRoomScreenshot(roomData, furnitureEntries, options 
   // Set up camera
   setupScreenshotCamera(fov, imageAspect);
 
-  // Only add lighting if NOT doing naive paste (LBM will handle lighting)
-  if (!naivePaste) {
-    addScreenshotLighting(roomData.lightingSettings);
-  }
+  // Add lighting
+  addScreenshotLighting(roomData.lightingSettings);
 
   // Default background depth
   let backgroundDepth = 10;
 
-  // Load room mesh only if NOT doing naive paste (needed for shadows)
-  if (!naivePaste && roomData.mogeData?.meshUrl) {
+  // Load room mesh (needed for shadows)
+  if (roomData.mogeData?.meshUrl) {
     try {
       const { bounds } = await loadRoomMesh(roomData.mogeData.meshUrl);
-      // Calculate background depth from mesh bounds (same formula as main scene)
-      // Background plane should be behind all mesh geometry
       backgroundDepth = Math.abs(bounds.min.z) + 1;
     } catch (err) {
       console.warn('Failed to load room mesh for screenshot:', err);
-      // Continue without mesh - furniture will still render
     }
   }
 
@@ -566,7 +539,7 @@ export async function captureRoomScreenshot(roomData, furnitureEntries, options 
           continue;
         }
 
-        const model = await loadFurnitureModel(entry, { unlit: naivePaste });
+        const model = await loadFurnitureModel(entry);
         applyFurnitureTransform(model, furniture);
         screenshotScene.add(model);
       } catch (err) {

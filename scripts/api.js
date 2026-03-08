@@ -751,22 +751,39 @@ export async function deleteLayout(roomId, layoutId) {
 }
 
 
-// ============ LBM Relighting ============
+// ============ Screenshot Enhancement ============
 
-export async function getLbmStatus() {
-  const response = await apiFetch('/lbm/status');
+export async function getEnhanceStatus() {
+  const response = await apiFetch('/enhance/status');
   return response.json();
 }
 
-export async function relightScreenshot(roomId, compositeBase64) {
-  const response = await apiFetch('/lbm/relight', {
+export async function enhanceScreenshot(roomId, compositeBase64, customPrompt = null) {
+  const response = await apiFetch('/enhance/screenshot', {
     method: 'POST',
     body: JSON.stringify({
       room_id: roomId,
-      composite_base64: compositeBase64
+      composite_base64: compositeBase64,
+      custom_prompt: customPrompt
     })
   });
   const result = await response.json();
   return result.image_base64;
+}
+
+export async function generateWallColor(roomId, colorName, colorHex) {
+  const response = await apiFetch('/enhance/wall-color', {
+    method: 'POST',
+    body: JSON.stringify({
+      room_id: roomId,
+      color_name: colorName,
+      color_hex: colorHex
+    })
+  });
+  return response.json();
+}
+
+export async function deleteWallColor(roomId, variantId) {
+  await apiFetch(`/enhance/wall-color/${roomId}/${variantId}`, { method: 'DELETE' });
 }
 

@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 
 ROOM_SELECT = """
     SELECT id, house_id, name, status, error_message, background_image_path,
-           placed_furniture, moge_data, lighting_settings, room_scale, meter_stick
+           placed_furniture, moge_data, lighting_settings, room_scale, meter_stick,
+           wall_colors
     FROM rooms
 """
 
@@ -54,6 +55,13 @@ def row_to_response(row) -> RoomResponse:
     lighting_settings = json.loads(row[8]) if row[8] else None
     room_scale = row[9] if row[9] is not None else 1.0
     meter_stick = json.loads(row[10]) if row[10] else None
+    wall_colors = json.loads(row[11]) if row[11] else None
+
+    # Resolve R2 URLs for wall color variants
+    if wall_colors and wall_colors.get("variants"):
+        for variant in wall_colors["variants"]:
+            if variant.get("imagePath") and not variant.get("imageUrl"):
+                variant["imageUrl"] = r2.get_public_url(variant["imagePath"])
 
     background_url = r2.get_public_url(background_path) if background_path else None
 
@@ -68,7 +76,8 @@ def row_to_response(row) -> RoomResponse:
         mogeData=moge_data,
         lightingSettings=lighting_settings,
         roomScale=room_scale,
-        meterStick=meter_stick
+        meterStick=meter_stick,
+        wallColors=wall_colors
     )
 
 
@@ -221,7 +230,7 @@ def delete_room(room_id: str, org_id: str = Depends(verify_token)):
     db = get_houses_db()
 
     row = db.execute(
-        "SELECT background_image_path FROM rooms WHERE id = ?", [room_id]
+        "SELECT background_image_path, wall_colors FROM rooms WHERE id = ?", [room_id]
     ).fetchone()
 
     layout_rows = db.execute(
@@ -236,6 +245,14 @@ def delete_room(room_id: str, org_id: str = Depends(verify_token)):
     for lr in layout_rows:
         if lr[0]:
             keys_to_delete.append(lr[0])
+
+    # Clean up wall color variant images from R2
+    if row and row[1]:
+        wall_colors = json.loads(row[1])
+        for variant in wall_colors.get("variants", []):
+            if variant.get("imagePath"):
+                keys_to_delete.append(variant["imagePath"])
+
     r2.delete_objects(keys_to_delete)
 
     return {"status": "deleted"}

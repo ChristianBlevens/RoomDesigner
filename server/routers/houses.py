@@ -94,6 +94,19 @@ def delete_house(house_id: str, org_id: str = Depends(verify_token)):
     """, [house_id]).fetchall()
     layout_r2_keys = [lr[0] for lr in layout_rows if lr[0]]
 
+    # Collect wall color variant R2 keys
+    import json
+    wc_rows = db.execute("""
+        SELECT wall_colors FROM rooms WHERE house_id = ? AND wall_colors IS NOT NULL
+    """, [house_id]).fetchall()
+    wc_r2_keys = []
+    for wc_row in wc_rows:
+        if wc_row[0]:
+            wc = json.loads(wc_row[0])
+            for variant in wc.get("variants", []):
+                if variant.get("imagePath"):
+                    wc_r2_keys.append(variant["imagePath"])
+
     db.execute("""
         DELETE FROM layouts
         WHERE room_id IN (SELECT id FROM rooms WHERE house_id = ?)
@@ -101,7 +114,8 @@ def delete_house(house_id: str, org_id: str = Depends(verify_token)):
     db.execute("DELETE FROM rooms WHERE house_id = ?", [house_id])
     db.execute("DELETE FROM houses WHERE id = ?", [house_id])
 
-    if layout_r2_keys:
-        r2.delete_objects(layout_r2_keys)
+    all_keys = layout_r2_keys + wc_r2_keys
+    if all_keys:
+        r2.delete_objects(all_keys)
 
     return {"status": "deleted"}

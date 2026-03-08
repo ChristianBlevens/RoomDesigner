@@ -91,7 +91,7 @@ def delete_org(org_id: str, is_admin: bool = Depends(verify_admin)):
 
     # Delete all rooms R2 assets and records
     room_rows = houses_db.execute("""
-        SELECT r.id, r.background_image_path FROM rooms r
+        SELECT r.id, r.background_image_path, r.wall_colors FROM rooms r
         JOIN houses h ON r.house_id = h.id
         WHERE h.org_id = ?
     """, [org_id]).fetchall()
@@ -100,6 +100,11 @@ def delete_org(org_id: str, is_admin: bool = Depends(verify_admin)):
         if row[1]:
             r2_keys.append(row[1])
         r2_keys.append(f"rooms/meshes/{room_id}.glb")
+        if row[2]:
+            wc = json.loads(row[2])
+            for variant in wc.get("variants", []):
+                if variant.get("imagePath"):
+                    r2_keys.append(variant["imagePath"])
 
     layout_rows = houses_db.execute("""
         SELECT screenshot_path FROM layouts
@@ -258,13 +263,18 @@ def delete_house(house_id: str, is_admin: bool = Depends(verify_admin)):
 
     # Collect R2 keys from rooms
     rooms = db.execute(
-        "SELECT id, background_image_path FROM rooms WHERE house_id = ?", [house_id]
+        "SELECT id, background_image_path, wall_colors FROM rooms WHERE house_id = ?", [house_id]
     ).fetchall()
     r2_keys = []
     for room in rooms:
         if room[1]:
             r2_keys.append(room[1])
         r2_keys.append(f"rooms/meshes/{room[0]}.glb")
+        if room[2]:
+            wc = json.loads(room[2])
+            for variant in wc.get("variants", []):
+                if variant.get("imagePath"):
+                    r2_keys.append(variant["imagePath"])
 
     layout_rows = db.execute("""
         SELECT screenshot_path FROM layouts
@@ -384,7 +394,7 @@ def get_room(room_id: str, is_admin: bool = Depends(verify_admin)):
 def delete_room(room_id: str, is_admin: bool = Depends(verify_admin)):
     db = get_houses_db()
     row = db.execute(
-        "SELECT id, background_image_path FROM rooms WHERE id = ?", [room_id]
+        "SELECT id, background_image_path, wall_colors FROM rooms WHERE id = ?", [room_id]
     ).fetchone()
     if not row:
         raise HTTPException(404, "Room not found")
@@ -392,6 +402,11 @@ def delete_room(room_id: str, is_admin: bool = Depends(verify_admin)):
     r2_keys = [f"rooms/meshes/{room_id}.glb"]
     if row[1]:
         r2_keys.append(row[1])
+    if row[2]:
+        wc = json.loads(row[2])
+        for variant in wc.get("variants", []):
+            if variant.get("imagePath"):
+                r2_keys.append(variant["imagePath"])
 
     layout_rows = db.execute(
         "SELECT screenshot_path FROM layouts WHERE room_id = ?", [room_id]

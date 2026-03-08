@@ -88,9 +88,16 @@ def init_databases():
             lighting_settings JSON,
             room_scale DOUBLE DEFAULT 1.0,
             meter_stick JSON,
+            wall_colors JSON,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # Migration: add wall_colors column if missing
+    try:
+        _houses_conn.execute("ALTER TABLE rooms ADD COLUMN wall_colors JSON")
+    except Exception:
+        pass
 
     _houses_conn.execute("CREATE INDEX IF NOT EXISTS idx_rooms_house_id ON rooms(house_id)")
 

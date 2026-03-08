@@ -954,12 +954,29 @@ input[type="date"]:focus {
   pointer-events: none;
 }
 
-/* ============ LBM Confirmation Modal ============ */
+/* ============ Enhance Confirmation Modal ============ */
 
-.lbm-note {
+.enhance-note {
   font-size: 0.85rem;
   color: var(--text-secondary);
   margin-top: 0.5rem;
+}
+
+.enhance-prompt-input {
+  width: 100%;
+  background: var(--surface-dark);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--font-sm);
+  padding: var(--spacing-sm);
+  resize: vertical;
+  margin-bottom: var(--spacing-md);
+  font-family: inherit;
+}
+
+.enhance-prompt-input::placeholder {
+  color: var(--text-muted);
 }
 
 /* ============ Tutorial Hub Modal ============ */

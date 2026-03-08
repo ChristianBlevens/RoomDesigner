@@ -1309,3 +1309,172 @@ select option {
 .layout-missing-list li:last-child {
   border-bottom: none;
 }
+
+/* ============ Wall Color Panel ============ */
+
+.wall-color-panel {
+  position: fixed;
+  bottom: var(--above-controls, 120px);
+  left: var(--spacing-md);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--blur-heavy));
+  -webkit-backdrop-filter: blur(var(--blur-heavy));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  z-index: 100;
+  width: min(320px, calc(100vw - var(--spacing-md) * 2));
+}
+
+.wall-color-panel.hidden {
+  display: none;
+}
+
+.wall-color-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-sm);
+  color: var(--text-bright);
+  font-size: var(--font-md);
+  font-weight: 500;
+}
+
+.wall-color-presets {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--spacing-xs);
+  margin-bottom: var(--spacing-sm);
+}
+
+.color-swatch {
+  width: 100%;
+  aspect-ratio: 1;
+  border: 2px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  min-height: 36px;
+  transition: border-color 0.15s, transform 0.1s;
+}
+
+.color-swatch:hover {
+  border-color: var(--accent);
+  transform: scale(1.1);
+}
+
+.wall-color-custom {
+  display: flex;
+  gap: var(--spacing-xs);
+  margin-bottom: var(--spacing-sm);
+  align-items: center;
+}
+
+.wall-color-custom input[type="color"] {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  padding: 2px;
+  flex-shrink: 0;
+}
+
+.wall-color-custom input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface-dark);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: var(--font-sm);
+}
+
+.wall-color-custom input[type="text"]::placeholder {
+  color: var(--text-muted);
+}
+
+.wall-color-gallery {
+  display: flex;
+  gap: var(--spacing-xs);
+  overflow-x: auto;
+  padding: var(--spacing-xs) 0;
+}
+
+.wall-color-card {
+  flex-shrink: 0;
+  width: 70px;
+  padding: var(--spacing-xs);
+  background: var(--surface-dark);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: center;
+  position: relative;
+  transition: border-color 0.15s;
+}
+
+.wall-color-card.active {
+  border-color: var(--accent);
+}
+
+.wall-color-card:hover {
+  border-color: var(--text-secondary);
+}
+
+.wall-color-label {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wall-color-delete {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: rgba(0, 0, 0, 0.6);
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.wall-color-card:hover .wall-color-delete {
+  opacity: 1;
+}
+
+.wall-color-delete:hover {
+  color: var(--text-danger);
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.wall-color-card.generating {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.wall-color-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border-subtle);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin: 0 auto var(--spacing-xs);
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

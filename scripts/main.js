@@ -74,8 +74,10 @@ import {
   subscribeToEvents,
   createRoom,
   getBatchAvailability,
-  getLbmStatus,
-  relightScreenshot,
+  getEnhanceStatus,
+  enhanceScreenshot,
+  generateWallColor,
+  deleteWallColor,
   getLayouts,
   createLayout,
   getLayout,
@@ -128,6 +130,7 @@ import { isAuthenticated, signIn, signUp, logout, getUsername, getToken, isAdmin
 let currentHouseId = null;
 let currentRoomId = null;
 let currentBackgroundImage = null;
+let currentRoom = null;
 let tagsDropdown = null;
 
 // Previous room state for selective saves (only save changed fields)
@@ -279,6 +282,7 @@ async function init() {
   setupLayoutControls();
   setupBeforeAfterToggle();
   setupMeterStick();
+  setupWallColorControls();
   setupTutorials();
   setupControlsBarLayout();
 
@@ -554,6 +558,7 @@ function setupLightingControls() {
     // Close other panels if open (only one can be open at a time)
     closeScalePanelIfOpen();
     closeLayoutsPanelIfOpen();
+    closeWallColorPanelIfOpen();
 
     lightingPanelOpen = true;
     lightingPanel.classList.remove('hidden');
@@ -835,6 +840,7 @@ function openLayoutsPanel() {
   closeLightingPanelIfOpen();
   closeScalePanelIfOpen();
   closeLayoutsPanelIfOpen();
+  closeWallColorPanelIfOpen();
   layoutsPanelOpen = true;
   document.getElementById('layouts-panel').classList.remove('hidden');
   document.getElementById('layouts-btn').classList.add('active');
@@ -1080,6 +1086,7 @@ function setupScaleControls() {
     // Close other panels if open (only one can be open at a time)
     closeLightingPanelIfOpen();
     closeLayoutsPanelIfOpen();
+    closeWallColorPanelIfOpen();
 
     scalePanelOpen = true;
     scalePanel.classList.remove('hidden');
@@ -2821,10 +2828,172 @@ export function showActionNotification(message, duration = 2000) {
   }, duration);
 }
 
+// ============ Wall Color Panel ============
+
+let wallColorPanelOpen = false;
+let wallColorVariants = [];
+let activeWallColorId = 'original';
+let wallColorGenerating = false;
+
+function setupWallColorControls() {
+  const paintBtn = document.getElementById('paint-btn');
+  const closeBtn = document.getElementById('wall-color-close-btn');
+  const applyBtn = document.getElementById('wall-color-apply');
+
+  paintBtn.addEventListener('click', () => {
+    wallColorPanelOpen ? closeWallColorPanel() : openWallColorPanel();
+  });
+  closeBtn.addEventListener('click', closeWallColorPanel);
+
+  // Preset swatches
+  document.querySelectorAll('.color-swatch').forEach(swatch => {
+    swatch.addEventListener('click', () => {
+      applyWallColor(swatch.dataset.name, swatch.dataset.color);
+    });
+  });
+
+  // Custom color
+  applyBtn.addEventListener('click', () => {
+    const hex = document.getElementById('wall-color-picker').value;
+    const name = document.getElementById('wall-color-name').value.trim() || hex;
+    applyWallColor(name, hex);
+  });
+}
+
+function openWallColorPanel() {
+  closeLightingPanelIfOpen();
+  closeScalePanelIfOpen();
+  closeLayoutsPanelIfOpen();
+  wallColorPanelOpen = true;
+  document.getElementById('wall-color-panel').classList.remove('hidden');
+  document.getElementById('paint-btn').classList.add('active');
+  renderWallColorGallery();
+}
+
+function closeWallColorPanel() {
+  wallColorPanelOpen = false;
+  document.getElementById('wall-color-panel').classList.add('hidden');
+  document.getElementById('paint-btn').classList.remove('active');
+}
+
+function closeWallColorPanelIfOpen() {
+  if (wallColorPanelOpen) closeWallColorPanel();
+}
+
+async function applyWallColor(colorName, colorHex) {
+  if (wallColorGenerating || !currentRoomId) return;
+  wallColorGenerating = true;
+  renderWallColorGallery();
+
+  try {
+    const result = await generateWallColor(currentRoomId, colorName, colorHex);
+    wallColorVariants.push({
+      id: result.variant_id,
+      colorName: colorName,
+      colorHex: colorHex,
+      imageUrl: null,
+    });
+    activeWallColorId = result.variant_id;
+
+    const blob = base64ToBlob(result.image_base64, 'image/png');
+    await setBackgroundImagePlane(blob);
+
+    showActionNotification(`Wall color: ${colorName}`);
+  } catch (err) {
+    showActionNotification('Failed to generate wall color');
+  } finally {
+    wallColorGenerating = false;
+    renderWallColorGallery();
+  }
+}
+
+async function switchWallColor(variantId) {
+  activeWallColorId = variantId;
+  if (variantId === 'original') {
+    const bgUrl = currentRoom?.mogeData?.backgroundUrl || currentRoom?.backgroundImageUrl;
+    if (bgUrl) await setBackgroundImagePlane(bgUrl);
+  } else {
+    const variant = wallColorVariants.find(v => v.id === variantId);
+    if (variant && variant.imageUrl) {
+      await setBackgroundImagePlane(variant.imageUrl);
+    }
+  }
+  renderWallColorGallery();
+}
+
+function renderWallColorGallery() {
+  const container = document.getElementById('wall-color-gallery');
+  container.innerHTML = '';
+
+  // Original card
+  const origCard = document.createElement('div');
+  origCard.className = `wall-color-card${activeWallColorId === 'original' ? ' active' : ''}`;
+  origCard.innerHTML = '<span class="wall-color-label">Original</span>';
+  origCard.addEventListener('click', () => switchWallColor('original'));
+  container.appendChild(origCard);
+
+  // Variant cards
+  for (const v of wallColorVariants) {
+    const card = document.createElement('div');
+    card.className = `wall-color-card${activeWallColorId === v.id ? ' active' : ''}`;
+    card.style.borderTop = `4px solid ${v.colorHex}`;
+    card.innerHTML = `
+      <span class="wall-color-label">${v.colorName}</span>
+      <button class="wall-color-delete" title="Delete">&times;</button>
+    `;
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('.wall-color-delete')) return;
+      switchWallColor(v.id);
+    });
+    card.querySelector('.wall-color-delete').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        await deleteWallColor(currentRoomId, v.id);
+        wallColorVariants = wallColorVariants.filter(x => x.id !== v.id);
+        if (activeWallColorId === v.id) {
+          activeWallColorId = 'original';
+          await switchWallColor('original');
+        }
+        renderWallColorGallery();
+      } catch (err) {
+        showActionNotification('Failed to delete variant');
+      }
+    });
+    container.appendChild(card);
+  }
+
+  // Generating placeholder
+  if (wallColorGenerating) {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'wall-color-card generating';
+    placeholder.innerHTML = '<div class="wall-color-spinner"></div><span class="wall-color-label">Generating...</span>';
+    container.appendChild(placeholder);
+  }
+}
+
+function loadRoomWallColors(room) {
+  const wc = room.wallColors || { activeVariantId: 'original', variants: [] };
+  wallColorVariants = wc.variants || [];
+  activeWallColorId = wc.activeVariantId || 'original';
+
+  if (activeWallColorId !== 'original') {
+    const variant = wallColorVariants.find(v => v.id === activeWallColorId);
+    if (variant && variant.imageUrl) {
+      setBackgroundImagePlane(variant.imageUrl);
+    }
+  }
+}
+
+function clearWallColorState() {
+  wallColorVariants = [];
+  activeWallColorId = 'original';
+  closeWallColorPanelIfOpen();
+}
+
 // ============ Session Modal (House Operations) ============
 
-// LBM confirmation state
-let lbmResolve = null;
+// Enhance confirmation state
+let enhanceResolve = null;
 
 function setupSessionModal() {
   const sessionBtn = document.getElementById('session-btn');
@@ -2850,44 +3019,35 @@ function setupSessionModal() {
   const exportProgressCloseBtn = document.getElementById('export-progress-close');
   exportProgressCloseBtn.addEventListener('click', hideExportProgressModal);
 
-  // LBM Confirmation Modal
-  const lbmSkipBtn = document.getElementById('lbm-skip-btn');
-  const lbmApplyBtn = document.getElementById('lbm-apply-btn');
-
-  lbmSkipBtn.addEventListener('click', () => {
-    document.getElementById('lbm-confirm-modal').classList.add('modal-hidden');
-    if (lbmResolve) lbmResolve(false);
+  // Enhance Confirmation Modal
+  document.getElementById('enhance-skip-btn').addEventListener('click', () => {
+    document.getElementById('enhance-confirm-modal').classList.add('modal-hidden');
+    if (enhanceResolve) enhanceResolve({ enhance: false });
   });
 
-  lbmApplyBtn.addEventListener('click', () => {
-    document.getElementById('lbm-confirm-modal').classList.add('modal-hidden');
-    if (lbmResolve) lbmResolve(true);
+  document.getElementById('enhance-apply-btn').addEventListener('click', () => {
+    const customPrompt = document.getElementById('enhance-custom-prompt').value.trim() || null;
+    document.getElementById('enhance-confirm-modal').classList.add('modal-hidden');
+    if (enhanceResolve) enhanceResolve({ enhance: true, customPrompt });
   });
 }
 
 /**
- * Show LBM confirmation modal if LBM is configured.
- * Returns true if user wants LBM, false otherwise.
+ * Show enhance confirmation modal if Gemini API is configured.
+ * Returns { enhance: boolean, customPrompt: string|null }.
  */
-async function showLbmConfirmation() {
-  // LBM relighting disabled — current model doesn't produce good results.
-  // Re-enable by removing this early return when a better model is available.
-  return false;
-
-  // Check if LBM is configured
+async function showEnhanceConfirmation() {
   try {
-    const status = await getLbmStatus();
-    if (!status.configured) {
-      return false;  // Skip LBM if not configured
-    }
+    const status = await getEnhanceStatus();
+    if (!status.configured) return { enhance: false };
   } catch (e) {
-    console.warn('LBM status check failed:', e);
-    return false;
+    return { enhance: false };
   }
 
   return new Promise((resolve) => {
-    lbmResolve = resolve;
-    document.getElementById('lbm-confirm-modal').classList.remove('modal-hidden');
+    enhanceResolve = resolve;
+    document.getElementById('enhance-custom-prompt').value = '';
+    document.getElementById('enhance-confirm-modal').classList.remove('modal-hidden');
   });
 }
 
@@ -2921,8 +3081,8 @@ async function handleExportHouse() {
     await saveCurrentRoom();
   }
 
-  // Ask about LBM relighting
-  const useLbm = await showLbmConfirmation();
+  // Ask about AI enhancement
+  const enhanceChoice = await showEnhanceConfirmation();
 
   const house = getCurrentHouse();
 
@@ -2962,12 +3122,12 @@ async function handleExportHouse() {
       }
     }
 
-    // Export screenshots (with optional LBM relighting)
+    // Export screenshots (with optional AI enhancement)
     const { zip: zipBlob, results: exportResults } = await exportHouseScreenshotsWithProgress(
       house,
       rooms,
       furnitureEntries,
-      useLbm,
+      enhanceChoice,
       (current, total, roomName, status) => {
         updateExportProgress(current, total, roomName, status);
       }
@@ -2996,10 +3156,10 @@ async function handleExportHouse() {
  * @param {Object} house - House data
  * @param {Array} rooms - Room data array
  * @param {Map} furnitureEntries - Map of entryId to furniture entry
- * @param {boolean} useLbm - Whether to apply LBM relighting
+ * @param {Object} enhanceChoice - { enhance: boolean, customPrompt: string|null }
  * @param {Function} onProgress - Progress callback
  */
-async function exportHouseScreenshotsWithProgress(house, rooms, furnitureEntries, useLbm, onProgress) {
+async function exportHouseScreenshotsWithProgress(house, rooms, furnitureEntries, enhanceChoice, onProgress) {
   const zip = new JSZip();
   const results = [];
 
@@ -3017,41 +3177,29 @@ async function exportHouseScreenshotsWithProgress(house, rooms, furnitureEntries
         continue;
       }
 
-      let screenshot;
-      let lbmFallback = false;
+      // Always capture with lighting/shadows
+      let screenshot = await captureRoomScreenshot(room, furnitureEntries);
+      let enhanceFallback = false;
 
-      if (useLbm && room.id) {
-        // LBM mode: capture naive paste (no lighting/shadows), then send to LBM
-        onProgress(i + 1, rooms.length, roomName, 'relighting');
+      if (enhanceChoice.enhance && room.id) {
+        onProgress(i + 1, rooms.length, roomName, 'enhancing');
         try {
-          // Capture naive paste (unlit furniture on background)
-          const naivePaste = await captureRoomScreenshot(room, furnitureEntries, { naivePaste: true });
-          const compositeBase64 = await blobToBase64(naivePaste);
-          console.log(`LBM: Sending ${roomName}, naive paste size: ${compositeBase64.length} chars`);
-
-          // Send to LBM for relighting
-          const relightedBase64 = await relightScreenshot(room.id, compositeBase64);
-          console.log(`LBM: Received ${roomName}, result size: ${relightedBase64.length} chars`);
-
-          screenshot = base64ToBlob(relightedBase64, 'image/png');
-          console.log(`LBM: Converted to blob, size: ${screenshot.size} bytes`);
-        } catch (lbmErr) {
-          console.error(`LBM relighting failed for "${roomName}":`, lbmErr);
-          screenshot = await captureRoomScreenshot(room, furnitureEntries);
-          lbmFallback = true;
+          const compositeBase64 = await blobToBase64(screenshot);
+          const enhancedBase64 = await enhanceScreenshot(room.id, compositeBase64, enhanceChoice.customPrompt);
+          screenshot = base64ToBlob(enhancedBase64, 'image/png');
+        } catch (err) {
+          console.error(`Enhancement failed for "${roomName}":`, err);
+          enhanceFallback = true;
         }
-      } else {
-        // Normal mode: capture with lighting and shadows
-        screenshot = await captureRoomScreenshot(room, furnitureEntries);
       }
 
       const safeName = roomName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
       const filename = `${safeName}.png`;
 
       zip.file(filename, screenshot);
-      results.push({ room: roomName, success: true, filename, screenshot, lbmFallback });
+      results.push({ room: roomName, success: true, filename, screenshot, enhanceFallback });
 
-      onProgress(i + 1, rooms.length, roomName, lbmFallback ? 'lbm-fallback' : 'complete');
+      onProgress(i + 1, rooms.length, roomName, enhanceFallback ? 'enhance-fallback' : 'complete');
     } catch (err) {
       console.error(`Failed to capture screenshot for "${roomName}":`, err);
       results.push({ room: roomName, success: false, error: err.message, screenshot: null });
@@ -3157,10 +3305,10 @@ async function generateExportPDF(house, rooms, results, furnitureEntries) {
       // Scale to fit page width (170mm), auto height maintains aspect ratio
       doc.addImage(imgData, 'PNG', 20, yPos, 170, 0);
       yPos = 140;
-      if (result.lbmFallback) {
+      if (result.enhanceFallback) {
         doc.setFontSize(9);
         doc.setTextColor(200, 150, 50);
-        doc.text('Note: AI relighting was unavailable for this room', 20, yPos);
+        doc.text('Note: AI enhancement was unavailable for this room', 20, yPos);
         doc.setTextColor(0, 0, 0);
         yPos += 7;
       }
@@ -3298,8 +3446,8 @@ function updateExportProgress(current, total, roomName, status = 'loading') {
   if (status === 'loading') {
     textEl.textContent = `Capturing "${roomName}"...`;
     detailEl.textContent = `Room ${current} of ${total}`;
-  } else if (status === 'relighting') {
-    textEl.textContent = `Relighting "${roomName}"...`;
+  } else if (status === 'enhancing') {
+    textEl.textContent = `Enhancing "${roomName}"...`;
     detailEl.textContent = `Room ${current} of ${total} (AI processing)`;
   } else if (status === 'complete') {
     textEl.textContent = `Captured "${roomName}"`;
@@ -3307,8 +3455,8 @@ function updateExportProgress(current, total, roomName, status = 'loading') {
   } else if (status === 'error') {
     textEl.textContent = `Failed: "${roomName}"`;
     detailEl.textContent = `Room ${current} of ${total} (error)`;
-  } else if (status === 'lbm-fallback') {
-    textEl.textContent = `Captured "${roomName}" (without relighting)`;
+  } else if (status === 'enhance-fallback') {
+    textEl.textContent = `Captured "${roomName}" (without enhancement)`;
     detailEl.textContent = `Room ${current} of ${total} complete`;
   }
 }
@@ -3324,23 +3472,23 @@ function showExportComplete(results) {
 
   const succeeded = results.filter(r => r.success);
   const failed = results.filter(r => !r.success);
-  const lbmFallbacks = results.filter(r => r.lbmFallback);
+  const enhanceFallbacks = results.filter(r => r.enhanceFallback);
 
   fillEl.style.width = '100%';
 
   if (failed.length === 0) {
     textEl.textContent = 'Export Complete!';
     let detail = `${succeeded.length} room${succeeded.length !== 1 ? 's' : ''} exported`;
-    if (lbmFallbacks.length > 0) {
-      detail += ` (${lbmFallbacks.length} without AI relighting)`;
+    if (enhanceFallbacks.length > 0) {
+      detail += ` (${enhanceFallbacks.length} without AI enhancement)`;
     }
     detailEl.textContent = detail;
   } else {
     textEl.textContent = `Export Complete (${failed.length} failed)`;
     const failList = failed.map(r => `${r.room}: ${r.error}`).join('; ');
     let detail = `${succeeded.length} exported, ${failed.length} failed — ${failList}`;
-    if (lbmFallbacks.length > 0) {
-      detail += ` | ${lbmFallbacks.length} without AI relighting`;
+    if (enhanceFallbacks.length > 0) {
+      detail += ` | ${enhanceFallbacks.length} without AI enhancement`;
     }
     detailEl.textContent = detail;
   }
@@ -3758,6 +3906,7 @@ async function handleRoomImageUpload(event) {
   closeLightingPanelIfOpen();
   closeScalePanelIfOpen();
   closeLayoutsPanelIfOpen();
+  closeWallColorPanelIfOpen();
 
   // Store pending image
   pendingRoomImage = file;
@@ -3836,6 +3985,7 @@ async function switchRoom(roomId) {
   closeLightingPanelIfOpen();
   closeScalePanelIfOpen();
   closeLayoutsPanelIfOpen();
+  closeWallColorPanelIfOpen();
 
   // Save current room first
   if (currentRoomId) {
@@ -3921,6 +4071,8 @@ async function loadRoomById(roomId) {
     showError('Room not found');
     return;
   }
+
+  currentRoom = room;
 
   // Verify room has mesh data (required)
   if (!room.mogeData || !room.mogeData.meshUrl) {
@@ -4065,6 +4217,9 @@ async function loadRoomById(roomId) {
   savedMeterStickData = room.meterStick || null;
   updateMeterStickButton();
 
+  // Load wall color state
+  loadRoomWallColors(room);
+
   // Store initial state for selective saves (only save changed fields)
   previousRoomState = {
     id: roomId,
@@ -4182,10 +4337,12 @@ async function closeHouse() {
   closeLightingPanelIfOpen();
   closeScalePanelIfOpen();
   closeLayoutsPanelIfOpen();
+  closeWallColorPanelIfOpen();
 
   currentHouseId = null;
   currentRoomId = null;
   currentBackgroundImage = null;
+  currentRoom = null;
   previousRoomState = null;
   setCurrentHouse(null);
   setCurrentLoadedHouse(null);
@@ -4197,6 +4354,8 @@ async function closeHouse() {
   clearMeterStick();
   meterStickPlacementMode = false;
   savedMeterStickData = null;
+
+  clearWallColorState();
 
   document.getElementById('background-container').style.backgroundImage = '';
   clearAllFurniture();

@@ -53,3 +53,4 @@ class RoomResponse(BaseModel):
     lightingSettings: Optional[dict] = None
     roomScale: Optional[float] = None
     meterStick: Optional[dict] = None
+    wallColors: Optional[dict] = None
