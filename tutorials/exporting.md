@@ -6,7 +6,10 @@ Export generates a ZIP file containing screenshots, inventory data, and a stagin
 
 1. Tap the **House** button in the controls bar
 2. Tap **Export House**
-3. Wait for the export to process — a progress modal shows each room being captured
+3. Choose whether to **enhance screenshots with AI** — this makes furniture blend more naturally with room lighting
+   - Optionally add custom instructions (e.g., "make the lighting warmer")
+   - Tap **Enhance** to apply, or **Skip** for standard screenshots
+4. Wait for the export to process — a progress modal shows each room being captured
 
 ## Export Contents
 
@@ -21,3 +24,5 @@ The ZIP file includes:
 - Screenshots are captured using an offscreen renderer at the original photo resolution
 - The meter stick is not included in screenshots
 - All rooms in the house are included in the export
+- If AI enhancement fails for a room, the standard screenshot is used instead
+- The PDF report notes which rooms were exported without enhancement

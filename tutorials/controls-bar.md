@@ -11,6 +11,7 @@ The controls bar is the fixed strip of buttons above the room tabs. It contains 
 - **Before/After** — toggle furniture visibility for comparison
 - **Meter Stick** — place a 1-meter reference for scale calibration
 - **Layouts** — save and load furniture arrangements
+- **Wall Color** — change wall colors using AI
 - **?** — open this tutorial hub
 - **House** — open house options (edit, export, close, delete, sign out)
 

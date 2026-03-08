@@ -7,6 +7,7 @@
   { "id": "before-after", "title": "Before / After", "file": "before-after.md", "parent": "controls-bar" },
   { "id": "meter-stick", "title": "Meter Stick", "file": "meter-stick.md", "parent": "controls-bar" },
   { "id": "room-layouts", "title": "Room Layouts", "file": "room-layouts.md", "parent": "controls-bar" },
+  { "id": "wall-colors", "title": "Wall Colors", "file": "wall-colors.md", "parent": "controls-bar" },
   { "id": "house-button", "title": "House Button", "file": "house-button.md", "parent": "controls-bar" },
   { "id": "furniture", "title": "Furniture", "file": "furniture.md" },
   { "id": "placing-furniture", "title": "Placing Furniture", "file": "placing-furniture.md", "parent": "furniture" },

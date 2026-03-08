@@ -74,7 +74,6 @@ import {
   subscribeToEvents,
   createRoom,
   getBatchAvailability,
-  getEnhanceStatus,
   enhanceScreenshot,
   generateWallColor,
   deleteWallColor,
@@ -2845,10 +2844,11 @@ function setupWallColorControls() {
   });
   closeBtn.addEventListener('click', closeWallColorPanel);
 
-  // Preset swatches
+  // Preset swatches set the custom color picker and name
   document.querySelectorAll('.color-swatch').forEach(swatch => {
     swatch.addEventListener('click', () => {
-      applyWallColor(swatch.dataset.name, swatch.dataset.color);
+      document.getElementById('wall-color-picker').value = swatch.dataset.color;
+      document.getElementById('wall-color-name').value = swatch.dataset.name;
     });
   });
 
@@ -3037,13 +3037,6 @@ function setupSessionModal() {
  * Returns { enhance: boolean, customPrompt: string|null }.
  */
 async function showEnhanceConfirmation() {
-  try {
-    const status = await getEnhanceStatus();
-    if (!status.configured) return { enhance: false };
-  } catch (e) {
-    return { enhance: false };
-  }
-
   return new Promise((resolve) => {
     enhanceResolve = resolve;
     document.getElementById('enhance-custom-prompt').value = '';
