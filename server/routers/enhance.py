@@ -21,11 +21,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 ENHANCE_PROMPT = (
-    "This is a photograph of a room with 3D-rendered furniture composited on top. "
-    "Make the furniture blend naturally into the scene — match the lighting, shadows, "
-    "reflections, and color temperature of the room. Make it look like a professional "
-    "interior design photograph. Do not change the room structure, wall colors, or "
-    "furniture positions."
+    "Adjust only the lighting, shadows, and reflections in this image so that all "
+    "objects appear naturally lit by the room's environment. Do not add, remove, "
+    "move, or alter any objects, furniture, walls, or surfaces. Do not change the "
+    "composition. Only correct how light interacts with the existing scene."
 )
 
 WALL_COLOR_PROMPT = (

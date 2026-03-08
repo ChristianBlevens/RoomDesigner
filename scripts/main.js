@@ -2948,19 +2948,22 @@ function renderWallColorGallery() {
       if (e.target.closest('.wall-color-delete')) return;
       switchWallColor(v.id);
     });
-    card.querySelector('.wall-color-delete').addEventListener('click', async (e) => {
+    card.querySelector('.wall-color-delete').addEventListener('click', (e) => {
       e.stopPropagation();
-      try {
-        await deleteWallColor(currentRoomId, v.id);
-        wallColorVariants = wallColorVariants.filter(x => x.id !== v.id);
-        if (activeWallColorId === v.id) {
-          activeWallColorId = 'original';
-          await switchWallColor('original');
+      showConfirmDialog(`Delete "${v.colorName}" wall color?`, async () => {
+        modalManager.closeModal();
+        try {
+          await deleteWallColor(currentRoomId, v.id);
+          wallColorVariants = wallColorVariants.filter(x => x.id !== v.id);
+          if (activeWallColorId === v.id) {
+            activeWallColorId = 'original';
+            await switchWallColor('original');
+          }
+          renderWallColorGallery();
+        } catch (err) {
+          showActionNotification('Failed to delete variant');
         }
-        renderWallColorGallery();
-      } catch (err) {
-        showActionNotification('Failed to delete variant');
-      }
+      });
     });
     container.appendChild(card);
   }
