@@ -220,7 +220,7 @@ class Trellis2Inference:
                 verbose=False,
             )
             glb_buffer = io.BytesIO()
-            glb.export(glb_buffer)
+            glb.export(glb_buffer, file_type="glb")
             glb_bytes = glb_buffer.getvalue()
 
             glb_base64 = base64.b64encode(glb_bytes).decode("ascii")

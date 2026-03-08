@@ -49,7 +49,7 @@ async def generate_3d(image_bytes: bytes, resolution: int = 512) -> bytes:
     logger.info(f"Sending to TRELLIS.2: {len(image_bytes) / 1024:.1f}KB image, resolution={resolution}")
 
     try:
-        async with httpx.AsyncClient(timeout=TRELLIS2_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=TRELLIS2_TIMEOUT, follow_redirects=True) as client:
             response = await client.post(TRELLIS2_ENDPOINT, json=payload)
 
         if response.status_code != 200:
