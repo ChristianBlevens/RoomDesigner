@@ -76,7 +76,7 @@ image = (
         "opencv-python-headless",
         "trimesh[easy]",
         "huggingface-hub",
-        "transformers",
+        "transformers<4.50.0",
         "kornia",
         "timm",
         "lpips",
