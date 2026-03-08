@@ -36,11 +36,6 @@ def download_model():
     from huggingface_hub import login
     login(token=os.environ["HF_TOKEN"])
 
-    # Disable meta tensor initialization (transformers 4.50+ default)
-    # RMBG-2.0's BiRefNet calls .item() during __init__ which fails with meta tensors
-    import transformers.modeling_utils
-    transformers.modeling_utils._LOW_CPU_MEM_USAGE_DEFAULT = False
-
     from trellis2.pipelines import Trellis2ImageTo3DPipeline
 
     pipeline = Trellis2ImageTo3DPipeline.from_pretrained("microsoft/TRELLIS.2-4B")
@@ -81,7 +76,7 @@ image = (
         "opencv-python-headless",
         "trimesh[easy]",
         "huggingface-hub",
-        "transformers",
+        "transformers>=4.50.0,<5.0.0",
         "kornia",
         "timm",
         "lpips",
