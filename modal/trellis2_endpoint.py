@@ -36,6 +36,11 @@ def download_model():
     from huggingface_hub import login
     login(token=os.environ["HF_TOKEN"])
 
+    # Disable meta tensor initialization (transformers 4.50+ default)
+    # RMBG-2.0's BiRefNet calls .item() during __init__ which fails with meta tensors
+    import transformers.modeling_utils
+    transformers.modeling_utils._LOW_CPU_MEM_USAGE_DEFAULT = False
+
     from trellis2.pipelines import Trellis2ImageTo3DPipeline
 
     pipeline = Trellis2ImageTo3DPipeline.from_pretrained("microsoft/TRELLIS.2-4B")
@@ -100,7 +105,7 @@ image = (
     )
     # Install CUDA extensions — requires GPU for compilation
     # Force g++ (PyTorch expects it; Modal GPU images may default to clang++)
-    .env({"CC": "gcc", "CXX": "g++", "TORCH_CUDA_ARCH_LIST": "8.0", "TRANSFORMERS_LOW_CPU_MEM_USAGE": "0"})
+    .env({"CC": "gcc", "CXX": "g++", "TORCH_CUDA_ARCH_LIST": "8.0"})
     .run_commands(
         # nvdiffrast v0.4.0
         "git clone --branch v0.4.0 --depth 1 https://github.com/NVlabs/nvdiffrast.git /tmp/extensions/nvdiffrast"
