@@ -126,7 +126,7 @@ app = modal.App("roomdesigner-trellis2", image=image)
 
 @app.cls(
     gpu="A100",
-    scaledown_window=300,
+    scaledown_window=60,
     timeout=300,
     retries=modal.Retries(max_retries=2, initial_delay=1.0),
 )
@@ -193,12 +193,15 @@ class Trellis2Inference:
             return {"error": f"Failed to decode image: {str(e)}", "status": "failed"}
 
         resolution = request.get("resolution", 512)
+        # Map resolution to max_num_tokens for TRELLIS.2 pipeline
+        resolution_to_tokens = {512: 49152, 1024: 393216, 1536: 1327104}
+        max_num_tokens = resolution_to_tokens.get(resolution, 49152)
 
         try:
             image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
 
             with torch.no_grad():
-                mesh = self.pipeline.run(image, resolution=resolution)[0]
+                mesh = self.pipeline.run(image, max_num_tokens=max_num_tokens)[0]
 
             mesh.simplify(16777216)
 
@@ -216,7 +219,9 @@ class Trellis2Inference:
                 remesh=True,
                 verbose=False,
             )
-            glb_bytes = glb.export(file_type="glb")
+            glb_buffer = io.BytesIO()
+            glb.export(glb_buffer)
+            glb_bytes = glb_buffer.getvalue()
 
             glb_base64 = base64.b64encode(glb_bytes).decode("ascii")
             print(f"Generated GLB: {len(glb_bytes) / 1024:.1f} KB at resolution {resolution}")
