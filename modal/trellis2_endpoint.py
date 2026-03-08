@@ -203,9 +203,12 @@ class Trellis2Inference:
             with torch.no_grad():
                 mesh = self.pipeline.run(image, max_num_tokens=max_num_tokens)[0]
 
+            print(f"Pre-simplify mesh: {mesh.vertices.shape[0]} vertices, {mesh.faces.shape[0]} faces")
             mesh.simplify(10000)
+            print(f"Post-simplify mesh: {mesh.vertices.shape[0]} vertices, {mesh.faces.shape[0]} faces")
 
-            # Export to GLB via o_voxel postprocessing
+            # Export to GLB via o_voxel postprocessing (remesh=False to avoid CuMesh hang)
+            print("Starting to_glb export...")
             glb = o_voxel.postprocess.to_glb(
                 vertices=mesh.vertices,
                 faces=mesh.faces,
@@ -216,15 +219,16 @@ class Trellis2Inference:
                 aabb=[[-0.5, -0.5, -0.5], [0.5, 0.5, 0.5]],
                 decimation_target=10000,
                 texture_size=1024,
-                remesh=True,
-                verbose=False,
+                remesh=False,
+                verbose=True,
             )
+            print("to_glb export complete, writing GLB bytes...")
             glb_buffer = io.BytesIO()
             glb.export(glb_buffer, file_type="glb")
             glb_bytes = glb_buffer.getvalue()
 
             glb_base64 = base64.b64encode(glb_bytes).decode("ascii")
-            print(f"Generated GLB: {len(glb_bytes) / 1024:.1f} KB at resolution {resolution}")
+            print(f"Generated GLB: {len(glb_bytes) / 1024:.1f} KB, resolution={resolution}")
 
             return {
                 "glb": glb_base64,
