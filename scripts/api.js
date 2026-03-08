@@ -56,7 +56,7 @@ async function apiFetch(path, options = {}) {
   return response;
 }
 
-async function fetchAsBlob(url) {
+export async function fetchAsBlob(url) {
   const response = await fetch(adjustUrlForProxy(url), { cache: 'no-store' });
   if (!response.ok) return null;
   return response.blob();
@@ -359,7 +359,8 @@ function transformRoomResponse(room) {
     mogeData: room.mogeData,
     lightingSettings: room.lightingSettings,
     roomScale: room.roomScale,
-    meterStick: room.meterStick
+    meterStick: room.meterStick,
+    wallColors: room.wallColors
   };
 }
 

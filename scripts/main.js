@@ -77,6 +77,7 @@ import {
   enhanceScreenshot,
   generateWallColor,
   deleteWallColor,
+  fetchAsBlob,
   getLayouts,
   createLayout,
   getLayout,
@@ -2891,7 +2892,7 @@ async function applyWallColor(colorName, colorHex) {
       id: result.variant_id,
       colorName: colorName,
       colorHex: colorHex,
-      imageUrl: null,
+      imageUrl: result.image_url,
     });
     activeWallColorId = result.variant_id;
 
@@ -2909,14 +2910,16 @@ async function applyWallColor(colorName, colorHex) {
 
 async function switchWallColor(variantId) {
   activeWallColorId = variantId;
+  let url;
   if (variantId === 'original') {
-    const bgUrl = currentRoom?.mogeData?.backgroundUrl || currentRoom?.backgroundImageUrl;
-    if (bgUrl) await setBackgroundImagePlane(bgUrl);
+    url = currentRoom?.backgroundImageUrl;
   } else {
     const variant = wallColorVariants.find(v => v.id === variantId);
-    if (variant && variant.imageUrl) {
-      await setBackgroundImagePlane(variant.imageUrl);
-    }
+    url = variant?.imageUrl;
+  }
+  if (url) {
+    const blob = await fetchAsBlob(url);
+    if (blob) await setBackgroundImagePlane(blob);
   }
   renderWallColorGallery();
 }
@@ -2971,7 +2974,7 @@ function renderWallColorGallery() {
   }
 }
 
-function loadRoomWallColors(room) {
+async function loadRoomWallColors(room) {
   const wc = room.wallColors || { activeVariantId: 'original', variants: [] };
   wallColorVariants = wc.variants || [];
   activeWallColorId = wc.activeVariantId || 'original';
@@ -2979,7 +2982,8 @@ function loadRoomWallColors(room) {
   if (activeWallColorId !== 'original') {
     const variant = wallColorVariants.find(v => v.id === activeWallColorId);
     if (variant && variant.imageUrl) {
-      setBackgroundImagePlane(variant.imageUrl);
+      const blob = await fetchAsBlob(variant.imageUrl);
+      if (blob) await setBackgroundImagePlane(blob);
     }
   }
 }
@@ -4211,7 +4215,7 @@ async function loadRoomById(roomId) {
   updateMeterStickButton();
 
   // Load wall color state
-  loadRoomWallColors(room);
+  await loadRoomWallColors(room);
 
   // Store initial state for selective saves (only save changed fields)
   previousRoomState = {

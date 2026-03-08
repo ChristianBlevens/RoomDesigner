@@ -55,6 +55,7 @@ class WallColorRequest(BaseModel):
 class WallColorResponse(BaseModel):
     variant_id: str
     image_base64: str
+    image_url: str
 
 
 @router.post("/screenshot", response_model=EnhanceResponse)
@@ -138,7 +139,8 @@ async def generate_wall_color(request: WallColorRequest, org_id: str = Depends(v
 
     return WallColorResponse(
         variant_id=variant_id,
-        image_base64=base64.b64encode(result_bytes).decode("ascii")
+        image_base64=base64.b64encode(result_bytes).decode("ascii"),
+        image_url=r2.get_public_url(variant_key)
     )
 
 
