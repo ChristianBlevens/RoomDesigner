@@ -203,7 +203,7 @@ class Trellis2Inference:
             with torch.no_grad():
                 mesh = self.pipeline.run(image, max_num_tokens=max_num_tokens)[0]
 
-            mesh.simplify(16777216)
+            mesh.simplify(10000)
 
             # Export to GLB via o_voxel postprocessing
             glb = o_voxel.postprocess.to_glb(
@@ -214,8 +214,8 @@ class Trellis2Inference:
                 attr_layout=mesh.layout,
                 voxel_size=mesh.voxel_size,
                 aabb=[[-0.5, -0.5, -0.5], [0.5, 0.5, 0.5]],
-                decimation_target=1000000,
-                texture_size=4096,
+                decimation_target=10000,
+                texture_size=1024,
                 remesh=True,
                 verbose=False,
             )
