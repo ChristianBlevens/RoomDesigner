@@ -122,15 +122,12 @@ def update_furniture(furniture_id: str, furniture: FurnitureUpdate, org_id: str 
     if furniture.quantity is not None:
         updates.append("quantity = ?")
         values.append(furniture.quantity)
-    if furniture.dimensionX is not None:
-        updates.append("dimension_x = ?")
-        values.append(furniture.dimensionX)
-    if furniture.dimensionY is not None:
-        updates.append("dimension_y = ?")
-        values.append(furniture.dimensionY)
-    if furniture.dimensionZ is not None:
-        updates.append("dimension_z = ?")
-        values.append(furniture.dimensionZ)
+    updates.append("dimension_x = ?")
+    values.append(furniture.dimensionX)
+    updates.append("dimension_y = ?")
+    values.append(furniture.dimensionY)
+    updates.append("dimension_z = ?")
+    values.append(furniture.dimensionZ)
 
     if updates:
         values.append(furniture_id)
