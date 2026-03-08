@@ -76,7 +76,7 @@ image = (
         "opencv-python-headless",
         "trimesh[easy]",
         "huggingface-hub",
-        "transformers<4.50.0",
+        "transformers",
         "kornia",
         "timm",
         "lpips",
@@ -100,7 +100,7 @@ image = (
     )
     # Install CUDA extensions — requires GPU for compilation
     # Force g++ (PyTorch expects it; Modal GPU images may default to clang++)
-    .env({"CC": "gcc", "CXX": "g++", "TORCH_CUDA_ARCH_LIST": "8.0"})
+    .env({"CC": "gcc", "CXX": "g++", "TORCH_CUDA_ARCH_LIST": "8.0", "TRANSFORMERS_LOW_CPU_MEM_USAGE": "0"})
     .run_commands(
         # nvdiffrast v0.4.0
         "git clone --branch v0.4.0 --depth 1 https://github.com/NVlabs/nvdiffrast.git /tmp/extensions/nvdiffrast"
