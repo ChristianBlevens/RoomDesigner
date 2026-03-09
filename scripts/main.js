@@ -292,6 +292,9 @@ async function init() {
   document.addEventListener('pointerdown', (event) => {
     if (!lightingPanelOpen && !scalePanelOpen && !layoutsPanelOpen && !wallColorPanelOpen) return;
 
+    // Never close panels when clicking on a modal overlay (modals sit above panels)
+    if (event.target.closest('.modal-overlay')) return;
+
     const panelIds = ['lighting-panel', 'scale-panel', 'layouts-panel', 'wall-color-panel'];
     const buttonIds = ['lighting-btn', 'scale-btn', 'layouts-btn', 'paint-btn'];
 
