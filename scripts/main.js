@@ -286,7 +286,7 @@ async function init() {
   setupTutorials();
   setupControlsBarLayout();
 
-  // Close control bar panels when clicking outside
+  // Close control bar panels when clicking outside (capture phase to intercept before canvas)
   document.addEventListener('pointerdown', (event) => {
     if (!lightingPanelOpen && !scalePanelOpen && !layoutsPanelOpen && !wallColorPanelOpen) return;
 
@@ -306,7 +306,10 @@ async function init() {
     closeScalePanelIfOpen();
     closeLayoutsPanelIfOpen();
     closeWallColorPanelIfOpen();
-  });
+
+    // Prevent this click from triggering canvas interactions (e.g. opening furniture modal)
+    event.stopPropagation();
+  }, true);
 
   // Warn about unsaved changes on page unload
   window.addEventListener('beforeunload', (e) => {
