@@ -186,21 +186,19 @@
   <div id="wall-color-panel" class="wall-color-panel hidden">
     <div class="wall-color-panel-header">
       <span>Wall Color</span>
+      <button id="wall-color-edit-btn" class="wall-color-edit-btn hidden" title="Edit selected preset">&#9998;</button>
       <button id="wall-color-close-btn" class="lighting-close-btn">&times;</button>
     </div>
-    <div class="wall-color-presets">
-      <button class="color-swatch" data-color="#F5F5DC" data-name="Beige" style="background:#F5F5DC" title="Beige"></button>
-      <button class="color-swatch" data-color="#D3D3D3" data-name="Light Gray" style="background:#D3D3D3" title="Light Gray"></button>
-      <button class="color-swatch" data-color="#FAF0E6" data-name="Linen" style="background:#FAF0E6" title="Linen"></button>
-      <button class="color-swatch" data-color="#BCB88A" data-name="Sage Green" style="background:#BCB88A" title="Sage Green"></button>
-      <button class="color-swatch" data-color="#B0C4DE" data-name="Steel Blue" style="background:#B0C4DE" title="Steel Blue"></button>
-      <button class="color-swatch" data-color="#E6D5B8" data-name="Warm Sand" style="background:#E6D5B8" title="Warm Sand"></button>
-      <button class="color-swatch" data-color="#F0E68C" data-name="Soft Yellow" style="background:#F0E68C" title="Soft Yellow"></button>
-      <button class="color-swatch" data-color="#E8D4C8" data-name="Blush" style="background:#E8D4C8" title="Blush"></button>
-    </div>
+    <div id="wall-color-presets" class="wall-color-presets"></div>
     <div class="wall-color-custom">
-      <input type="color" id="wall-color-picker" value="#D3D3D3">
-      <input type="text" id="wall-color-name" placeholder="Color name">
+      <div class="wall-color-input-row">
+        <input type="color" id="wall-color-picker" value="#D3D3D3">
+        <button id="wall-color-clear-color" class="wall-color-clear-btn hidden" title="Clear color">&times;</button>
+      </div>
+      <div class="wall-color-input-row">
+        <input type="text" id="wall-color-name" placeholder="Color name">
+        <button id="wall-color-clear-name" class="wall-color-clear-btn hidden" title="Clear name">&times;</button>
+      </div>
       <button id="wall-color-apply" class="btn-primary">Apply</button>
     </div>
     <div id="wall-color-gallery" class="wall-color-gallery"></div>

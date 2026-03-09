@@ -27,8 +27,22 @@ ENHANCE_PROMPT = (
     "composition. Only correct how light interacts with the existing scene."
 )
 
-WALL_COLOR_PROMPT = (
+WALL_COLOR_PROMPT_BOTH = (
     "Change all wall surfaces in this room to {color_name} ({color_hex}). "
+    "Keep the exact same room structure, flooring, ceiling, windows, doors, "
+    "and all other elements unchanged. Make it look like the walls were "
+    "professionally painted in this color."
+)
+
+WALL_COLOR_PROMPT_HEX_ONLY = (
+    "Change all wall surfaces in this room to the color {color_hex}. "
+    "Keep the exact same room structure, flooring, ceiling, windows, doors, "
+    "and all other elements unchanged. Make it look like the walls were "
+    "professionally painted in this color."
+)
+
+WALL_COLOR_PROMPT_NAME_ONLY = (
+    "Change all wall surfaces in this room to {color_name}. "
     "Keep the exact same room structure, flooring, ceiling, windows, doors, "
     "and all other elements unchanged. Make it look like the walls were "
     "professionally painted in this color."
@@ -47,8 +61,8 @@ class EnhanceResponse(BaseModel):
 
 class WallColorRequest(BaseModel):
     room_id: str
-    color_name: str
-    color_hex: str
+    color_name: Optional[str] = None
+    color_hex: Optional[str] = None
 
 
 class WallColorResponse(BaseModel):
@@ -101,10 +115,17 @@ async def generate_wall_color(request: WallColorRequest, org_id: str = Depends(v
     if not bg_bytes:
         raise HTTPException(404, "Background image not found in storage")
 
-    prompt = WALL_COLOR_PROMPT.format(
-        color_name=request.color_name,
-        color_hex=request.color_hex
-    )
+    if not request.color_name and not request.color_hex:
+        raise HTTPException(400, "At least one of color_name or color_hex is required")
+
+    if request.color_name and request.color_hex:
+        prompt = WALL_COLOR_PROMPT_BOTH.format(
+            color_name=request.color_name, color_hex=request.color_hex
+        )
+    elif request.color_hex:
+        prompt = WALL_COLOR_PROMPT_HEX_ONLY.format(color_hex=request.color_hex)
+    else:
+        prompt = WALL_COLOR_PROMPT_NAME_ONLY.format(color_name=request.color_name)
 
     try:
         result_bytes = await edit_image(bg_bytes, prompt, mime_type="image/jpeg")

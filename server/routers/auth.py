@@ -1,7 +1,9 @@
 import os
+import json
 import uuid
 import logging
 from datetime import datetime, timedelta
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -211,3 +213,35 @@ def log_out(credentials: HTTPAuthorizationCredentials = Depends(security)):
     except jwt.InvalidTokenError:
         pass
     return {"status": "logged out"}
+
+
+# ============ Wall Color Presets ============
+
+class WallColorPreset(BaseModel):
+    color: str
+    name: Optional[str] = None
+
+class WallColorPresetsRequest(BaseModel):
+    presets: List[WallColorPreset]
+
+
+@router.get("/presets/wall-colors")
+def get_wall_color_presets(org_id: str = Depends(verify_token)):
+    db = get_auth_db()
+    row = db.execute(
+        "SELECT wall_color_presets FROM orgs WHERE id = ?", [org_id]
+    ).fetchone()
+    if row and row[0]:
+        return {"presets": json.loads(row[0])}
+    return {"presets": None}
+
+
+@router.put("/presets/wall-colors")
+def save_wall_color_presets(body: WallColorPresetsRequest, org_id: str = Depends(verify_token)):
+    db = get_auth_db()
+    presets_json = json.dumps([p.model_dump() for p in body.presets])
+    db.execute(
+        "UPDATE orgs SET wall_color_presets = ? WHERE id = ?",
+        [presets_json, org_id]
+    )
+    return {"status": "saved"}

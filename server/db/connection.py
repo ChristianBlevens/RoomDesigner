@@ -43,6 +43,7 @@ def init_databases():
             id VARCHAR PRIMARY KEY,
             username VARCHAR NOT NULL UNIQUE,
             password_hash VARCHAR NOT NULL,
+            wall_color_presets JSON,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)

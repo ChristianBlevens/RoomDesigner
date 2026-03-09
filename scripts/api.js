@@ -773,18 +773,30 @@ export async function enhanceScreenshot(roomId, compositeBase64, customPrompt = 
 }
 
 export async function generateWallColor(roomId, colorName, colorHex) {
+  const body = { room_id: roomId };
+  if (colorName) body.color_name = colorName;
+  if (colorHex) body.color_hex = colorHex;
   const response = await apiFetch('/enhance/wall-color', {
     method: 'POST',
-    body: JSON.stringify({
-      room_id: roomId,
-      color_name: colorName,
-      color_hex: colorHex
-    })
+    body: JSON.stringify(body)
   });
   return response.json();
 }
 
 export async function deleteWallColor(roomId, variantId) {
   await apiFetch(`/enhance/wall-color/${roomId}/${variantId}`, { method: 'DELETE' });
+}
+
+export async function getWallColorPresets() {
+  const response = await apiFetch('/auth/presets/wall-colors');
+  const data = await response.json();
+  return data.presets;
+}
+
+export async function saveWallColorPresets(presets) {
+  await apiFetch('/auth/presets/wall-colors', {
+    method: 'PUT',
+    body: JSON.stringify({ presets })
+  });
 }
 
