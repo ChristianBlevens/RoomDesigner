@@ -369,6 +369,40 @@
   font-size: var(--font-md);
 }
 
+.color-picker-modal-fields {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-lg);
+  justify-content: center;
+}
+
+.color-picker-modal-fields input[type="color"] {
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  padding: 2px;
+  flex-shrink: 0;
+}
+
+.color-picker-modal-fields input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  padding: var(--spacing-sm);
+  font-size: var(--font-md);
+}
+
+.color-picker-modal-fields input[type="text"]::placeholder {
+  color: var(--text-muted);
+}
+
 .confirm-buttons {
   display: flex;
   flex-wrap: wrap;

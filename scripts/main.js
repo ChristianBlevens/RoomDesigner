@@ -2870,7 +2870,10 @@ let activeWallColorId = 'original';
 let wallColorGenerating = false;
 let wallColorPresets = null;
 let selectedSwatchIndex = -1;
+let currentColor = '#D3D3D3';
+let currentColorName = '';
 let colorCleared = false;
+let colorPickerModalCallback = null;
 
 const DEFAULT_PRESETS = [
   { color: '#F5F5DC', name: 'Beige' },
@@ -2885,6 +2888,14 @@ const DEFAULT_PRESETS = [
 
 function getActivePresets() {
   return wallColorPresets || DEFAULT_PRESETS;
+}
+
+function updateCustomDisplay() {
+  const swatch = document.getElementById('wall-color-swatch');
+  const nameDisplay = document.getElementById('wall-color-name-display');
+
+  swatch.style.background = colorCleared ? '#333' : currentColor;
+  nameDisplay.textContent = colorCleared ? '' : (currentColorName || currentColor);
 }
 
 function renderSwatches() {
@@ -2903,7 +2914,6 @@ function renderSwatches() {
     container.appendChild(btn);
   });
 
-  // Show/hide edit button based on selection
   const editBtn = document.getElementById('wall-color-edit-btn');
   if (selectedSwatchIndex >= 0) {
     editBtn.classList.remove('hidden');
@@ -2915,7 +2925,6 @@ function renderSwatches() {
 function selectSwatch(index) {
   const presets = getActivePresets();
   if (index === selectedSwatchIndex) {
-    // Deselect
     selectedSwatchIndex = -1;
     renderSwatches();
     return;
@@ -2924,17 +2933,20 @@ function selectSwatch(index) {
   selectedSwatchIndex = index;
   const preset = presets[index];
 
-  // Populate inputs
-  const picker = document.getElementById('wall-color-picker');
-  const nameInput = document.getElementById('wall-color-name');
-  picker.value = preset.color;
+  currentColor = preset.color;
+  currentColorName = preset.name || '';
   colorCleared = false;
-  picker.classList.remove('cleared');
-  document.getElementById('wall-color-clear-color').classList.remove('hidden');
-  nameInput.value = preset.name || '';
-  document.getElementById('wall-color-clear-name').classList.toggle('hidden', !nameInput.value);
 
+  updateCustomDisplay();
   renderSwatches();
+}
+
+function openColorPickerModal(title, color, name, onSave) {
+  document.getElementById('color-picker-modal-title').textContent = title;
+  document.getElementById('color-picker-modal-color').value = color || '#D3D3D3';
+  document.getElementById('color-picker-modal-name').value = name || '';
+  colorPickerModalCallback = onSave;
+  modalManager.openModal('color-picker-modal');
 }
 
 function setupWallColorControls() {
@@ -2942,100 +2954,73 @@ function setupWallColorControls() {
   const closeBtn = document.getElementById('wall-color-close-btn');
   const applyBtn = document.getElementById('wall-color-apply');
   const editBtn = document.getElementById('wall-color-edit-btn');
-  const picker = document.getElementById('wall-color-picker');
-  const nameInput = document.getElementById('wall-color-name');
-  const clearColorBtn = document.getElementById('wall-color-clear-color');
-  const clearNameBtn = document.getElementById('wall-color-clear-name');
+  const pickBtn = document.getElementById('wall-color-pick-btn');
 
   paintBtn.addEventListener('click', () => {
     wallColorPanelOpen ? closeWallColorPanel() : openWallColorPanel();
   });
   closeBtn.addEventListener('click', closeWallColorPanel);
 
-  // Edit preset button — opens a hidden color picker to change the selected swatch
-  const presetPicker = document.createElement('input');
-  presetPicker.type = 'color';
-  presetPicker.style.position = 'absolute';
-  presetPicker.style.opacity = '0';
-  presetPicker.style.pointerEvents = 'none';
-  presetPicker.style.width = '0';
-  presetPicker.style.height = '0';
-  document.body.appendChild(presetPicker);
+  // Clicking the pick button opens color picker modal for custom selection
+  pickBtn.addEventListener('click', () => {
+    openColorPickerModal('Pick Color', colorCleared ? '#D3D3D3' : currentColor, currentColorName, (color, name) => {
+      currentColor = color;
+      currentColorName = name;
+      colorCleared = !color && !name;
+      selectedSwatchIndex = -1;
+      updateCustomDisplay();
+      renderSwatches();
+    });
+  });
 
+  // Edit preset button opens color picker modal for the selected preset
   editBtn.addEventListener('click', () => {
-    if (selectedSwatchIndex < 0) return;
-    const presets = getActivePresets();
-    presetPicker.value = presets[selectedSwatchIndex].color;
-    presetPicker.click();
-  });
-
-  presetPicker.addEventListener('input', () => {
-    if (selectedSwatchIndex < 0) return;
-    const presets = getActivePresets();
-    presets[selectedSwatchIndex].color = presetPicker.value;
-    renderSwatches();
-  });
-
-  presetPicker.addEventListener('change', async () => {
     if (selectedSwatchIndex < 0) return;
     const presets = getActivePresets();
     const preset = presets[selectedSwatchIndex];
 
-    // Update preset name from the name input (user may have edited it)
-    preset.name = nameInput.value.trim() || null;
+    openColorPickerModal('Edit Preset', preset.color, preset.name || '', async (color, name) => {
+      preset.color = color;
+      preset.name = name || null;
 
-    // Update the main picker to reflect the edited preset
-    picker.value = preset.color;
-    colorCleared = false;
-    picker.classList.remove('cleared');
-    clearColorBtn.classList.remove('hidden');
-
-    renderSwatches();
-
-    // Save to server
-    try {
-      await saveWallColorPresets(presets);
-      wallColorPresets = presets;
-    } catch (err) {
-      showActionNotification('Failed to save preset');
-    }
-  });
-
-  // Clear color button
-  clearColorBtn.addEventListener('click', () => {
-    colorCleared = true;
-    picker.classList.add('cleared');
-    clearColorBtn.classList.add('hidden');
-  });
-
-  // Clear name button
-  clearNameBtn.addEventListener('click', () => {
-    nameInput.value = '';
-    clearNameBtn.classList.add('hidden');
-  });
-
-  // Show/hide clear buttons on input changes
-  picker.addEventListener('input', () => {
-    colorCleared = false;
-    picker.classList.remove('cleared');
-    clearColorBtn.classList.remove('hidden');
-    // Deselect swatch when manually changing color
-    if (selectedSwatchIndex >= 0) {
-      selectedSwatchIndex = -1;
+      // Update custom display to reflect edited preset (since it was selected)
+      currentColor = color;
+      currentColorName = name;
+      colorCleared = false;
+      updateCustomDisplay();
       renderSwatches();
-    }
-  });
 
-  nameInput.addEventListener('input', () => {
-    clearNameBtn.classList.toggle('hidden', !nameInput.value);
+      try {
+        await saveWallColorPresets(presets);
+        wallColorPresets = presets;
+      } catch (err) {
+        showActionNotification('Failed to save preset');
+      }
+    });
   });
 
   // Apply button
   applyBtn.addEventListener('click', () => {
-    const hex = colorCleared ? null : picker.value;
-    const name = nameInput.value.trim() || null;
+    const hex = colorCleared ? null : currentColor;
+    const name = currentColorName || null;
     if (!hex && !name) return;
     applyWallColor(name, hex);
+  });
+
+  // Color picker modal save/cancel
+  document.getElementById('color-picker-modal-save').addEventListener('click', () => {
+    const color = document.getElementById('color-picker-modal-color').value;
+    const name = document.getElementById('color-picker-modal-name').value.trim();
+    modalManager.closeModal();
+    if (colorPickerModalCallback) {
+      colorPickerModalCallback(color, name);
+      colorPickerModalCallback = null;
+    }
+  });
+
+  document.getElementById('color-picker-modal-cancel').addEventListener('click', () => {
+    colorPickerModalCallback = null;
+    modalManager.closeModal();
   });
 
   // Load presets from server
@@ -3058,12 +3043,9 @@ function openWallColorPanel() {
   closeLayoutsPanelIfOpen();
   wallColorPanelOpen = true;
   selectedSwatchIndex = -1;
-  colorCleared = false;
-  document.getElementById('wall-color-picker').classList.remove('cleared');
-  document.getElementById('wall-color-clear-color').classList.add('hidden');
-  document.getElementById('wall-color-clear-name').classList.add('hidden');
   document.getElementById('wall-color-panel').classList.remove('hidden');
   document.getElementById('paint-btn').classList.add('active');
+  updateCustomDisplay();
   renderSwatches();
   renderWallColorGallery();
 }

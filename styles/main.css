@@ -1386,41 +1386,6 @@ select option {
   color: var(--accent);
 }
 
-.wall-color-input-row {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  position: relative;
-}
-
-.wall-color-input-row:first-child {
-  flex-shrink: 0;
-}
-
-.wall-color-input-row:nth-child(2) {
-  flex: 1;
-  min-width: 0;
-}
-
-.wall-color-clear-btn {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  font-size: 0.9rem;
-  cursor: pointer;
-  padding: 2px 4px;
-  flex-shrink: 0;
-  transition: color 0.15s;
-}
-
-.wall-color-clear-btn:hover {
-  color: var(--text-danger);
-}
-
-.wall-color-custom input[type="color"].cleared {
-  opacity: 0.3;
-}
-
 .wall-color-custom {
   display: flex;
   gap: var(--spacing-xs);
@@ -1428,30 +1393,44 @@ select option {
   align-items: center;
 }
 
-.wall-color-custom input[type="color"] {
-  width: 36px;
-  height: 36px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  cursor: pointer;
-  padding: 2px;
-  flex-shrink: 0;
-  transition: opacity 0.15s;
-}
-
-.wall-color-custom input[type="text"] {
+.wall-color-pick-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
   flex: 1;
   min-width: 0;
-  background: var(--surface-dark);
+  cursor: pointer;
+  padding: var(--spacing-xs);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  padding: var(--spacing-xs) var(--spacing-sm);
-  font-size: var(--font-sm);
+  background: var(--surface-dark);
+  transition: border-color 0.15s;
 }
 
-.wall-color-custom input[type="text"]::placeholder {
+.wall-color-pick-btn:hover {
+  border-color: var(--accent);
+}
+
+.wall-color-swatch {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.wall-color-name-display {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wall-color-name-display:empty::before {
+  content: 'Tap to pick color';
   color: var(--text-muted);
 }
 

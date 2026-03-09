@@ -191,13 +191,9 @@
     </div>
     <div id="wall-color-presets" class="wall-color-presets"></div>
     <div class="wall-color-custom">
-      <div class="wall-color-input-row">
-        <input type="color" id="wall-color-picker" value="#D3D3D3">
-        <button id="wall-color-clear-color" class="wall-color-clear-btn hidden" title="Clear color">&times;</button>
-      </div>
-      <div class="wall-color-input-row">
-        <input type="text" id="wall-color-name" placeholder="Color name">
-        <button id="wall-color-clear-name" class="wall-color-clear-btn hidden" title="Clear name">&times;</button>
+      <div id="wall-color-pick-btn" class="wall-color-pick-btn" title="Pick color">
+        <div id="wall-color-swatch" class="wall-color-swatch" style="background:#D3D3D3"></div>
+        <span id="wall-color-name-display" class="wall-color-name-display"></span>
       </div>
       <button id="wall-color-apply" class="btn-primary">Apply</button>
     </div>
@@ -562,6 +558,21 @@
       <div class="confirm-buttons">
         <button id="enhance-skip-btn" class="btn-secondary">Skip</button>
         <button id="enhance-apply-btn" class="btn-primary">Enhance</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Color Picker Modal (shared for custom color selection and preset editing) -->
+  <div class="modal-overlay modal-hidden" id="color-picker-modal">
+    <div class="modal-content confirm-modal-content">
+      <h3 id="color-picker-modal-title">Pick Color</h3>
+      <div class="color-picker-modal-fields">
+        <input type="color" id="color-picker-modal-color" value="#D3D3D3">
+        <input type="text" id="color-picker-modal-name" placeholder="Color name (optional)">
+      </div>
+      <div class="confirm-buttons">
+        <button id="color-picker-modal-cancel" class="btn-secondary">Cancel</button>
+        <button id="color-picker-modal-save" class="btn-primary">Done</button>
       </div>
     </div>
   </div>
