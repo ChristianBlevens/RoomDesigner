@@ -30,7 +30,7 @@ import {
 import { getFurnitureEntry } from './api.js';
 import { modalManager } from './modals.js';
 import { extractModelFromZip } from './utils.js';
-import { isLightingDirectionMode, showActionNotification, isMeterStickPlacementMode } from './main.js';
+import { isLightingDirectionMode, showActionNotification, showConfirmDialog, isMeterStickPlacementMode } from './main.js';
 
 // Interaction state
 let selectedObject = null;
@@ -901,21 +901,25 @@ function onKeyDown(event) {
 function deleteSelectedFurniture() {
   if (!selectedObject) return;
 
-  // Show immediate feedback
-  showActionNotification('Deleting...');
+  const isMeterStick = selectedObject.userData.isMeterStick;
+  const message = isMeterStick ? 'Delete meter stick?' : 'Delete this furniture?';
 
-  if (selectedObject.userData.isMeterStick) {
-    removeMeterStickFromScene();
+  showConfirmDialog(message, () => {
+    modalManager.closeModal();
+
+    if (isMeterStick) {
+      removeMeterStickFromScene();
+      deselectFurniture();
+      if (onMeterStickDeleted) onMeterStickDeleted();
+      return;
+    }
+
+    const scene = getScene();
+    const command = new DeleteFurnitureCommand(scene, selectedObject, selectableObjects);
+    undoManager.execute(command);
+
     deselectFurniture();
-    if (onMeterStickDeleted) onMeterStickDeleted();
-    return;
-  }
-
-  const scene = getScene();
-  const command = new DeleteFurnitureCommand(scene, selectedObject, selectableObjects);
-  undoManager.execute(command);
-
-  deselectFurniture();
+  });
 }
 
 // Place furniture from database entry

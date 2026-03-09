@@ -207,7 +207,7 @@ function hidePopup(popupId) {
  * @param {Function} onConfirm - Async function to call on confirm
  * @param {Function} [onCancel] - Optional function to call on cancel
  */
-function showConfirmDialog(message, onConfirm, onCancel = null) {
+export function showConfirmDialog(message, onConfirm, onCancel = null) {
   const messageEl = document.getElementById('confirm-delete-message');
   const confirmBtn = document.getElementById('confirm-delete-btn');
   const cancelBtn = document.getElementById('confirm-cancel-btn');
@@ -285,6 +285,28 @@ async function init() {
   setupWallColorControls();
   setupTutorials();
   setupControlsBarLayout();
+
+  // Close control bar panels when clicking outside
+  document.addEventListener('pointerdown', (event) => {
+    if (!lightingPanelOpen && !scalePanelOpen && !layoutsPanelOpen && !wallColorPanelOpen) return;
+
+    const panelIds = ['lighting-panel', 'scale-panel', 'layouts-panel', 'wall-color-panel'];
+    const buttonIds = ['lighting-btn', 'scale-btn', 'layouts-btn', 'paint-btn'];
+
+    for (const id of panelIds) {
+      const el = document.getElementById(id);
+      if (el && el.contains(event.target)) return;
+    }
+    for (const id of buttonIds) {
+      const el = document.getElementById(id);
+      if (el && el.contains(event.target)) return;
+    }
+
+    closeLightingPanelIfOpen();
+    closeScalePanelIfOpen();
+    closeLayoutsPanelIfOpen();
+    closeWallColorPanelIfOpen();
+  });
 
   // Warn about unsaved changes on page unload
   window.addEventListener('beforeunload', (e) => {
@@ -896,15 +918,18 @@ async function renderLayoutCards() {
         loadLayoutFromCard(layout);
       });
 
-      card.querySelector('.layout-card-delete').addEventListener('click', async (e) => {
+      card.querySelector('.layout-card-delete').addEventListener('click', (e) => {
         e.stopPropagation();
-        try {
-          await deleteLayout(currentRoomId, layout.id);
-          showActionNotification('Layout deleted');
-          renderLayoutCards();
-        } catch (err) {
-          showActionNotification('Failed to delete layout');
-        }
+        showConfirmDialog(`Delete layout "${layout.name}"?`, async () => {
+          modalManager.closeModal();
+          try {
+            await deleteLayout(currentRoomId, layout.id);
+            showActionNotification('Layout deleted');
+            renderLayoutCards();
+          } catch (err) {
+            showActionNotification('Failed to delete layout');
+          }
+        });
       });
 
       container.appendChild(card);

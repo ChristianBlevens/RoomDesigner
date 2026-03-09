@@ -12,7 +12,7 @@ body {
   max-width: 1400px;
   margin: 0 auto;
   padding: var(--spacing-md);
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 /* ============ Header ============ */
@@ -184,7 +184,7 @@ body {
   top: 0;
   right: 0;
   width: min(500px, 90vw);
-  height: 100vh;
+  height: 100dvh;
   background: var(--bg-primary);
   border-left: 1px solid var(--border-default);
   box-shadow: var(--shadow-lg);
