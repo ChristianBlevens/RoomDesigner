@@ -61,6 +61,12 @@ def init_databases():
         )
     """)
 
+    # Migration: add destaging_buffer_days column if missing
+    try:
+        _auth_conn.execute("ALTER TABLE orgs ADD COLUMN destaging_buffer_days INTEGER DEFAULT 0")
+    except Exception:
+        pass
+
     # Houses database
     _houses_conn = _safe_connect(HOUSES_DB)
     _houses_conn.execute("""
@@ -97,6 +103,12 @@ def init_databases():
     # Migration: add wall_colors column if missing
     try:
         _houses_conn.execute("ALTER TABLE rooms ADD COLUMN wall_colors JSON")
+    except Exception:
+        pass
+
+    # Migration: add original_background_key column if missing
+    try:
+        _houses_conn.execute("ALTER TABLE rooms ADD COLUMN original_background_key VARCHAR")
     except Exception:
         pass
 

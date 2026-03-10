@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 ROOM_SELECT = """
     SELECT id, house_id, name, status, error_message, background_image_path,
            placed_furniture, moge_data, lighting_settings, room_scale, meter_stick,
-           wall_colors
+           wall_colors, original_background_key
     FROM rooms
 """
 
@@ -56,6 +56,7 @@ def row_to_response(row) -> RoomResponse:
     room_scale = row[9] if row[9] is not None else 1.0
     meter_stick = json.loads(row[10]) if row[10] else None
     wall_colors = json.loads(row[11]) if row[11] else None
+    original_bg_key = row[12] if len(row) > 12 else None
 
     # Resolve R2 URLs for wall color variants
     if wall_colors and wall_colors.get("variants"):
@@ -64,6 +65,7 @@ def row_to_response(row) -> RoomResponse:
                 variant["imageUrl"] = r2.get_public_url(variant["imagePath"])
 
     background_url = r2.get_public_url(background_path) if background_path else None
+    original_bg_url = r2.get_public_url(original_bg_key) if original_bg_key else None
 
     return RoomResponse(
         id=room_id,
@@ -72,6 +74,7 @@ def row_to_response(row) -> RoomResponse:
         status=status,
         errorMessage=error_message,
         backgroundImageUrl=background_url,
+        originalBackgroundUrl=original_bg_url,
         placedFurniture=placed_furniture,
         mogeData=moge_data,
         lightingSettings=lighting_settings,
@@ -127,30 +130,54 @@ async def create_room(
     houseId: str = Form(...),
     name: str = Form(...),
     image: UploadFile = File(...),
+    clearFurniture: str = Form("false"),
     org_id: str = Depends(verify_token)
 ):
     """
     Create a new room with background image.
-    Synchronous: waits for Modal mesh generation (30-60 seconds).
+    Optionally clears furniture from image via Gemini before MoGe-2 processing.
+    Synchronous: waits for processing (30-90 seconds depending on clearing).
     """
     verify_house_ownership(houseId, org_id)
     db = get_houses_db()
 
     room_id = str(uuid.uuid4())
     image_bytes = await image.read()
-
-    logger.info(f"Processing room {room_id} with Modal...")
-    try:
-        result = await process_image_with_modal(image_bytes)
-    except MoGeError as e:
-        logger.error(f"Room {room_id} mesh generation failed: {e}")
-        raise HTTPException(status_code=502, detail=f"Mesh generation failed: {str(e)}")
+    should_clear = clearFurniture.lower() == "true"
 
     ext = "jpg"
     if image.content_type == "image/png":
         ext = "png"
     elif image.content_type == "image/webp":
         ext = "webp"
+
+    original_bg_key = None
+    moge_input_bytes = image_bytes
+
+    if should_clear:
+        original_bg_key = f"rooms/backgrounds/originals/{room_id}.{ext}"
+        r2.upload_bytes(original_bg_key, image_bytes, image.content_type or "image/jpeg")
+
+        logger.info(f"Clearing furniture from room {room_id} via Gemini...")
+        try:
+            from gemini_client import edit_image
+            from routers.enhance import ROOM_CLEAR_PROMPT
+            cleared_bytes = await edit_image(image_bytes, ROOM_CLEAR_PROMPT, mime_type=image.content_type or "image/jpeg")
+            moge_input_bytes = cleared_bytes
+            image_bytes = cleared_bytes
+        except Exception as e:
+            logger.error(f"Room {room_id} furniture clearing failed: {e}")
+            r2.delete_object(original_bg_key)
+            raise HTTPException(status_code=502, detail=f"Furniture clearing failed: {str(e)}")
+
+    logger.info(f"Processing room {room_id} with Modal...")
+    try:
+        result = await process_image_with_modal(moge_input_bytes)
+    except MoGeError as e:
+        logger.error(f"Room {room_id} mesh generation failed: {e}")
+        if original_bg_key:
+            r2.delete_object(original_bg_key)
+        raise HTTPException(status_code=502, detail=f"Mesh generation failed: {str(e)}")
 
     mesh_key = f"rooms/meshes/{room_id}.glb"
     r2.upload_bytes(mesh_key, result["mesh_bytes"], "model/gltf-binary")
@@ -170,13 +197,14 @@ async def create_room(
 
     db.execute(
         """
-        INSERT INTO rooms (id, house_id, name, status, background_image_path, placed_furniture, moge_data, lighting_settings)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO rooms (id, house_id, name, status, background_image_path,
+                           original_background_key, placed_furniture, moge_data, lighting_settings)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        [room_id, houseId, name, "ready", bg_key, "[]", json.dumps(moge_data), None]
+        [room_id, houseId, name, "ready", bg_key, original_bg_key, "[]", json.dumps(moge_data), None]
     )
 
-    logger.info(f"Room {room_id} created successfully")
+    logger.info(f"Room {room_id} created successfully" + (" (furniture cleared)" if should_clear else ""))
 
     return RoomResponse(
         id=room_id,
@@ -184,6 +212,7 @@ async def create_room(
         name=name,
         status="ready",
         backgroundImageUrl=r2.get_public_url(bg_key),
+        originalBackgroundUrl=r2.get_public_url(original_bg_key) if original_bg_key else None,
         placedFurniture=[],
         mogeData=moge_data,
         lightingSettings=None
@@ -230,7 +259,7 @@ def delete_room(room_id: str, org_id: str = Depends(verify_token)):
     db = get_houses_db()
 
     row = db.execute(
-        "SELECT background_image_path, wall_colors FROM rooms WHERE id = ?", [room_id]
+        "SELECT background_image_path, wall_colors, original_background_key FROM rooms WHERE id = ?", [room_id]
     ).fetchone()
 
     layout_rows = db.execute(
@@ -242,6 +271,9 @@ def delete_room(room_id: str, org_id: str = Depends(verify_token)):
     keys_to_delete = [f"rooms/meshes/{room_id}.glb"]
     if row and row[0]:
         keys_to_delete.append(row[0])
+    # Original background (pre-clearing)
+    if row and row[2]:
+        keys_to_delete.append(row[2])
     for lr in layout_rows:
         if lr[0]:
             keys_to_delete.append(lr[0])

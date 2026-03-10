@@ -214,12 +214,13 @@ export async function getOrphanRooms() {
  * Synchronous: waits for mesh generation (30-60 seconds).
  * Returns the completed room or throws error.
  */
-export async function createRoom(houseId, name, imageFile) {
+export async function createRoom(houseId, name, imageFile, clearFurniture = false) {
   const token = getToken();
   const formData = new FormData();
   formData.append('houseId', houseId);
   formData.append('name', name);
   formData.append('image', imageFile);
+  formData.append('clearFurniture', clearFurniture.toString());
 
   const headers = {};
   if (token) {
@@ -641,6 +642,7 @@ export async function getBatchAvailability(entryIds, currentHouseId, currentRoom
       result[id] = {
         available: Math.max(0, cached[id].available - placedInScene),
         total: cached[id].total,
+        conflicts: cached[id].conflicts || [],
       };
     }
     return result;
@@ -665,10 +667,11 @@ export async function getBatchAvailability(entryIds, currentHouseId, currentRoom
   const result = {};
   for (const id of entryIds) {
     const placedInScene = currentRoomPlacedCounts[id] || 0;
-    const entry = serverResult[id] || { available: 0, total: 0 };
+    const entry = serverResult[id] || { available: 0, total: 0, conflicts: [] };
     result[id] = {
       available: Math.max(0, entry.available - placedInScene),
       total: entry.total,
+      conflicts: entry.conflicts || [],
     };
   }
 
@@ -797,6 +800,19 @@ export async function saveWallColorPresets(presets) {
   await apiFetch('/auth/presets/wall-colors', {
     method: 'PUT',
     body: JSON.stringify({ presets })
+  });
+}
+
+export async function getDestagingBuffer() {
+  const response = await apiFetch('/auth/settings/destaging-buffer');
+  const data = await response.json();
+  return data.days;
+}
+
+export async function saveDestagingBuffer(days) {
+  await apiFetch('/auth/settings/destaging-buffer', {
+    method: 'PUT',
+    body: JSON.stringify({ days }),
   });
 }
 

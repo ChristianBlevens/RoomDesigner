@@ -79,6 +79,8 @@ import {
   deleteWallColor,
   getWallColorPresets,
   saveWallColorPresets,
+  getDestagingBuffer,
+  saveDestagingBuffer,
   fetchAsBlob,
   getLayouts,
   createLayout,
@@ -126,6 +128,7 @@ import {
   debounce
 } from './utils.js';
 import { adjustUrlForProxy } from './api.js';
+import { invalidateCache } from './cache.js';
 import { isAuthenticated, signIn, signUp, logout, getUsername, getToken, isAdmin } from './auth.js';
 
 // Application state
@@ -145,6 +148,7 @@ let savedMeterStickData = null;
 // Pending state for multi-step room creation flow
 let pendingRoomImage = null;
 let pendingRoomName = null;
+let pendingClearFurniture = false;
 
 // Helper: count how many of a specific entry are placed in the current scene
 function getPlacedCountForEntry(entryId) {
@@ -266,6 +270,7 @@ async function init() {
 
   // Setup UI event handlers
   setupFileInputs();
+  setupClearFurnitureModal();
   setupOrientationModal();
   setupFurnitureModal();
   setupEntryEditor();
@@ -290,6 +295,13 @@ async function init() {
 
   // Close control bar panels when clicking outside (capture phase to intercept before canvas)
   document.addEventListener('pointerdown', (event) => {
+    // Dismiss conflict tooltips when tapping elsewhere
+    if (!event.target.closest('.availability-badge')) {
+      document.querySelectorAll('.availability-badge.tooltip-visible').forEach(b => {
+        b.classList.remove('tooltip-visible');
+      });
+    }
+
     if (!lightingPanelOpen && !scalePanelOpen && !layoutsPanelOpen && !wallColorPanelOpen) return;
 
     // Never close panels when clicking on a modal overlay (modals sit above panels)
@@ -1219,6 +1231,20 @@ function setupFileInputs() {
   }
 }
 
+function setupClearFurnitureModal() {
+  document.getElementById('clear-furniture-yes').addEventListener('click', async () => {
+    pendingClearFurniture = true;
+    modalManager.closeModal('clear-furniture-modal');
+    await processRoomAutomatically();
+  });
+
+  document.getElementById('clear-furniture-no').addEventListener('click', async () => {
+    pendingClearFurniture = false;
+    modalManager.closeModal('clear-furniture-modal');
+    await processRoomAutomatically();
+  });
+}
+
 function setBackgroundImage(blob, bringToFront = false) {
   const container = document.getElementById('background-container');
   const url = URL.createObjectURL(blob);
@@ -1361,13 +1387,15 @@ async function processRoomAutomatically() {
   errorEl.classList.add('hidden');
   loadingEl.classList.remove('hidden');
   applyBtn.classList.add('hidden');
-  loadingText.textContent = 'Creating room and analyzing geometry (30-60 seconds)...';
+  loadingText.textContent = pendingClearFurniture
+    ? 'Clearing furniture and analyzing geometry (60-90 seconds)...'
+    : 'Creating room and analyzing geometry (30-60 seconds)...';
 
   modalManager.openModal('orientation-modal');
 
   try {
-    // Create room - server waits for Modal mesh generation
-    const room = await createRoom(currentHouseId, pendingRoomName, pendingRoomImage);
+    // Create room - server waits for Modal mesh generation (and optional Gemini clearing)
+    const room = await createRoom(currentHouseId, pendingRoomName, pendingRoomImage, pendingClearFurniture);
     console.log('Room created:', room);
 
     // Load mesh into scene
@@ -1406,11 +1434,13 @@ async function processRoomAutomatically() {
 
     // Set as current room
     currentRoomId = room.id;
+    currentRoom = room;
     currentBackgroundImage = pendingRoomImage;
 
     // Clear pending state
     pendingRoomImage = null;
     pendingRoomName = null;
+    pendingClearFurniture = false;
 
     // Clear any existing furniture
     clearAllFurniture();
@@ -1457,6 +1487,7 @@ async function cancelRoomCreationFlow() {
   // Clear pending state
   pendingRoomImage = null;
   pendingRoomName = null;
+  pendingClearFurniture = false;
 
   modalManager.closeAllModals();
   resetBackgroundZIndex();
@@ -1509,7 +1540,52 @@ function openFurnitureModal() {
 async function refreshFurnitureModal() {
   await updateCategorySelect();
   await updateTagsDropdown();
+  await loadDestagingBufferUI();
   await renderFurnitureGrid();
+}
+
+async function loadDestagingBufferUI() {
+  let container = document.getElementById('destaging-buffer-row');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'destaging-buffer-row';
+    container.className = 'destaging-buffer-row';
+    container.innerHTML = `
+      <label>De-staging buffer:
+        <input type="number" id="destaging-buffer-input" min="0" max="30" value="0">
+        <span>days</span>
+      </label>
+      <button id="destaging-buffer-save" class="btn-secondary btn-sm">Save</button>
+      <span id="destaging-buffer-status" class="buffer-status"></span>
+    `;
+    const header = document.querySelector('.furniture-modal-header');
+    header.parentNode.insertBefore(container, header.nextSibling);
+
+    document.getElementById('destaging-buffer-save').addEventListener('click', async () => {
+      const input = document.getElementById('destaging-buffer-input');
+      const days = parseInt(input.value, 10);
+      if (isNaN(days) || days < 0) return;
+      const status = document.getElementById('destaging-buffer-status');
+      try {
+        await saveDestagingBuffer(days);
+        status.textContent = 'Saved';
+        status.className = 'buffer-status saved';
+        setTimeout(() => { status.textContent = ''; }, 2000);
+        invalidateCache('availability');
+        await renderFurnitureGrid();
+      } catch (err) {
+        status.textContent = 'Failed';
+        status.className = 'buffer-status failed';
+      }
+    });
+  }
+
+  try {
+    const days = await getDestagingBuffer();
+    document.getElementById('destaging-buffer-input').value = days;
+  } catch (err) {
+    document.getElementById('destaging-buffer-input').value = 0;
+  }
 }
 
 async function updateCategorySelect() {
@@ -1683,9 +1759,35 @@ async function createFurnitureCard(item, availability) {
   loadCardImages(item.id, thumbnailContainer);
 
   // Availability badge
+  const hasBufferConflicts = availability.conflicts?.some(c => c.type === 'buffer') || false;
   const badge = document.createElement('span');
-  badge.className = 'availability-badge' + (isUnavailable ? ' unavailable' : '');
+  badge.className = 'availability-badge'
+      + (isUnavailable ? ' unavailable' : '')
+      + (!isUnavailable && hasBufferConflicts ? ' warning' : '');
   badge.textContent = `${available}/${total}`;
+
+  // Conflict tooltip
+  if (availability.conflicts && availability.conflicts.length > 0) {
+    const tooltip = document.createElement('div');
+    tooltip.className = 'conflict-tooltip';
+    const lines = availability.conflicts.map(c => {
+      const dateRange = formatConflictDates(c.startDate, c.endDate);
+      const suffix = c.type === 'buffer' ? ' \u2014 may still be there' : '';
+      return `${c.count} at "${c.houseName}" (${dateRange})${suffix}`;
+    });
+    tooltip.innerHTML = lines.join('<br>');
+    badge.appendChild(tooltip);
+    badge.style.position = 'relative';
+
+    badge.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('.availability-badge.tooltip-visible').forEach(b => {
+        if (b !== badge) b.classList.remove('tooltip-visible');
+      });
+      badge.classList.toggle('tooltip-visible');
+    });
+  }
+
   thumbnailContainer.appendChild(badge);
 
   // Name
@@ -2839,6 +2941,17 @@ async function openTutorialContent(entry) {
   }
 }
 
+// ============ Conflict Date Formatting ============
+
+function formatConflictDates(startDate, endDate) {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  const opts = { month: 'short', day: 'numeric' };
+  const startStr = start.toLocaleDateString('en-US', opts);
+  const endStr = end.toLocaleDateString('en-US', opts);
+  return `${startStr}\u2013${endStr}`;
+}
+
 // ============ Action Notification (Bottom-Left Feedback) ============
 
 let actionNotificationTimeout = null;
@@ -3095,7 +3208,9 @@ async function applyWallColor(colorName, colorHex) {
 async function switchWallColor(variantId) {
   activeWallColorId = variantId;
   let url;
-  if (variantId === 'original') {
+  if (variantId === 'original-photo' && currentRoom?.originalBackgroundUrl) {
+    url = currentRoom.originalBackgroundUrl;
+  } else if (variantId === 'original') {
     url = currentRoom?.backgroundImageUrl;
   } else {
     const variant = wallColorVariants.find(v => v.id === variantId);
@@ -3112,12 +3227,26 @@ function renderWallColorGallery() {
   const container = document.getElementById('wall-color-gallery');
   container.innerHTML = '';
 
-  // Original card
-  const origCard = document.createElement('div');
-  origCard.className = `wall-color-card${activeWallColorId === 'original' ? ' active' : ''}`;
-  origCard.innerHTML = '<span class="wall-color-label">Original</span>';
-  origCard.addEventListener('click', () => switchWallColor('original'));
-  container.appendChild(origCard);
+  // Original/Cleared cards
+  if (currentRoom && currentRoom.originalBackgroundUrl) {
+    const origPhotoCard = document.createElement('div');
+    origPhotoCard.className = `wall-color-card${activeWallColorId === 'original-photo' ? ' active' : ''}`;
+    origPhotoCard.innerHTML = '<span class="wall-color-label">Original Photo</span>';
+    origPhotoCard.addEventListener('click', () => switchWallColor('original-photo'));
+    container.appendChild(origPhotoCard);
+
+    const clearedCard = document.createElement('div');
+    clearedCard.className = `wall-color-card${activeWallColorId === 'original' ? ' active' : ''}`;
+    clearedCard.innerHTML = '<span class="wall-color-label">Cleared</span>';
+    clearedCard.addEventListener('click', () => switchWallColor('original'));
+    container.appendChild(clearedCard);
+  } else {
+    const origCard = document.createElement('div');
+    origCard.className = `wall-color-card${activeWallColorId === 'original' ? ' active' : ''}`;
+    origCard.innerHTML = '<span class="wall-color-label">Original</span>';
+    origCard.addEventListener('click', () => switchWallColor('original'));
+    container.appendChild(origCard);
+  }
 
   // Variant cards
   for (const v of wallColorVariants) {
@@ -4067,8 +4196,8 @@ async function handleRoomNameSubmit(event) {
     pendingRoomName = name;
     closeRoomNameModal();
 
-    // Start automatic processing flow (no user interaction required)
-    await processRoomAutomatically();
+    // Ask about furniture clearing before processing
+    modalManager.openModal('clear-furniture-modal');
   } finally {
     roomNameSubmitting = false;
   }

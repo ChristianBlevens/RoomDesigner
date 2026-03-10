@@ -48,6 +48,14 @@ WALL_COLOR_PROMPT_NAME_ONLY = (
     "professionally painted in this color."
 )
 
+ROOM_CLEAR_PROMPT = (
+    "Remove all furniture, objects, and clutter from this room photograph. "
+    "Show the empty room with bare floors, walls, and ceiling. "
+    "Reconstruct the surfaces behind removed objects to look natural and continuous. "
+    "Preserve the room's architecture, lighting, windows, doors, and built-in features. "
+    "Do not add any new objects or furniture."
+)
+
 
 class EnhanceRequest(BaseModel):
     room_id: str

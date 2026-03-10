@@ -32,3 +32,18 @@ class FurnitureResponse(BaseModel):
     imageUrl: Optional[str] = None
     preview3dUrl: Optional[str] = None
     modelUrl: Optional[str] = None
+
+
+class ConflictDetail(BaseModel):
+    houseId: str
+    houseName: str
+    startDate: str
+    endDate: str
+    count: int
+    type: str  # "overlap" or "buffer"
+
+
+class AvailabilityEntry(BaseModel):
+    available: int
+    total: int
+    conflicts: List[ConflictDetail] = []

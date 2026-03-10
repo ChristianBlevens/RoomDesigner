@@ -154,27 +154,27 @@ def delete_furniture(furniture_id: str, org_id: str = Depends(verify_token)):
     return {"status": "deleted"}
 
 
-# Batch availability models and endpoint
+# Batch availability endpoint
 
 class AvailabilityRequest(BaseModel):
     entryIds: List[str]
     currentHouseId: Optional[str] = None
     currentRoomId: Optional[str] = None
 
-class AvailabilityEntry(BaseModel):
-    available: int
-    total: int
 
-@router.post("/availability", response_model=Dict[str, AvailabilityEntry])
+@router.post("/availability")
 def get_batch_availability(request: AvailabilityRequest, org_id: str = Depends(verify_token)):
     """
     Calculate availability for multiple furniture entries in a single request.
     Availability = total quantity - used in overlapping houses (excluding current room).
+    Includes conflict details per house and buffer zone warnings.
     """
-    from db.connection import get_houses_db
+    from db.connection import get_houses_db, get_auth_db
+    from models.furniture import AvailabilityEntry, ConflictDetail
 
     furniture_db = get_furniture_db()
     houses_db = get_houses_db()
+    auth_db = get_auth_db()
 
     result = {}
 
@@ -208,28 +208,56 @@ def get_batch_availability(request: AvailabilityRequest, org_id: str = Depends(v
 
     house_start, house_end = current_house
 
-    overlapping_houses = houses_db.execute(
+    # Query 1: Hard conflicts (actual date overlap)
+    overlap_houses = houses_db.execute(
         """
-        SELECT id FROM houses
-        WHERE org_id = ? AND start_date <= ? AND end_date >= ?
+        SELECT id, name, start_date, end_date FROM houses
+        WHERE org_id = ? AND id != ? AND start_date <= ? AND end_date >= ?
         """,
-        [org_id, house_end, house_start]
+        [org_id, request.currentHouseId, str(house_end), str(house_start)]
     ).fetchall()
 
-    overlapping_house_ids = [h[0] for h in overlapping_houses]
+    # Query 2: Buffer zone warnings (ended within N days before current house starts)
+    buffer_row = auth_db.execute(
+        "SELECT destaging_buffer_days FROM orgs WHERE id = ?", [org_id]
+    ).fetchone()
+    buffer_days = buffer_row[0] if buffer_row and buffer_row[0] else 0
 
-    if not overlapping_house_ids:
+    buffer_houses = []
+    if buffer_days > 0:
+        from datetime import timedelta
+        buffer_start = house_start - timedelta(days=buffer_days)
+        buffer_houses = houses_db.execute(
+            """
+            SELECT id, name, start_date, end_date FROM houses
+            WHERE org_id = ? AND id != ?
+            AND end_date < ? AND end_date >= ?
+            """,
+            [org_id, request.currentHouseId, str(house_start), str(buffer_start)]
+        ).fetchall()
+
+    # Build house info lookup
+    conflict_houses = {}
+    for h in overlap_houses:
+        conflict_houses[h[0]] = {"name": h[1], "start": str(h[2]), "end": str(h[3]), "type": "overlap"}
+    for h in buffer_houses:
+        if h[0] not in conflict_houses:
+            conflict_houses[h[0]] = {"name": h[1], "start": str(h[2]), "end": str(h[3]), "type": "buffer"}
+
+    if not conflict_houses:
         for entry_id in request.entryIds:
             total = quantities.get(entry_id, 0)
             result[entry_id] = AvailabilityEntry(available=total, total=total)
         return result
 
-    house_placeholders = ','.join(['?' for _ in overlapping_house_ids])
+    # Query rooms in all conflict houses for placed furniture
+    all_conflict_ids = list(conflict_houses.keys())
+    house_placeholders = ','.join(['?' for _ in all_conflict_ids])
     rooms_query = f"""
-        SELECT id, placed_furniture FROM rooms
+        SELECT house_id, placed_furniture FROM rooms
         WHERE house_id IN ({house_placeholders})
     """
-    rooms_params = list(overlapping_house_ids)
+    rooms_params = list(all_conflict_ids)
 
     if request.currentRoomId:
         rooms_query += " AND id != ?"
@@ -237,21 +265,45 @@ def get_batch_availability(request: AvailabilityRequest, org_id: str = Depends(v
 
     rooms = houses_db.execute(rooms_query, rooms_params).fetchall()
 
-    placed_counts = {entry_id: 0 for entry_id in request.entryIds}
+    # Count placed furniture per entry per house
+    per_house_counts = {entry_id: {} for entry_id in request.entryIds}
 
     for room_row in rooms:
+        room_house_id = room_row[0]
         placed_furniture_json = room_row[1]
         if placed_furniture_json:
             placed_furniture = json.loads(placed_furniture_json)
             for furn in placed_furniture:
                 entry_id = furn.get('entryId')
-                if entry_id in placed_counts:
-                    placed_counts[entry_id] += 1
+                if entry_id in per_house_counts:
+                    if room_house_id not in per_house_counts[entry_id]:
+                        per_house_counts[entry_id][room_house_id] = 0
+                    per_house_counts[entry_id][room_house_id] += 1
 
+    # Build results with conflict details
     for entry_id in request.entryIds:
         total = quantities.get(entry_id, 0)
-        used = placed_counts.get(entry_id, 0)
-        available = max(0, total - used)
-        result[entry_id] = AvailabilityEntry(available=available, total=total)
+        house_counts = per_house_counts.get(entry_id, {})
+
+        conflicts = []
+        overlap_used = 0
+        for h_id, count in house_counts.items():
+            if count > 0 and h_id in conflict_houses:
+                h_info = conflict_houses[h_id]
+                conflicts.append(ConflictDetail(
+                    houseId=h_id,
+                    houseName=h_info["name"],
+                    startDate=h_info["start"],
+                    endDate=h_info["end"],
+                    count=count,
+                    type=h_info["type"]
+                ))
+                if h_info["type"] == "overlap":
+                    overlap_used += count
+
+        available = max(0, total - overlap_used)
+        result[entry_id] = AvailabilityEntry(
+            available=available, total=total, conflicts=conflicts
+        )
 
     return result

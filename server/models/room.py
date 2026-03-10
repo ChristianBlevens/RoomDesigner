@@ -48,6 +48,7 @@ class RoomResponse(BaseModel):
     status: Literal["processing", "ready", "failed"] = "ready"
     errorMessage: Optional[str] = None
     backgroundImageUrl: Optional[str] = None
+    originalBackgroundUrl: Optional[str] = None
     placedFurniture: List[dict] = []
     mogeData: Optional[dict] = None
     lightingSettings: Optional[dict] = None

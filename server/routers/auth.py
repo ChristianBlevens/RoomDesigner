@@ -245,3 +245,30 @@ def save_wall_color_presets(body: WallColorPresetsRequest, org_id: str = Depends
         [presets_json, org_id]
     )
     return {"status": "saved"}
+
+
+# ============ De-staging Buffer Setting ============
+
+class DestagingBufferRequest(BaseModel):
+    days: int
+
+
+@router.get("/settings/destaging-buffer")
+def get_destaging_buffer(org_id: str = Depends(verify_token)):
+    db = get_auth_db()
+    row = db.execute(
+        "SELECT destaging_buffer_days FROM orgs WHERE id = ?", [org_id]
+    ).fetchone()
+    return {"days": row[0] if row and row[0] else 0}
+
+
+@router.put("/settings/destaging-buffer")
+def save_destaging_buffer(body: DestagingBufferRequest, org_id: str = Depends(verify_token)):
+    if body.days < 0:
+        raise HTTPException(400, "Buffer days must be non-negative")
+    db = get_auth_db()
+    db.execute(
+        "UPDATE orgs SET destaging_buffer_days = ? WHERE id = ?",
+        [body.days, org_id]
+    )
+    return {"status": "saved"}

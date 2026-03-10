@@ -94,10 +94,11 @@ def delete_house(house_id: str, org_id: str = Depends(verify_token)):
     """, [house_id]).fetchall()
     layout_r2_keys = [lr[0] for lr in layout_rows if lr[0]]
 
-    # Collect wall color variant R2 keys
+    # Collect wall color variant R2 keys and original backgrounds
     import json
     wc_rows = db.execute("""
-        SELECT wall_colors FROM rooms WHERE house_id = ? AND wall_colors IS NOT NULL
+        SELECT wall_colors, original_background_key FROM rooms
+        WHERE house_id = ? AND (wall_colors IS NOT NULL OR original_background_key IS NOT NULL)
     """, [house_id]).fetchall()
     wc_r2_keys = []
     for wc_row in wc_rows:
@@ -106,6 +107,8 @@ def delete_house(house_id: str, org_id: str = Depends(verify_token)):
             for variant in wc.get("variants", []):
                 if variant.get("imagePath"):
                     wc_r2_keys.append(variant["imagePath"])
+        if wc_row[1]:
+            wc_r2_keys.append(wc_row[1])
 
     db.execute("""
         DELETE FROM layouts
