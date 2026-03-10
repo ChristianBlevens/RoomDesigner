@@ -26,7 +26,8 @@ The meter stick scales along with all furniture when you adjust the room scale s
 
 ## Persistence
 
-- The meter stick is saved with the room
+- Each room has its own independent meter stick
+- The meter stick is saved with the room, including deletion — if you delete it, it stays deleted
 - When you re-open a room, the meter stick starts hidden — tap the button to show it
 - If the meter stick was previously placed, tapping the button restores it in its saved position (no need to re-place)
 

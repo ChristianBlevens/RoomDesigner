@@ -16,9 +16,10 @@ Generation takes a few seconds. A spinner shows in the gallery while processing.
 
 The gallery at the bottom of the panel shows all generated variants plus the original. Tap any card to switch the room background to that version.
 
-- The **Original** card restores the unmodified room photo
+- The **Original** card restores the unmodified room photo. If the room had furniture cleared during creation, this card is split in two: tap **Cleared** (left) for the AI-cleaned version, or **Original** (right) for the unmodified photo
 - Active variant is highlighted with a blue border
 - Each variant card shows a colored bar matching the wall color
+- Wall color generation and exports always use the cleared image as the base (not the original pre-clearing photo)
 
 ## Deleting a Variant
 
