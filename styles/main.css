@@ -1075,11 +1075,11 @@ select option {
   left: var(--edge-margin);
   background: var(--bg-surface);
   border: 1px solid var(--glass-border);
+  z-index: 300;
   color: var(--text-primary);
   padding: var(--spacing-sm) var(--spacing-md);
   border-radius: var(--radius-md);
   font-size: var(--font-sm);
-  z-index: 1001;
   opacity: 0;
   transform: translateX(-20px);
   transition: opacity 0.2s, transform 0.2s;
