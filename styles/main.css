@@ -1075,7 +1075,7 @@ select option {
   left: var(--edge-margin);
   background: var(--bg-surface);
   border: 1px solid var(--glass-border);
-  z-index: 300;
+  z-index: 50;
   color: var(--text-primary);
   padding: var(--spacing-sm) var(--spacing-md);
   border-radius: var(--radius-md);
