@@ -149,6 +149,7 @@ let savedMeterStickData = null;
 let pendingRoomImage = null;
 let pendingRoomName = null;
 let pendingClearFurniture = false;
+let pendingFloorHint = '';
 
 // Helper: count how many of a specific entry are placed in the current scene
 function getPlacedCountForEntry(entryId) {
@@ -1234,12 +1235,15 @@ function setupFileInputs() {
 function setupClearFurnitureModal() {
   document.getElementById('clear-furniture-yes').addEventListener('click', async () => {
     pendingClearFurniture = true;
+    pendingFloorHint = document.getElementById('clear-floor-hint').value.trim();
     modalManager.closeModal('clear-furniture-modal');
     await processRoomAutomatically();
   });
 
   document.getElementById('clear-furniture-no').addEventListener('click', async () => {
     pendingClearFurniture = false;
+    pendingFloorHint = '';
+    pendingFloorHint = '';
     modalManager.closeModal('clear-furniture-modal');
     await processRoomAutomatically();
   });
@@ -1395,7 +1399,7 @@ async function processRoomAutomatically() {
 
   try {
     // Create room - server waits for Modal mesh generation (and optional Gemini clearing)
-    const room = await createRoom(currentHouseId, pendingRoomName, pendingRoomImage, pendingClearFurniture);
+    const room = await createRoom(currentHouseId, pendingRoomName, pendingRoomImage, pendingClearFurniture, pendingFloorHint);
     console.log('Room created:', room);
 
     // Load mesh into scene
@@ -1441,6 +1445,7 @@ async function processRoomAutomatically() {
     pendingRoomImage = null;
     pendingRoomName = null;
     pendingClearFurniture = false;
+    pendingFloorHint = '';
 
     // Clear any existing furniture
     clearAllFurniture();
@@ -4197,7 +4202,11 @@ async function handleRoomNameSubmit(event) {
     closeRoomNameModal();
 
     // Ask about furniture clearing before processing
-    modalManager.openModal('clear-furniture-modal');
+    // Small delay ensures room name modal is fully closed before opening next modal
+    setTimeout(() => {
+      document.getElementById('clear-floor-hint').value = '';
+      modalManager.openModal('clear-furniture-modal');
+    }, 100);
   } finally {
     roomNameSubmitting = false;
   }

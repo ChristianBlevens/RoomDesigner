@@ -214,13 +214,14 @@ export async function getOrphanRooms() {
  * Synchronous: waits for mesh generation (30-60 seconds).
  * Returns the completed room or throws error.
  */
-export async function createRoom(houseId, name, imageFile, clearFurniture = false) {
+export async function createRoom(houseId, name, imageFile, clearFurniture = false, floorHint = '') {
   const token = getToken();
   const formData = new FormData();
   formData.append('houseId', houseId);
   formData.append('name', name);
   formData.append('image', imageFile);
   formData.append('clearFurniture', clearFurniture.toString());
+  if (floorHint) formData.append('floorHint', floorHint);
 
   const headers = {};
   if (token) {

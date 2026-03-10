@@ -131,6 +131,7 @@ async def create_room(
     name: str = Form(...),
     image: UploadFile = File(...),
     clearFurniture: str = Form("false"),
+    floorHint: str = Form(""),
     org_id: str = Depends(verify_token)
 ):
     """
@@ -162,7 +163,10 @@ async def create_room(
         try:
             from gemini_client import edit_image
             from routers.enhance import ROOM_CLEAR_PROMPT
-            cleared_bytes = await edit_image(image_bytes, ROOM_CLEAR_PROMPT, mime_type=image.content_type or "image/jpeg")
+            clear_prompt = ROOM_CLEAR_PROMPT
+            if floorHint.strip():
+                clear_prompt += f" The floor beneath the furniture is {floorHint.strip()}."
+            cleared_bytes = await edit_image(image_bytes, clear_prompt, mime_type=image.content_type or "image/jpeg")
             moge_input_bytes = cleared_bytes
             image_bytes = cleared_bytes
         except Exception as e:
