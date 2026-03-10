@@ -1462,6 +1462,33 @@ select option {
   border-color: var(--text-secondary);
 }
 
+.wall-color-split {
+  display: flex;
+  padding: 0;
+  overflow: hidden;
+  width: auto;
+}
+
+.wall-color-split-half {
+  padding: var(--spacing-xs);
+  cursor: pointer;
+  text-align: center;
+  min-width: 50px;
+  transition: background 0.15s;
+}
+
+.wall-color-split-half:first-child {
+  border-right: 1px solid var(--border-subtle);
+}
+
+.wall-color-split-half:hover {
+  background: var(--surface-hover, rgba(255,255,255,0.05));
+}
+
+.wall-color-split-half.active {
+  background: var(--accent-muted, rgba(99,146,234,0.15));
+}
+
 .wall-color-label {
   font-size: 0.7rem;
   color: var(--text-secondary);

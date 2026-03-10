@@ -246,9 +246,9 @@ def update_room(room_id: str, room: RoomUpdate, org_id: str = Depends(verify_tok
     if room.roomScale is not None:
         updates.append("room_scale = ?")
         values.append(room.roomScale)
-    if room.meterStick is not None:
+    if 'meterStick' in room.model_fields_set:
         updates.append("meter_stick = ?")
-        values.append(json.dumps(room.meterStick))
+        values.append(json.dumps(room.meterStick) if room.meterStick else None)
 
     if updates:
         values.append(room_id)

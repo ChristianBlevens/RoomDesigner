@@ -30,7 +30,7 @@ import {
 import { getFurnitureEntry } from './api.js';
 import { modalManager } from './modals.js';
 import { extractModelFromZip } from './utils.js';
-import { isLightingDirectionMode, showActionNotification, showConfirmDialog, isMeterStickPlacementMode } from './main.js';
+import { isLightingDirectionMode, showActionNotification, showConfirmDialog } from './main.js';
 
 // Interaction state
 let selectedObject = null;
@@ -439,6 +439,7 @@ let onOpenFurnitureModal = null;
 // Callback for meter stick events
 let onMeterStickDeleted = null;
 let onMeterStickPlace = null;
+let meterStickPlacementActive = false;
 
 export function setMeterStickDeletedCallback(callback) {
   onMeterStickDeleted = callback;
@@ -446,6 +447,10 @@ export function setMeterStickDeletedCallback(callback) {
 
 export function setMeterStickPlaceCallback(callback) {
   onMeterStickPlace = callback;
+}
+
+export function setMeterStickPlacementActive(active) {
+  meterStickPlacementActive = active;
 }
 
 // Store click position and surface info for placing furniture
@@ -684,7 +689,7 @@ function onPointerUp(event) {
       // If something was selected, just deselect
       if (selectedObject) {
         deselectFurniture();
-      } else if (isMeterStickPlacementMode() && onMeterStickPlace) {
+      } else if (meterStickPlacementActive && onMeterStickPlace) {
         if (lastClickPosition && lastClickSurfaceNormal) {
           onMeterStickPlace(lastClickPosition.clone(), lastClickSurfaceNormal.clone());
         }

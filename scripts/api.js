@@ -362,7 +362,8 @@ function transformRoomResponse(room) {
     lightingSettings: room.lightingSettings,
     roomScale: room.roomScale,
     meterStick: room.meterStick,
-    wallColors: room.wallColors
+    wallColors: room.wallColors,
+    originalBackgroundUrl: room.originalBackgroundUrl
   };
 }
 

@@ -119,7 +119,8 @@ import {
   removeAllFurnitureByEntryId,
   deselectFurniture,
   setMeterStickDeletedCallback,
-  setMeterStickPlaceCallback
+  setMeterStickPlaceCallback,
+  setMeterStickPlacementActive
 } from './furniture.js';
 import {
   showError,
@@ -2760,7 +2761,9 @@ function setupMeterStick() {
 
   setMeterStickDeletedCallback(() => {
     meterStickPlacementMode = false;
+    setMeterStickPlacementActive(false);
     updateMeterStickButton();
+    saveCurrentRoom();
   });
 
   setMeterStickPlaceCallback((position, normal) => {
@@ -2773,6 +2776,7 @@ function handleMeterStickButtonClick() {
 
   if (meterStickPlacementMode) {
     meterStickPlacementMode = false;
+    setMeterStickPlacementActive(false);
     updateMeterStickButton();
     showActionNotification('Meter stick cancelled');
     return;
@@ -2789,6 +2793,7 @@ function handleMeterStickButtonClick() {
     }
 
     meterStickPlacementMode = true;
+    setMeterStickPlacementActive(true);
     updateMeterStickButton();
     showActionNotification('Tap a surface to place meter stick', 10000);
     return;
@@ -2848,6 +2853,7 @@ function placeMeterStickAtSurface(position, surfaceNormal) {
 
   addMeterStickToScene(stick);
   meterStickPlacementMode = false;
+  setMeterStickPlacementActive(false);
   updateMeterStickButton();
   showActionNotification('Meter stick placed');
 }
@@ -2869,9 +2875,6 @@ function restoreMeterStickFromData(data) {
   addMeterStickToScene(stick);
 }
 
-export function isMeterStickPlacementMode() {
-  return meterStickPlacementMode;
-}
 
 function getMeterStickSaveData() {
   const stick = getMeterStick();
@@ -3232,19 +3235,21 @@ function renderWallColorGallery() {
   const container = document.getElementById('wall-color-gallery');
   container.innerHTML = '';
 
-  // Original/Cleared cards
+  // Original card (split when room has cleared background)
   if (currentRoom && currentRoom.originalBackgroundUrl) {
-    const origPhotoCard = document.createElement('div');
-    origPhotoCard.className = `wall-color-card${activeWallColorId === 'original-photo' ? ' active' : ''}`;
-    origPhotoCard.innerHTML = '<span class="wall-color-label">Original Photo</span>';
-    origPhotoCard.addEventListener('click', () => switchWallColor('original-photo'));
-    container.appendChild(origPhotoCard);
-
-    const clearedCard = document.createElement('div');
-    clearedCard.className = `wall-color-card${activeWallColorId === 'original' ? ' active' : ''}`;
-    clearedCard.innerHTML = '<span class="wall-color-label">Cleared</span>';
-    clearedCard.addEventListener('click', () => switchWallColor('original'));
-    container.appendChild(clearedCard);
+    const splitCard = document.createElement('div');
+    splitCard.className = 'wall-color-card wall-color-split';
+    const leftHalf = document.createElement('div');
+    leftHalf.className = `wall-color-split-half${activeWallColorId === 'original' ? ' active' : ''}`;
+    leftHalf.innerHTML = '<span class="wall-color-label">Cleared</span>';
+    leftHalf.addEventListener('click', () => switchWallColor('original'));
+    const rightHalf = document.createElement('div');
+    rightHalf.className = `wall-color-split-half${activeWallColorId === 'original-photo' ? ' active' : ''}`;
+    rightHalf.innerHTML = '<span class="wall-color-label">Original</span>';
+    rightHalf.addEventListener('click', () => switchWallColor('original-photo'));
+    splitCard.appendChild(leftHalf);
+    splitCard.appendChild(rightHalf);
+    container.appendChild(splitCard);
   } else {
     const origCard = document.createElement('div');
     origCard.className = `wall-color-card${activeWallColorId === 'original' ? ' active' : ''}`;
@@ -4537,6 +4542,7 @@ async function loadRoomById(roomId) {
   // Store meter stick data for deferred creation (hidden until button pressed)
   clearMeterStick();
   meterStickPlacementMode = false;
+  setMeterStickPlacementActive(false);
   savedMeterStickData = room.meterStick || null;
   updateMeterStickButton();
 
@@ -4676,6 +4682,7 @@ async function closeHouse() {
 
   clearMeterStick();
   meterStickPlacementMode = false;
+  setMeterStickPlacementActive(false);
   savedMeterStickData = null;
 
   clearWallColorState();
