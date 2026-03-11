@@ -1,5 +1,6 @@
 """Shareable house view: public share page and owner-mode data endpoint."""
 
+import os
 import secrets
 import json
 import base64
@@ -69,10 +70,13 @@ async def serve_share_page(token: str, request: Request):
     if not row:
         raise HTTPException(404, "Share link not found or has been revoked")
 
-    # Detect base path from request URL (handles /room/ prefix behind nginx)
-    path = request.url.path
-    share_idx = path.find("/share/")
-    base_href = path[:share_idx] + "/" if share_idx > 0 else "/"
+    # Derive base path from SERVER_BASE_URL (handles /room/ prefix behind nginx)
+    server_url = os.environ.get("SERVER_BASE_URL", "")
+    if server_url:
+        from urllib.parse import urlparse
+        base_href = urlparse(server_url).path.rstrip("/") + "/"
+    else:
+        base_href = "/"
 
     html = share_path.read_text()
     html = html.replace("<head>", f'<head>\n  <base href="{base_href}">', 1)
