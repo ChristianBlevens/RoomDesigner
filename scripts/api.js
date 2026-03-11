@@ -183,26 +183,6 @@ export async function getRoomsByHouseId(houseId, skipCache = false) {
   return transformed;
 }
 
-/**
- * Get all rooms for a house with full data (including background images).
- * Used for screenshot export where we need complete room data.
- *
- * @param {string} houseId - House ID
- * @returns {Promise<Array<Object>>} Array of room objects with background images
- */
-export async function getRoomsWithDataByHouseId(houseId) {
-  // First get room list (metadata only, cached)
-  const roomList = await getRoomsByHouseId(houseId);
-
-  // Then load full data for each room
-  const fullRooms = [];
-  for (const room of roomList) {
-    const fullRoom = await loadRoom(room.id);
-    fullRooms.push(fullRoom);
-  }
-  return fullRooms;
-}
-
 export async function getOrphanRooms() {
   const response = await apiFetch('/rooms/orphans');
   const rooms = await response.json();
@@ -549,7 +529,10 @@ export async function saveFurnitureEntry(entry) {
     quantity: entry.quantity || 1,
     dimensionX: entry.dimensionX || null,
     dimensionY: entry.dimensionY || null,
-    dimensionZ: entry.dimensionZ || null
+    dimensionZ: entry.dimensionZ || null,
+    location: entry.location || null,
+    condition: entry.condition || null,
+    conditionNotes: entry.conditionNotes || null
   };
 
   let entryId;
@@ -690,7 +673,10 @@ function transformFurnitureResponse(entry) {
     dimensionX: entry.dimensionX,
     dimensionY: entry.dimensionY,
     dimensionZ: entry.dimensionZ,
-    hasModel: !!entry.modelUrl
+    hasModel: !!entry.modelUrl,
+    location: entry.location,
+    condition: entry.condition,
+    conditionNotes: entry.conditionNotes
   };
 }
 
@@ -757,26 +743,6 @@ export async function deleteLayout(roomId, layoutId) {
 }
 
 
-// ============ Screenshot Enhancement ============
-
-export async function getEnhanceStatus() {
-  const response = await apiFetch('/enhance/status');
-  return response.json();
-}
-
-export async function enhanceScreenshot(roomId, compositeBase64, customPrompt = null) {
-  const response = await apiFetch('/enhance/screenshot', {
-    method: 'POST',
-    body: JSON.stringify({
-      room_id: roomId,
-      composite_base64: compositeBase64,
-      custom_prompt: customPrompt
-    })
-  });
-  const result = await response.json();
-  return result.image_base64;
-}
-
 export async function generateWallColor(roomId, colorName, colorHex) {
   const body = { room_id: roomId };
   if (colorName) body.color_name = colorName;
@@ -816,5 +782,28 @@ export async function saveDestagingBuffer(days) {
     method: 'PUT',
     body: JSON.stringify({ days }),
   });
+}
+
+// ============ Share ============
+
+export async function generateShareToken(houseId) {
+  const response = await apiFetch(`/houses/${houseId}/share`, { method: 'POST' });
+  return response.json();
+}
+
+export async function revokeShareToken(houseId) {
+  await apiFetch(`/houses/${houseId}/share`, { method: 'DELETE' });
+}
+
+export async function uploadFinalImage(roomId, imageBase64) {
+  const response = await apiFetch(`/rooms/${roomId}/final-image`, {
+    method: 'POST',
+    body: JSON.stringify({ image_base64: imageBase64 })
+  });
+  return response.json();
+}
+
+export async function deleteFinalImage(roomId) {
+  await apiFetch(`/rooms/${roomId}/final-image`, { method: 'DELETE' });
 }
 

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Staged House View</title>
+  <link rel="stylesheet" href="styles/share.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="share-app">
+    <div id="share-loading" class="share-loading">
+      <p>Loading...</p>
+    </div>
+    <div id="share-error" class="share-error hidden">
+      <h2>Link Not Found</h2>
+      <p>This share link may have been revoked or the house no longer exists.</p>
+    </div>
+    <div id="share-content" class="share-content hidden">
+      <header class="share-header">
+        <h1 id="share-house-name"></h1>
+        <p id="share-house-dates" class="share-dates"></p>
+      </header>
+      <main id="share-rooms" class="share-rooms"></main>
+      <section id="share-manifest" class="share-manifest">
+        <h2>Delivery Manifest</h2>
+        <div id="share-inventory"></div>
+      </section>
+      <footer class="share-footer">
+        <button id="share-download-all" class="share-btn-primary">Download All Images</button>
+      </footer>
+    </div>
+  </div>
+  <script type="module" src="scripts/share.js"></script>
+</body>
+</html>

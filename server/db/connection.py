@@ -112,6 +112,19 @@ def init_databases():
     except Exception:
         pass
 
+    # Migration: add final_image_path column if missing
+    try:
+        _houses_conn.execute("ALTER TABLE rooms ADD COLUMN final_image_path VARCHAR")
+    except Exception:
+        pass
+
+    # Migration: add share_token column if missing
+    try:
+        _houses_conn.execute("ALTER TABLE houses ADD COLUMN share_token VARCHAR")
+    except Exception:
+        pass
+    _houses_conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_houses_share_token ON houses(share_token)")
+
     _houses_conn.execute("CREATE INDEX IF NOT EXISTS idx_rooms_house_id ON rooms(house_id)")
 
     _houses_conn.execute("""
@@ -147,6 +160,22 @@ def init_databases():
     """)
     _furniture_conn.execute("CREATE INDEX IF NOT EXISTS idx_furniture_category ON furniture(category)")
     _furniture_conn.execute("CREATE INDEX IF NOT EXISTS idx_furniture_org_id ON furniture(org_id)")
+
+    # Migration: add location column if missing
+    try:
+        _furniture_conn.execute("ALTER TABLE furniture ADD COLUMN location VARCHAR")
+    except Exception:
+        pass
+
+    # Migration: add condition and condition_notes columns if missing
+    try:
+        _furniture_conn.execute("ALTER TABLE furniture ADD COLUMN condition VARCHAR")
+    except Exception:
+        pass
+    try:
+        _furniture_conn.execute("ALTER TABLE furniture ADD COLUMN condition_notes VARCHAR")
+    except Exception:
+        pass
 
     # Meshy generation tasks table
     _furniture_conn.execute("""

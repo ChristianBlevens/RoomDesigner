@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 ROOM_SELECT = """
     SELECT id, house_id, name, status, error_message, background_image_path,
            placed_furniture, moge_data, lighting_settings, room_scale, meter_stick,
-           wall_colors, original_background_key
+           wall_colors, original_background_key, final_image_path
     FROM rooms
 """
 
@@ -57,6 +57,7 @@ def row_to_response(row) -> RoomResponse:
     meter_stick = json.loads(row[10]) if row[10] else None
     wall_colors = json.loads(row[11]) if row[11] else None
     original_bg_key = row[12] if len(row) > 12 else None
+    final_image_path = row[13] if len(row) > 13 else None
 
     # Resolve R2 URLs for wall color variants
     if wall_colors and wall_colors.get("variants"):
@@ -66,6 +67,7 @@ def row_to_response(row) -> RoomResponse:
 
     background_url = r2.get_public_url(background_path) if background_path else None
     original_bg_url = r2.get_public_url(original_bg_key) if original_bg_key else None
+    final_image_url = r2.get_public_url(final_image_path) if final_image_path else None
 
     return RoomResponse(
         id=room_id,
@@ -75,6 +77,7 @@ def row_to_response(row) -> RoomResponse:
         errorMessage=error_message,
         backgroundImageUrl=background_url,
         originalBackgroundUrl=original_bg_url,
+        finalImageUrl=final_image_url,
         placedFurniture=placed_furniture,
         mogeData=moge_data,
         lightingSettings=lighting_settings,
@@ -263,7 +266,8 @@ def delete_room(room_id: str, org_id: str = Depends(verify_token)):
     db = get_houses_db()
 
     row = db.execute(
-        "SELECT background_image_path, wall_colors, original_background_key FROM rooms WHERE id = ?", [room_id]
+        "SELECT background_image_path, wall_colors, original_background_key, final_image_path FROM rooms WHERE id = ?",
+        [room_id]
     ).fetchone()
 
     layout_rows = db.execute(
@@ -278,6 +282,9 @@ def delete_room(room_id: str, org_id: str = Depends(verify_token)):
     # Original background (pre-clearing)
     if row and row[2]:
         keys_to_delete.append(row[2])
+    # Final image
+    if row and row[3]:
+        keys_to_delete.append(row[3])
     for lr in layout_rows:
         if lr[0]:
             keys_to_delete.append(lr[0])

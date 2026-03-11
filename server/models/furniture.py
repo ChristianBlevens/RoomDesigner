@@ -10,6 +10,9 @@ class FurnitureCreate(BaseModel):
     dimensionX: Optional[float] = None
     dimensionY: Optional[float] = None
     dimensionZ: Optional[float] = None
+    location: Optional[str] = None
+    condition: Optional[str] = None
+    conditionNotes: Optional[str] = None
 
 class FurnitureUpdate(BaseModel):
     name: Optional[str] = None
@@ -19,6 +22,9 @@ class FurnitureUpdate(BaseModel):
     dimensionX: Optional[float] = None
     dimensionY: Optional[float] = None
     dimensionZ: Optional[float] = None
+    location: Optional[str] = None
+    condition: Optional[str] = None
+    conditionNotes: Optional[str] = None
 
 class FurnitureResponse(BaseModel):
     id: str
@@ -32,6 +38,9 @@ class FurnitureResponse(BaseModel):
     imageUrl: Optional[str] = None
     preview3dUrl: Optional[str] = None
     modelUrl: Optional[str] = None
+    location: Optional[str] = None
+    condition: Optional[str] = None
+    conditionNotes: Optional[str] = None
 
 
 class ConflictDetail(BaseModel):

@@ -16,7 +16,6 @@
   }
   </script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js"></script>
 </head>
 <body>
@@ -464,6 +463,26 @@
           </p>
         </div>
         <div class="form-row">
+          <label for="entry-location">Location</label>
+          <input type="text" id="entry-location" placeholder="e.g., Warehouse B, Aisle 3">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="entry-condition">Condition</label>
+            <select id="entry-condition">
+              <option value="">Not Assessed</option>
+              <option value="excellent">Excellent</option>
+              <option value="good">Good</option>
+              <option value="fair">Fair</option>
+              <option value="poor">Poor</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="entry-condition-notes">Condition Notes</label>
+            <textarea id="entry-condition-notes" rows="2" placeholder="Describe any damage or wear..."></textarea>
+          </div>
+        </div>
+        <div class="form-row">
           <div class="form-group">
             <label>Image</label>
             <div class="upload-preview" id="image-upload-preview">
@@ -514,13 +533,15 @@
           </svg>
           Edit House
         </button>
-        <button id="export-session-btn" class="btn-secondary">
+        <button id="share-session-btn" class="btn-secondary">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="7 10 12 15 17 10"></polyline>
-            <line x1="12" y1="15" x2="12" y2="3"></line>
+            <circle cx="18" cy="5" r="3"></circle>
+            <circle cx="6" cy="12" r="3"></circle>
+            <circle cx="18" cy="19" r="3"></circle>
+            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
           </svg>
-          Export House
+          Share House
         </button>
         <button id="close-house-session-btn" class="btn-secondary">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -548,35 +569,18 @@
     </div>
   </div>
 
-  <!-- Export Progress Modal -->
-  <div class="modal-overlay modal-hidden" id="export-progress-modal">
-    <div class="modal-content export-progress-content">
-      <h3>Exporting Screenshots</h3>
-      <div class="export-progress-info">
-        <p id="export-progress-text">Preparing export...</p>
-        <div class="export-progress-bar">
-          <div id="export-progress-fill" class="export-progress-fill"></div>
-        </div>
-        <p id="export-progress-detail" class="export-progress-detail"></p>
-      </div>
-      <div class="export-progress-actions hidden" id="export-progress-actions">
-        <button id="export-progress-close" class="btn-primary">Close</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Screenshot Enhancement Confirmation Modal -->
-  <div class="modal-overlay modal-hidden" id="enhance-confirm-modal">
+  <!-- Share House Modal -->
+  <div class="modal-overlay modal-hidden" id="share-modal">
     <div class="modal-content confirm-modal-content">
-      <h3>Enhance with AI?</h3>
-      <p>Process screenshots through AI to make furniture blend naturally with the room lighting and environment.</p>
-      <p class="enhance-note">Adds ~5 seconds per room.</p>
-      <textarea id="enhance-custom-prompt" class="enhance-prompt-input"
-        placeholder="Optional: additional instructions (e.g., 'make the lighting warmer', 'add soft shadows')"
-        rows="2"></textarea>
+      <h3>Share House</h3>
+      <p class="share-description">Anyone with this link can view the staged rooms and delivery manifest.</p>
+      <div class="share-url-container">
+        <input type="text" id="share-url-input" class="share-url-input" readonly>
+        <button id="share-copy-btn" class="btn-secondary share-copy-btn">Copy</button>
+      </div>
       <div class="confirm-buttons">
-        <button id="enhance-skip-btn" class="btn-secondary">Skip</button>
-        <button id="enhance-apply-btn" class="btn-primary">Enhance</button>
+        <button id="share-revoke-btn" class="btn-danger">Revoke Link</button>
+        <button id="share-open-btn" class="btn-primary">Open</button>
       </div>
     </div>
   </div>

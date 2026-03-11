@@ -14,7 +14,7 @@ from slowapi.errors import RateLimitExceeded
 sys.path.insert(0, str(Path(__file__).parent))
 
 from db.connection import init_databases, close_databases
-from routers import houses, rooms, furniture, files, meshy, enhance, admin, layouts
+from routers import houses, rooms, furniture, files, meshy, enhance, admin, layouts, share
 from routers.auth import init_auth_secret
 from routers import auth
 from events import subscribe
@@ -70,6 +70,9 @@ app.include_router(files.router, prefix="/api/files", tags=["files"])
 app.include_router(meshy.router, prefix="/api/meshy", tags=["meshy"])
 app.include_router(enhance.router, prefix="/api/enhance", tags=["enhance"])
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
+
+# Share routes (public page + protected management, no prefix — handles /share/{token} and /api/share/{token})
+app.include_router(share.router, tags=["share"])
 
 
 @app.get("/api/events")

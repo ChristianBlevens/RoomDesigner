@@ -16,14 +16,15 @@ router = APIRouter()
 def get_all_houses(org_id: str = Depends(verify_token)):
     db = get_houses_db()
     rows = db.execute("""
-        SELECT id, name, start_date, end_date, created_at
+        SELECT id, name, start_date, end_date, created_at, share_token
         FROM houses WHERE org_id = ? ORDER BY start_date
     """, [org_id]).fetchall()
     return [
         HouseResponse(
             id=row[0], name=row[1],
             startDate=str(row[2]), endDate=str(row[3]),
-            createdAt=str(row[4]) if row[4] else None
+            createdAt=str(row[4]) if row[4] else None,
+            shareToken=row[5]
         ) for row in rows
     ]
 
@@ -31,7 +32,7 @@ def get_all_houses(org_id: str = Depends(verify_token)):
 def get_house(house_id: str, org_id: str = Depends(verify_token)):
     db = get_houses_db()
     row = db.execute(
-        "SELECT id, name, start_date, end_date, created_at FROM houses WHERE id = ? AND org_id = ?",
+        "SELECT id, name, start_date, end_date, created_at, share_token FROM houses WHERE id = ? AND org_id = ?",
         [house_id, org_id]
     ).fetchone()
     if not row:
@@ -39,7 +40,8 @@ def get_house(house_id: str, org_id: str = Depends(verify_token)):
     return HouseResponse(
         id=row[0], name=row[1],
         startDate=str(row[2]), endDate=str(row[3]),
-        createdAt=str(row[4]) if row[4] else None
+        createdAt=str(row[4]) if row[4] else None,
+        shareToken=row[5]
     )
 
 @router.post("/", response_model=HouseResponse)
@@ -94,11 +96,11 @@ def delete_house(house_id: str, org_id: str = Depends(verify_token)):
     """, [house_id]).fetchall()
     layout_r2_keys = [lr[0] for lr in layout_rows if lr[0]]
 
-    # Collect wall color variant R2 keys and original backgrounds
+    # Collect wall color variant R2 keys, original backgrounds, and final images
     import json
     wc_rows = db.execute("""
-        SELECT wall_colors, original_background_key FROM rooms
-        WHERE house_id = ? AND (wall_colors IS NOT NULL OR original_background_key IS NOT NULL)
+        SELECT wall_colors, original_background_key, final_image_path FROM rooms
+        WHERE house_id = ? AND (wall_colors IS NOT NULL OR original_background_key IS NOT NULL OR final_image_path IS NOT NULL)
     """, [house_id]).fetchall()
     wc_r2_keys = []
     for wc_row in wc_rows:
@@ -109,6 +111,8 @@ def delete_house(house_id: str, org_id: str = Depends(verify_token)):
                     wc_r2_keys.append(variant["imagePath"])
         if wc_row[1]:
             wc_r2_keys.append(wc_row[1])
+        if wc_row[2]:
+            wc_r2_keys.append(wc_row[2])
 
     db.execute("""
         DELETE FROM layouts

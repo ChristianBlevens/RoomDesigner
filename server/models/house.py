@@ -19,3 +19,4 @@ class HouseResponse(BaseModel):
     startDate: str
     endDate: str
     createdAt: Optional[str] = None
+    shareToken: Optional[str] = None

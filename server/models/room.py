@@ -49,6 +49,7 @@ class RoomResponse(BaseModel):
     errorMessage: Optional[str] = None
     backgroundImageUrl: Optional[str] = None
     originalBackgroundUrl: Optional[str] = None
+    finalImageUrl: Optional[str] = None
     placedFurniture: List[dict] = []
     mogeData: Optional[dict] = None
     lightingSettings: Optional[dict] = None

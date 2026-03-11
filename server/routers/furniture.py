@@ -17,7 +17,8 @@ router = APIRouter()
 FURNITURE_SELECT = """
     SELECT id, name, category, tags, quantity,
            dimension_x, dimension_y, dimension_z,
-           image_path, preview_3d_path, model_path
+           image_path, preview_3d_path, model_path,
+           location, condition, condition_notes
     FROM furniture
 """
 
@@ -27,6 +28,8 @@ def _file_url(db_path: str) -> str | None:
         return None
     return r2.get_public_url(db_path)
 
+
+VALID_CONDITIONS = {"excellent", "good", "fair", "poor"}
 
 def row_to_response(row) -> FurnitureResponse:
     furn_id = row[0]
@@ -43,7 +46,10 @@ def row_to_response(row) -> FurnitureResponse:
         dimensionZ=row[7],
         imageUrl=_file_url(row[8]),
         preview3dUrl=_file_url(row[9]),
-        modelUrl=_file_url(row[10])
+        modelUrl=_file_url(row[10]),
+        location=row[11],
+        condition=row[12],
+        conditionNotes=row[13]
     )
 
 @router.get("/", response_model=List[FurnitureResponse])
@@ -90,11 +96,17 @@ def create_furniture(furniture: FurnitureCreate, org_id: str = Depends(verify_to
     furn_id = furniture.id or str(uuid.uuid4())
     tags_json = json.dumps(furniture.tags) if furniture.tags else None
 
+    if furniture.condition and furniture.condition not in VALID_CONDITIONS:
+        raise HTTPException(400, f"Invalid condition: must be one of {VALID_CONDITIONS}")
+
     db.execute("""
-        INSERT INTO furniture (id, org_id, name, category, tags, quantity, dimension_x, dimension_y, dimension_z)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO furniture (id, org_id, name, category, tags, quantity,
+                               dimension_x, dimension_y, dimension_z,
+                               location, condition, condition_notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, [furn_id, org_id, furniture.name, furniture.category, tags_json,
-          furniture.quantity, furniture.dimensionX, furniture.dimensionY, furniture.dimensionZ])
+          furniture.quantity, furniture.dimensionX, furniture.dimensionY, furniture.dimensionZ,
+          furniture.location, furniture.condition, furniture.conditionNotes])
 
     return get_furniture(furn_id, org_id)
 
@@ -106,6 +118,9 @@ def update_furniture(furniture_id: str, furniture: FurnitureUpdate, org_id: str 
     ).fetchone()
     if not existing:
         raise HTTPException(404, "Furniture not found")
+
+    if furniture.condition and furniture.condition not in VALID_CONDITIONS:
+        raise HTTPException(400, f"Invalid condition: must be one of {VALID_CONDITIONS}")
 
     updates = []
     values = []
@@ -128,6 +143,15 @@ def update_furniture(furniture_id: str, furniture: FurnitureUpdate, org_id: str 
     values.append(furniture.dimensionY)
     updates.append("dimension_z = ?")
     values.append(furniture.dimensionZ)
+    if furniture.location is not None:
+        updates.append("location = ?")
+        values.append(furniture.location)
+    if furniture.condition is not None:
+        updates.append("condition = ?")
+        values.append(furniture.condition)
+    if furniture.conditionNotes is not None:
+        updates.append("condition_notes = ?")
+        values.append(furniture.conditionNotes)
 
     if updates:
         values.append(furniture_id)

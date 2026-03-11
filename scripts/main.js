@@ -69,18 +69,18 @@ import {
   getAllHouses,
   getHouse,
   getRoomsByHouseId,
-  getRoomsWithDataByHouseId,
   getOrphanRooms,
   subscribeToEvents,
   createRoom,
   getBatchAvailability,
-  enhanceScreenshot,
   generateWallColor,
   deleteWallColor,
   getWallColorPresets,
   saveWallColorPresets,
   getDestagingBuffer,
   saveDestagingBuffer,
+  generateShareToken,
+  revokeShareToken,
   fetchAsBlob,
   getLayouts,
   createLayout,
@@ -89,7 +89,6 @@ import {
 } from './api.js';
 import {
   captureRoomScreenshot,
-  disposeScreenshotRenderer,
   captureThumbnail
 } from './screenshot.js';
 import {
@@ -2290,6 +2289,9 @@ async function openEntryEditor(entryId) {
   dimY.classList.remove('invalid');
   dimZ.classList.remove('invalid');
   dimError.classList.add('hidden');
+  document.getElementById('entry-location').value = '';
+  document.getElementById('entry-condition').value = '';
+  document.getElementById('entry-condition-notes').value = '';
   if (tagDropdown) tagDropdown.classList.add('hidden');
   const categoryDropdown = document.getElementById('category-dropdown');
   if (categoryDropdown) categoryDropdown.classList.add('hidden');
@@ -2306,6 +2308,9 @@ async function openEntryEditor(entryId) {
       nameInput.value = entry.name || '';
       categoryInput.value = entry.category || '';
       qtyInput.value = entry.quantity || 1;
+      document.getElementById('entry-location').value = entry.location || '';
+      document.getElementById('entry-condition').value = entry.condition || '';
+      document.getElementById('entry-condition-notes').value = entry.conditionNotes || '';
 
       if (entry.image) {
         entryImageBlob = entry.image;
@@ -2579,7 +2584,10 @@ async function handleEntrySubmit(event) {
     quantity: Math.max(1, quantity),
     dimensionX: dimXVal !== '' ? parseFloat(dimXVal) : null,
     dimensionY: dimYVal !== '' ? parseFloat(dimYVal) : null,
-    dimensionZ: dimZVal !== '' ? parseFloat(dimZVal) : null
+    dimensionZ: dimZVal !== '' ? parseFloat(dimZVal) : null,
+    location: document.getElementById('entry-location').value.trim() || null,
+    condition: document.getElementById('entry-condition').value || null,
+    conditionNotes: document.getElementById('entry-condition-notes').value.trim() || null
   };
 
   // Show immediate feedback
@@ -3323,13 +3331,10 @@ function clearWallColorState() {
 
 // ============ Session Modal (House Operations) ============
 
-// Enhance confirmation state
-let enhanceResolve = null;
-
 function setupSessionModal() {
   const sessionBtn = document.getElementById('session-btn');
   const editHouseBtn = document.getElementById('edit-house-session-btn');
-  const exportBtn = document.getElementById('export-session-btn');
+  const shareBtn = document.getElementById('share-session-btn');
   const closeHouseBtn = document.getElementById('close-house-session-btn');
   const deleteHouseBtn = document.getElementById('delete-house-session-btn');
 
@@ -3337,7 +3342,7 @@ function setupSessionModal() {
 
   sessionBtn.addEventListener('click', openSessionModal);
   editHouseBtn.addEventListener('click', handleEditHouseFromSession);
-  exportBtn.addEventListener('click', handleExportHouse);
+  shareBtn.addEventListener('click', handleShareHouse);
   closeHouseBtn.addEventListener('click', handleCloseHouseFromSession);
   deleteHouseBtn.addEventListener('click', handleDeleteHouseFromSession);
   if (signoutBtn) {
@@ -3346,32 +3351,26 @@ function setupSessionModal() {
     });
   }
 
-  // Export progress modal close button
-  const exportProgressCloseBtn = document.getElementById('export-progress-close');
-  exportProgressCloseBtn.addEventListener('click', hideExportProgressModal);
-
-  // Enhance Confirmation Modal
-  document.getElementById('enhance-skip-btn').addEventListener('click', () => {
-    document.getElementById('enhance-confirm-modal').classList.add('modal-hidden');
-    if (enhanceResolve) enhanceResolve({ enhance: false });
+  // Share modal buttons
+  document.getElementById('share-copy-btn').addEventListener('click', () => {
+    const input = document.getElementById('share-url-input');
+    navigator.clipboard.writeText(input.value).then(() => {
+      const btn = document.getElementById('share-copy-btn');
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+    });
   });
 
-  document.getElementById('enhance-apply-btn').addEventListener('click', () => {
-    const customPrompt = document.getElementById('enhance-custom-prompt').value.trim() || null;
-    document.getElementById('enhance-confirm-modal').classList.add('modal-hidden');
-    if (enhanceResolve) enhanceResolve({ enhance: true, customPrompt });
+  document.getElementById('share-open-btn').addEventListener('click', () => {
+    const input = document.getElementById('share-url-input');
+    window.open(input.value, '_blank');
   });
-}
 
-/**
- * Show enhance confirmation modal if Gemini API is configured.
- * Returns { enhance: boolean, customPrompt: string|null }.
- */
-async function showEnhanceConfirmation() {
-  return new Promise((resolve) => {
-    enhanceResolve = resolve;
-    document.getElementById('enhance-custom-prompt').value = '';
-    document.getElementById('enhance-confirm-modal').classList.remove('modal-hidden');
+  document.getElementById('share-revoke-btn').addEventListener('click', async () => {
+    if (!currentHouseId) return;
+    await revokeShareToken(currentHouseId);
+    modalManager.closeModal();
+    showActionNotification('Share link revoked');
   });
 }
 
@@ -3391,332 +3390,26 @@ function handleEditHouseFromSession() {
   openHouseEditor(currentHouseId);
 }
 
-async function handleExportHouse() {
-  if (!currentHouseId) {
-    showError('No house to export');
-    return;
-  }
+async function handleShareHouse() {
+  if (!currentHouseId) return;
 
-  // Close session modal
   modalManager.closeModal();
 
-  // Save current room first
   if (currentRoomId && currentBackgroundImage) {
     await saveCurrentRoom();
   }
 
-  // Ask about AI enhancement
-  const enhanceChoice = await showEnhanceConfirmation();
-
-  const house = getCurrentHouse();
-
-  // Show export progress modal
-  showExportProgressModal();
-  updateExportProgress(0, 0, 'Loading room data...');
-
   try {
-    // Fetch all rooms with full data (including background images)
-    const rooms = await getRoomsWithDataByHouseId(currentHouseId);
+    const result = await generateShareToken(currentHouseId);
+    const shareUrl = `${window.location.origin}${window.location.pathname.replace(/\/+$/, '')}${result.shareUrl}`;
 
-    if (rooms.length === 0) {
-      hideExportProgressModal();
-      showError('No rooms to export');
-      return;
-    }
-
-    // Collect unique furniture entry IDs
-    const entryIds = new Set();
-    for (const room of rooms) {
-      if (room.placedFurniture) {
-        for (const furniture of room.placedFurniture) {
-          entryIds.add(furniture.entryId);
-        }
-      }
-    }
-
-    // Pre-fetch all furniture entries with models
-    updateExportProgress(0, rooms.length, 'Loading furniture models...');
-    const furnitureEntries = new Map();
-    for (const entryId of entryIds) {
-      try {
-        const entry = await getFurnitureEntry(entryId, { includeModel: true });
-        furnitureEntries.set(entryId, entry);
-      } catch (err) {
-        console.warn(`Failed to load furniture entry ${entryId}:`, err);
-      }
-    }
-
-    // Export screenshots (with optional AI enhancement)
-    const { zip: zipBlob, results: exportResults } = await exportHouseScreenshotsWithProgress(
-      house,
-      rooms,
-      furnitureEntries,
-      enhanceChoice,
-      (current, total, roomName, status) => {
-        updateExportProgress(current, total, roomName, status);
-      }
-    );
-
-    // Trigger download
-    const safeName = house.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-    const link = document.createElement('a');
-    link.download = `${safeName}-screenshots.zip`;
-    link.href = URL.createObjectURL(zipBlob);
-    link.click();
-    URL.revokeObjectURL(link.href);
-
-    // Show completion with error details
-    showExportComplete(exportResults);
-
+    document.getElementById('share-url-input').value = shareUrl;
+    modalManager.openModal('share-modal');
   } catch (err) {
-    console.error('Export failed:', err);
-    hideExportProgressModal();
-    showError(`Export failed: ${err.message}`);
+    showError(`Failed to generate share link: ${err.message}`);
   }
 }
 
-/**
- * Export house screenshots with furniture entries pre-loaded.
- * @param {Object} house - House data
- * @param {Array} rooms - Room data array
- * @param {Map} furnitureEntries - Map of entryId to furniture entry
- * @param {Object} enhanceChoice - { enhance: boolean, customPrompt: string|null }
- * @param {Function} onProgress - Progress callback
- */
-async function exportHouseScreenshotsWithProgress(house, rooms, furnitureEntries, enhanceChoice, onProgress) {
-  const zip = new JSZip();
-  const results = [];
-
-  for (let i = 0; i < rooms.length; i++) {
-    const room = rooms[i];
-    const roomName = room.name || `Room ${i + 1}`;
-
-    onProgress(i + 1, rooms.length, roomName, 'loading');
-
-    try {
-      if (!room.backgroundImage) {
-        console.warn(`Skipping room "${roomName}": no background image`);
-        results.push({ room: roomName, success: false, error: 'No background image', screenshot: null });
-        onProgress(i + 1, rooms.length, roomName, 'error');
-        continue;
-      }
-
-      // Always capture with lighting/shadows
-      let screenshot = await captureRoomScreenshot(room, furnitureEntries);
-      let enhanceFallback = false;
-
-      if (enhanceChoice.enhance && room.id) {
-        onProgress(i + 1, rooms.length, roomName, 'enhancing');
-        try {
-          const compositeBase64 = await blobToBase64(screenshot);
-          const enhancedBase64 = await enhanceScreenshot(room.id, compositeBase64, enhanceChoice.customPrompt);
-          screenshot = base64ToBlob(enhancedBase64, 'image/png');
-        } catch (err) {
-          console.error(`Enhancement failed for "${roomName}":`, err);
-          enhanceFallback = true;
-        }
-      }
-
-      const safeName = roomName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-      const filename = `${safeName}.png`;
-
-      zip.file(filename, screenshot);
-      results.push({ room: roomName, success: true, filename, screenshot, enhanceFallback });
-
-      onProgress(i + 1, rooms.length, roomName, enhanceFallback ? 'enhance-fallback' : 'complete');
-    } catch (err) {
-      console.error(`Failed to capture screenshot for "${roomName}":`, err);
-      results.push({ room: roomName, success: false, error: err.message, screenshot: null });
-      onProgress(i + 1, rooms.length, roomName, 'error');
-    }
-  }
-
-  // Clean up renderer
-  disposeScreenshotRenderer();
-
-  // Build delivery manifest
-  const manifest = {
-    house: {
-      name: house.name,
-      startDate: house.startDate,
-      endDate: house.endDate
-    },
-    exportDate: new Date().toISOString(),
-    rooms: rooms.map(room => ({
-      name: room.name,
-      furniture: (room.placedFurniture || []).map(pf => {
-        const entry = furnitureEntries.get(pf.entryId);
-        return {
-          name: entry?.name || 'Unknown',
-          category: entry?.category || null,
-          dimensions: entry ? {
-            width: entry.dimensionX,
-            height: entry.dimensionY,
-            depth: entry.dimensionZ
-          } : null
-        };
-      })
-    })),
-    inventory: aggregateFurnitureInventory(rooms, furnitureEntries)
-  };
-  zip.file('manifest.json', JSON.stringify(manifest, null, 2));
-
-  // Generate PDF report
-  const pdf = await generateExportPDF(house, rooms, results, furnitureEntries);
-  zip.file('staging_report.pdf', pdf);
-
-  // Generate ZIP
-  const zipBlob = await zip.generateAsync({
-    type: 'blob',
-    compression: 'DEFLATE',
-    compressionOptions: { level: 6 }
-  });
-
-  return { zip: zipBlob, results };
-}
-
-/**
- * Aggregate furniture inventory across all rooms.
- */
-function aggregateFurnitureInventory(rooms, furnitureEntries) {
-  const counts = new Map();
-  rooms.forEach(room => {
-    (room.placedFurniture || []).forEach(pf => {
-      counts.set(pf.entryId, (counts.get(pf.entryId) || 0) + 1);
-    });
-  });
-
-  return Array.from(counts.entries()).map(([entryId, count]) => {
-    const entry = furnitureEntries.get(entryId);
-    return {
-      name: entry?.name || 'Unknown',
-      category: entry?.category || null,
-      quantity: count
-    };
-  }).sort((a, b) => (a.category || '').localeCompare(b.category || '') || a.name.localeCompare(b.name));
-}
-
-/**
- * Generate PDF report for house export.
- */
-async function generateExportPDF(house, rooms, results, furnitureEntries) {
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-
-  // Title page
-  doc.setFontSize(24);
-  doc.text(house.name, 105, 40, { align: 'center' });
-  doc.setFontSize(12);
-  doc.text(`${house.startDate} - ${house.endDate}`, 105, 50, { align: 'center' });
-  doc.text(`Generated: ${new Date().toLocaleDateString()}`, 105, 60, { align: 'center' });
-
-  // Each room on a new page (screenshot above, furniture list below)
-  for (let i = 0; i < rooms.length; i++) {
-    const room = rooms[i];
-    const result = results[i];
-
-    doc.addPage();
-
-    // Room name header
-    doc.setFontSize(18);
-    doc.text(room.name || `Room ${i + 1}`, 20, 15);
-
-    let yPos = 25;
-
-    // Screenshot at top (if successful)
-    if (result.success && result.screenshot) {
-      const imgData = await blobToDataURL(result.screenshot);
-      // Scale to fit page width (170mm), auto height maintains aspect ratio
-      doc.addImage(imgData, 'PNG', 20, yPos, 170, 0);
-      yPos = 140;
-      if (result.enhanceFallback) {
-        doc.setFontSize(9);
-        doc.setTextColor(200, 150, 50);
-        doc.text('Note: AI enhancement was unavailable for this room', 20, yPos);
-        doc.setTextColor(0, 0, 0);
-        yPos += 7;
-      }
-    } else if (!result.success) {
-      doc.setFontSize(10);
-      doc.setTextColor(200, 50, 50);
-      doc.text(`Screenshot failed: ${result.error || 'Unknown error'}`, 20, yPos);
-      doc.setTextColor(0, 0, 0);
-      yPos += 10;
-    }
-
-    // Furniture list below image
-    const furnitureList = room.placedFurniture || [];
-    if (furnitureList.length > 0) {
-      doc.setFontSize(12);
-      doc.text('Furniture:', 20, yPos);
-      yPos += 7;
-
-      doc.setFontSize(10);
-      furnitureList.forEach(pf => {
-        const entry = furnitureEntries.get(pf.entryId);
-        const name = entry?.name || 'Unknown';
-        const dims = entry && entry.dimensionX ? `(${entry.dimensionX}"W x ${entry.dimensionY}"H x ${entry.dimensionZ}"D)` : '';
-        doc.text(`- ${name} ${dims}`, 25, yPos);
-        yPos += 5;
-      });
-    }
-  }
-
-  // Final page: Complete inventory for truck loading
-  doc.addPage();
-  doc.setFontSize(18);
-  doc.text('Complete Inventory', 20, 20);
-
-  const inventory = aggregateFurnitureInventory(rooms, furnitureEntries);
-  let yPos = 32;
-  doc.setFontSize(10);
-
-  let currentCategory = null;
-  inventory.forEach(item => {
-    // Category header
-    if (item.category !== currentCategory) {
-      currentCategory = item.category;
-      doc.setFontSize(12);
-      doc.text(currentCategory || 'Uncategorized', 20, yPos);
-      yPos += 6;
-      doc.setFontSize(10);
-    }
-    doc.text(`  ${item.name} x${item.quantity}`, 25, yPos);
-    yPos += 5;
-  });
-
-  return doc.output('blob');
-}
-
-/**
- * Convert blob to data URL for PDF embedding.
- */
-function blobToDataURL(blob) {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.readAsDataURL(blob);
-  });
-}
-
-/**
- * Convert a Blob to base64 string (without data URL prefix).
- */
-async function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64 = reader.result.split(',')[1];
-      resolve(base64);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
-
-/**
- * Convert base64 string to Blob.
- */
 function base64ToBlob(base64, mimeType = 'image/png') {
   const byteChars = atob(base64);
   const byteArrays = [];
@@ -3729,95 +3422,6 @@ function base64ToBlob(base64, mimeType = 'image/png') {
     byteArrays.push(new Uint8Array(byteNumbers));
   }
   return new Blob(byteArrays, { type: mimeType });
-}
-
-/**
- * Show the export progress modal.
- */
-function showExportProgressModal() {
-  const modal = document.getElementById('export-progress-modal');
-  const actions = document.getElementById('export-progress-actions');
-  modal.classList.remove('modal-hidden');
-  actions.classList.add('hidden');
-}
-
-/**
- * Hide the export progress modal.
- */
-function hideExportProgressModal() {
-  const modal = document.getElementById('export-progress-modal');
-  modal.classList.add('modal-hidden');
-}
-
-/**
- * Update export progress display.
- */
-function updateExportProgress(current, total, roomName, status = 'loading') {
-  const textEl = document.getElementById('export-progress-text');
-  const fillEl = document.getElementById('export-progress-fill');
-  const detailEl = document.getElementById('export-progress-detail');
-
-  if (total === 0) {
-    textEl.textContent = roomName; // Used for initial loading message
-    fillEl.style.width = '0%';
-    detailEl.textContent = '';
-    return;
-  }
-
-  const percent = Math.round((current / total) * 100);
-  fillEl.style.width = `${percent}%`;
-
-  if (status === 'loading') {
-    textEl.textContent = `Capturing "${roomName}"...`;
-    detailEl.textContent = `Room ${current} of ${total}`;
-  } else if (status === 'enhancing') {
-    textEl.textContent = `Enhancing "${roomName}"...`;
-    detailEl.textContent = `Room ${current} of ${total} (AI processing)`;
-  } else if (status === 'complete') {
-    textEl.textContent = `Captured "${roomName}"`;
-    detailEl.textContent = `Room ${current} of ${total} complete`;
-  } else if (status === 'error') {
-    textEl.textContent = `Failed: "${roomName}"`;
-    detailEl.textContent = `Room ${current} of ${total} (error)`;
-  } else if (status === 'enhance-fallback') {
-    textEl.textContent = `Captured "${roomName}" (without enhancement)`;
-    detailEl.textContent = `Room ${current} of ${total} complete`;
-  }
-}
-
-/**
- * Show export completion and enable close button.
- */
-function showExportComplete(results) {
-  const textEl = document.getElementById('export-progress-text');
-  const fillEl = document.getElementById('export-progress-fill');
-  const detailEl = document.getElementById('export-progress-detail');
-  const actions = document.getElementById('export-progress-actions');
-
-  const succeeded = results.filter(r => r.success);
-  const failed = results.filter(r => !r.success);
-  const enhanceFallbacks = results.filter(r => r.enhanceFallback);
-
-  fillEl.style.width = '100%';
-
-  if (failed.length === 0) {
-    textEl.textContent = 'Export Complete!';
-    let detail = `${succeeded.length} room${succeeded.length !== 1 ? 's' : ''} exported`;
-    if (enhanceFallbacks.length > 0) {
-      detail += ` (${enhanceFallbacks.length} without AI enhancement)`;
-    }
-    detailEl.textContent = detail;
-  } else {
-    textEl.textContent = `Export Complete (${failed.length} failed)`;
-    const failList = failed.map(r => `${r.room}: ${r.error}`).join('; ');
-    let detail = `${succeeded.length} exported, ${failed.length} failed — ${failList}`;
-    if (enhanceFallbacks.length > 0) {
-      detail += ` | ${enhanceFallbacks.length} without AI enhancement`;
-    }
-    detailEl.textContent = detail;
-  }
-
-  actions.classList.remove('hidden');
 }
 
 async function handleCloseHouseFromSession() {
