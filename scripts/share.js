@@ -94,7 +94,7 @@ function renderRoomCard(room, isOwner) {
     controls.className = 'share-owner-controls';
 
     const genBtn = document.createElement('button');
-    genBtn.className = 'share-btn-primary';
+    genBtn.className = 'btn-primary';
     genBtn.textContent = room.finalImageUrl ? 'Generate New Image' : 'Generate Image';
     genBtn.addEventListener('click', () => handleGenerateImage(room, card, imageArea));
     controls.appendChild(genBtn);
@@ -105,7 +105,7 @@ function renderRoomCard(room, isOwner) {
   // Download button for final image
   if (room.finalImageUrl) {
     const dlBtn = document.createElement('button');
-    dlBtn.className = 'share-btn-secondary share-download-btn';
+    dlBtn.className = 'btn-secondary share-download-btn';
     dlBtn.textContent = 'Download Image';
     dlBtn.addEventListener('click', () => downloadImage(room.finalImageUrl, room.name));
     card.appendChild(dlBtn);
@@ -365,7 +365,7 @@ async function handleGenerateImage(room, card, imageArea) {
     // Add download button if it didn't exist
     if (!card.querySelector('.share-download-btn')) {
       const dlBtn = document.createElement('button');
-      dlBtn.className = 'share-btn-secondary share-download-btn';
+      dlBtn.className = 'btn-secondary share-download-btn';
       dlBtn.textContent = 'Download Image';
       dlBtn.addEventListener('click', () => downloadImage(room.finalImageUrl, room.name));
       card.insertBefore(dlBtn, card.querySelector('.share-furniture-list'));
