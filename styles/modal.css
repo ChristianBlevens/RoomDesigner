@@ -357,8 +357,24 @@
 }
 
 .entry-editor-content {
-  width: min(500px, calc(100vw - var(--modal-margin-min) * 2));
+  width: min(650px, calc(100vw - var(--modal-margin-min) * 2));
   padding: var(--spacing-lg);
+}
+
+.entry-editor-content textarea {
+  width: 100%;
+  background: var(--surface-dark);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--font-md);
+  padding: var(--spacing-sm);
+  font-family: inherit;
+  resize: vertical;
+}
+
+.entry-editor-content textarea::placeholder {
+  color: var(--text-muted);
 }
 
 .entry-editor-content h3 {

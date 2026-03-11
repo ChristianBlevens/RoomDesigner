@@ -51,6 +51,7 @@ COPY styles/ ./styles/
 COPY tutorials/ ./tutorials/
 COPY index.html .
 COPY admin.html .
+COPY share.html .
 
 # Create data directories and X11 socket directory
 RUN mkdir -p /app/server/data /app/server/storage /tmp/.X11-unix && \
