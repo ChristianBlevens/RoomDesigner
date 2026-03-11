@@ -183,14 +183,20 @@ body {
   border-color: transparent transparent transparent var(--accent-primary);
 }
 
-/* Owner controls */
-.share-owner-controls {
+/* Button row below image (download left, generate right) */
+.share-btn-row {
+  display: flex;
+  gap: var(--spacing-sm);
   margin: var(--spacing-md) 0;
 }
 
-/* Share-specific button overrides for inline sizing */
-.share-download-btn {
-  margin-top: var(--spacing-sm);
+.share-btn-row .share-generate-btn {
+  margin-left: auto;
+}
+
+/* Manifest download button */
+.share-manifest-download-btn {
+  margin-top: var(--spacing-md);
 }
 
 /* Furniture list */

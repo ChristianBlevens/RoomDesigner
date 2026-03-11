@@ -88,27 +88,28 @@ function renderRoomCard(room, isOwner) {
 
   card.appendChild(imageArea);
 
-  // Owner mode: generate/update button
-  if (isOwner) {
-    const controls = document.createElement('div');
-    controls.className = 'share-owner-controls';
+  // Button row below image (download left, generate right)
+  const btnRow = document.createElement('div');
+  btnRow.className = 'share-btn-row';
 
-    const genBtn = document.createElement('button');
-    genBtn.className = 'btn-primary';
-    genBtn.textContent = room.finalImageUrl ? 'Generate New Image' : 'Generate Image';
-    genBtn.addEventListener('click', () => handleGenerateImage(room, card, imageArea));
-    controls.appendChild(genBtn);
-
-    card.appendChild(controls);
-  }
-
-  // Download button for final image
   if (room.finalImageUrl) {
     const dlBtn = document.createElement('button');
     dlBtn.className = 'btn-secondary share-download-btn';
     dlBtn.textContent = 'Download Image';
     dlBtn.addEventListener('click', () => downloadImage(room.finalImageUrl, room.name));
-    card.appendChild(dlBtn);
+    btnRow.appendChild(dlBtn);
+  }
+
+  if (isOwner) {
+    const genBtn = document.createElement('button');
+    genBtn.className = 'btn-primary share-generate-btn';
+    genBtn.textContent = room.finalImageUrl ? 'Generate New Image' : 'Generate Image';
+    genBtn.addEventListener('click', () => handleGenerateImage(room, card, imageArea));
+    btnRow.appendChild(genBtn);
+  }
+
+  if (btnRow.children.length > 0) {
+    card.appendChild(btnRow);
   }
 
   // Furniture list
@@ -201,7 +202,7 @@ function createBeforeAfterSlider(beforeUrl, afterUrl) {
   return container;
 }
 
-function renderInventory(inventory) {
+function renderInventory(inventory, houseName) {
   const container = document.getElementById('share-inventory');
   container.innerHTML = '';
 
@@ -239,6 +240,44 @@ function renderInventory(inventory) {
     group.appendChild(ul);
     container.appendChild(group);
   }
+
+  // Download manifest button
+  const dlBtn = document.createElement('button');
+  dlBtn.className = 'btn-secondary share-manifest-download-btn';
+  dlBtn.textContent = 'Download Manifest';
+  dlBtn.addEventListener('click', () => downloadManifest(inventory, houseName));
+  container.appendChild(dlBtn);
+}
+
+function downloadManifest(inventory, houseName) {
+  const byCategory = {};
+  for (const item of inventory) {
+    const cat = item.category || 'Uncategorized';
+    if (!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push(item);
+  }
+
+  let text = `Delivery Manifest — ${houseName}\n`;
+  text += '='.repeat(text.length - 1) + '\n\n';
+
+  for (const [category, items] of Object.entries(byCategory).sort()) {
+    text += `${category}\n`;
+    text += '-'.repeat(category.length) + '\n';
+    for (const item of items) {
+      let line = `  ${item.name} x${item.totalInHouse}`;
+      if (item.condition) line += ` [${item.condition}]`;
+      if (item.location) line += ` — ${item.location}`;
+      text += line + '\n';
+    }
+    text += '\n';
+  }
+
+  const blob = new Blob([text], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${houseName.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_manifest.txt`;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 async function downloadImage(url, name) {
@@ -266,7 +305,7 @@ async function handleGenerateImage(room, card, imageArea) {
     return;
   }
 
-  const genBtn = card.querySelector('.share-owner-controls button');
+  const genBtn = card.querySelector('.share-generate-btn');
   const originalText = genBtn.textContent;
   genBtn.textContent = 'Loading renderer...';
   genBtn.disabled = true;
@@ -374,13 +413,14 @@ async function handleGenerateImage(room, card, imageArea) {
     genBtn.textContent = 'Generate New Image';
     genBtn.disabled = false;
 
-    // Add download button if it didn't exist
-    if (!card.querySelector('.share-download-btn')) {
+    // Add download button to the button row if it didn't exist
+    const btnRow = card.querySelector('.share-btn-row');
+    if (btnRow && !btnRow.querySelector('.share-download-btn')) {
       const dlBtn = document.createElement('button');
       dlBtn.className = 'btn-secondary share-download-btn';
       dlBtn.textContent = 'Download Image';
       dlBtn.addEventListener('click', () => downloadImage(room.finalImageUrl, room.name));
-      card.insertBefore(dlBtn, card.querySelector('.share-furniture-list'));
+      btnRow.insertBefore(dlBtn, btnRow.firstChild);
     }
 
   } catch (err) {
@@ -438,7 +478,13 @@ async function init() {
       roomsContainer.appendChild(card);
     }
 
-    renderInventory(data.inventory);
+    // Delivery manifest — owner only
+    const manifestSection = document.getElementById('share-manifest');
+    if (data.isOwner && data.inventory.length > 0) {
+      renderInventory(data.inventory, data.house.name);
+    } else {
+      manifestSection.style.display = 'none';
+    }
 
     // Download all button
     document.getElementById('share-download-all').addEventListener('click', async () => {
