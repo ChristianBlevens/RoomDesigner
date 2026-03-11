@@ -8,6 +8,7 @@ import logging
 import sys
 from pathlib import Path
 from typing import Optional
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import HTMLResponse
@@ -320,8 +321,18 @@ def upload_final_image(room_id: str, request: FinalImageRequest, org_id: str = D
     except Exception as e:
         raise HTTPException(400, f"Invalid image: {str(e)}")
 
-    r2_key = f"rooms/final/{room_id}.png"
+    # Delete old final image from R2 if it exists
+    old_row = db.execute(
+        "SELECT final_image_path FROM rooms WHERE id = ?", [room_id]
+    ).fetchone()
+    old_key = old_row[0] if old_row else None
+
+    # Use unique key per upload to avoid CDN/browser cache serving stale images
+    r2_key = f"rooms/final/{room_id}_{uuid4().hex[:8]}.png"
     r2.upload_bytes(r2_key, image_bytes, "image/png")
+
+    if old_key:
+        r2.delete_object(old_key)
 
     db.execute(
         "UPDATE rooms SET final_image_path = ? WHERE id = ?",
