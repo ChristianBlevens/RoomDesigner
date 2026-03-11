@@ -436,7 +436,8 @@ input[type="text"],
 input[type="search"],
 input[type="password"],
 input[type="number"],
-select {
+select,
+textarea {
   padding: var(--spacing-sm) var(--spacing-md);
   min-height: var(--btn-size);
   border: 1px solid var(--border-default);
@@ -446,13 +447,19 @@ select {
   transition: border-color 0.2s, box-shadow 0.2s;
   background: var(--bg-input);
   color: var(--text-primary);
+  font-family: inherit;
+}
+
+textarea {
+  resize: vertical;
 }
 
 input[type="text"]:focus,
 input[type="search"]:focus,
 input[type="password"]:focus,
 input[type="number"]:focus,
-select:focus {
+select:focus,
+textarea:focus {
   border-color: var(--border-focus);
   box-shadow: 0 0 0 2px var(--accent-subtle);
 }
@@ -460,7 +467,8 @@ select:focus {
 input[type="text"]::placeholder,
 input[type="search"]::placeholder,
 input[type="password"]::placeholder,
-input[type="number"]::placeholder {
+input[type="number"]::placeholder,
+textarea::placeholder {
   color: var(--text-secondary);
 }
 
@@ -483,7 +491,8 @@ select option {
 
 .form-group input[type="text"],
 .form-group input[type="password"],
-.form-group select {
+.form-group select,
+.form-group textarea {
   width: 100%;
 }
 
@@ -493,6 +502,12 @@ select option {
 }
 
 .form-row .form-group {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.form-row .form-group > *:last-child:not(label) {
   flex: 1;
 }
 
@@ -675,10 +690,12 @@ select option {
 /* Dropdown input container */
 .dropdown-input-container {
   position: relative;
+  flex: 1;
 }
 
 .dropdown-input-container input[type="text"] {
   width: 100%;
+  height: 100%;
 }
 
 /* ============ Dimension Inputs ============ */

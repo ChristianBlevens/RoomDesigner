@@ -361,22 +361,6 @@
   padding: var(--spacing-lg);
 }
 
-.entry-editor-content textarea {
-  width: 100%;
-  background: var(--surface-dark);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-size: var(--font-md);
-  padding: var(--spacing-sm);
-  font-family: inherit;
-  resize: vertical;
-}
-
-.entry-editor-content textarea::placeholder {
-  color: var(--text-muted);
-}
-
 .entry-editor-content h3 {
   font-size: var(--font-lg);
   color: var(--text-bright);
