@@ -451,7 +451,7 @@ textarea {
 }
 
 textarea {
-  resize: vertical;
+  resize: none;
 }
 
 input[type="text"]:focus,
