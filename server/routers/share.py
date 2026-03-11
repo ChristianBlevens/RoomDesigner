@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -56,8 +56,8 @@ def _get_org_id_from_request(request: Request) -> Optional[str]:
 # ============ Public Endpoints ============
 
 @router.get("/share/{token}")
-async def serve_share_page(token: str):
-    """Serve the share HTML page."""
+async def serve_share_page(token: str, request: Request):
+    """Serve the share HTML page with correct base path for static assets."""
     share_path = FRONTEND_DIR / "share.html"
     if not share_path.exists():
         raise HTTPException(404, "Share page not found")
@@ -69,7 +69,14 @@ async def serve_share_page(token: str):
     if not row:
         raise HTTPException(404, "Share link not found or has been revoked")
 
-    return FileResponse(str(share_path), media_type="text/html")
+    # Detect base path from request URL (handles /room/ prefix behind nginx)
+    path = request.url.path
+    share_idx = path.find("/share/")
+    base_href = path[:share_idx] + "/" if share_idx > 0 else "/"
+
+    html = share_path.read_text()
+    html = html.replace("<head>", f'<head>\n  <base href="{base_href}">', 1)
+    return HTMLResponse(html)
 
 
 @router.get("/api/share/{token}")

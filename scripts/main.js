@@ -1550,46 +1550,28 @@ async function refreshFurnitureModal() {
 }
 
 async function loadDestagingBufferUI() {
-  let container = document.getElementById('destaging-buffer-row');
-  if (!container) {
-    container = document.createElement('div');
-    container.id = 'destaging-buffer-row';
-    container.className = 'destaging-buffer-row';
-    container.innerHTML = `
-      <label>De-staging buffer:
-        <input type="number" id="destaging-buffer-input" min="0" max="30" value="0">
-        <span>days</span>
-      </label>
-      <button id="destaging-buffer-save" class="btn-secondary btn-sm">Save</button>
-      <span id="destaging-buffer-status" class="buffer-status"></span>
-    `;
-    const header = document.querySelector('.furniture-modal-header');
-    header.parentNode.insertBefore(container, header.nextSibling);
+  const input = document.getElementById('destaging-buffer-input');
 
-    document.getElementById('destaging-buffer-save').addEventListener('click', async () => {
-      const input = document.getElementById('destaging-buffer-input');
+  if (!input._listenerAttached) {
+    input.addEventListener('change', async () => {
       const days = parseInt(input.value, 10);
       if (isNaN(days) || days < 0) return;
-      const status = document.getElementById('destaging-buffer-status');
       try {
         await saveDestagingBuffer(days);
-        status.textContent = 'Saved';
-        status.className = 'buffer-status saved';
-        setTimeout(() => { status.textContent = ''; }, 2000);
         invalidateCache('availability');
         await renderFurnitureGrid();
       } catch (err) {
-        status.textContent = 'Failed';
-        status.className = 'buffer-status failed';
+        console.error('Failed to save destaging buffer:', err);
       }
     });
+    input._listenerAttached = true;
   }
 
   try {
     const days = await getDestagingBuffer();
-    document.getElementById('destaging-buffer-input').value = days;
+    input.value = days;
   } catch (err) {
-    document.getElementById('destaging-buffer-input').value = 0;
+    input.value = 0;
   }
 }
 
