@@ -5,7 +5,7 @@ The furniture system lets you place, arrange, and manage 3D furniture models in 
 ## Overview
 
 - Furniture entries are stored in a shared database for your organization
-- Each entry can have a 2D photo, a 3D model, dimensions, category, tags, and a quantity
+- Each entry can have a 2D photo, a 3D model, dimensions, category, tags, quantity, storage location, and condition rating
 - Quantities are tracked across houses — the app prevents double-booking furniture during overlapping time periods
 - Tap anywhere on an empty surface to open the furniture database and place an item
 

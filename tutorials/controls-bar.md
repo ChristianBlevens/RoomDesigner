@@ -13,6 +13,6 @@ The controls bar is the fixed strip of buttons above the room tabs. It contains 
 - **Layouts** — save and load furniture arrangements
 - **Wall Color** — change wall colors using AI
 - **?** — open this tutorial hub
-- **House** — open house options (edit, export, close, delete, sign out)
+- **House** — open house options (edit, share, close, delete, sign out)
 
 All buttons are available on every screen size. Some buttons highlight when their mode or panel is active.

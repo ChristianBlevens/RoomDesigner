@@ -11,6 +11,7 @@ Welcome to Room Furniture Planner! This app helps interior design firms stage ho
 5. **Place furniture** — tap anywhere in the room to open the furniture database and select an item
 6. **Adjust and arrange** — drag furniture to reposition, use the gizmo to rotate or delete
 7. **Save** — room state saves automatically when you switch rooms or close the house
+8. **Share** — tap the House button and choose Share House to generate a link for clients
 
 ## Key Concepts
 

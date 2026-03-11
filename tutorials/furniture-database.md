@@ -23,20 +23,26 @@ Hover or tap any availability badge to see a **tooltip** listing which houses th
 
 ## De-staging Buffer
 
-At the top of the furniture modal, you can set a **de-staging buffer** (in days). This warns you when furniture was recently at another house that ended shortly before the current house starts — even though dates don't technically overlap, the furniture may not be physically returned yet.
+In the furniture modal header, between the tag filter and the Add Entry button, there is a **de-staging buffer** input (in days). This warns you when furniture was recently at another house that ended shortly before the current house starts — even though dates don't technically overlap, the furniture may not be physically returned yet.
 
 - Set to **0** (default) to disable buffer warnings
 - Typical values: **1-3 days**
+- Changes save automatically when you change the value
 - The setting applies to all availability calculations for your organization
 
 ## Adding a New Entry
 
 1. Tap the **"+ Add Entry"** button
 2. Fill in the name, category, tags, and dimensions (width, height, depth in centimeters)
-3. Upload a **photo** of the furniture (optional but recommended)
-4. Upload a **3D model** in GLB format, or generate one from the photo using Meshy.ai
-5. Set the **quantity** — how many of this item your organization owns
-6. Save the entry
+3. Set the **location** — where the item is stored (e.g., "Warehouse B, Aisle 3")
+4. Set the **condition** — rate the item as Excellent, Good, Fair, or Poor
+5. Add **condition notes** — describe any damage or wear
+6. Upload a **photo** of the furniture (optional but recommended)
+7. Upload a **3D model** in GLB format, or generate one from the photo using Meshy.ai
+8. Set the **quantity** — how many of this item your organization owns
+9. Save the entry
+
+Location and condition information appears on the share page's delivery manifest, helping delivery teams find and assess items.
 
 ## Editing and Deleting
 
