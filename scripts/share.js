@@ -150,11 +150,13 @@ function createBeforeAfterSlider(beforeUrl, afterUrl) {
   beforeImg.src = beforeUrl;
   beforeImg.className = 'share-slider-before';
   beforeImg.alt = 'Before';
+  beforeImg.draggable = false;
 
   const afterImg = document.createElement('img');
   afterImg.src = afterUrl;
   afterImg.className = 'share-slider-after';
   afterImg.alt = 'After';
+  afterImg.draggable = false;
 
   const divider = document.createElement('div');
   divider.className = 'share-slider-divider';
@@ -178,6 +180,7 @@ function createBeforeAfterSlider(beforeUrl, afterUrl) {
   }
 
   container.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
     isDragging = true;
     container.setPointerCapture(e.pointerId);
     updateSlider(e.clientX);
@@ -273,11 +276,20 @@ async function handleGenerateImage(room, card, imageArea) {
 
     genBtn.textContent = 'Capturing screenshot...';
 
+    // Determine the correct background URL (wall color variant if active, otherwise original)
+    let backgroundUrl = room.backgroundImageUrl;
+    if (room.wallColors?.activeVariantId && room.wallColors.variants) {
+      const activeVariant = room.wallColors.variants.find(v => v.id === room.wallColors.activeVariantId);
+      if (activeVariant?.imageUrl) {
+        backgroundUrl = activeVariant.imageUrl;
+      }
+    }
+
     // Build room data in the format captureRoomScreenshot expects
     const roomData = {
       id: room.id,
       name: room.name,
-      backgroundImageUrl: room.backgroundImageUrl,
+      backgroundImageUrl: backgroundUrl,
       placedFurniture: room.placedFurniture,
       mogeData: room.mogeData,
       lightingSettings: room.lightingSettings,
@@ -292,13 +304,13 @@ async function handleGenerateImage(room, card, imageArea) {
         const modelBlob = await modelResponse.blob();
         furnitureEntries.set(item.entryId, {
           ...item,
-          modelBlob,
+          model: modelBlob,
         });
       }
     }
 
     // Fetch background image blob
-    const bgResponse = await fetch(room.backgroundImageUrl, { cache: 'no-store' });
+    const bgResponse = await fetch(backgroundUrl, { cache: 'no-store' });
     roomData.backgroundImage = await bgResponse.blob();
 
     const screenshot = await screenshotModule.captureRoomScreenshot(roomData, furnitureEntries);
