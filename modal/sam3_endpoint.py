@@ -39,10 +39,17 @@ image = (
     .pip_install(
         "torch>=2.7.0",
         "torchvision",
-        "numpy<2.0",
+        "numpy>=1.26,<2.0",
         "opencv-python-headless",
         "pillow",
         "huggingface-hub",
+        "einops",
+        "timm>=1.0.17",
+        "tqdm",
+        "ftfy==6.1.1",
+        "regex",
+        "iopath>=0.1.10",
+        "scipy",
         "fastapi[standard]",
     )
     .run_commands(
