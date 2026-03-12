@@ -16,17 +16,17 @@ hf_secret = modal.Secret.from_name("huggingface")
 
 
 def download_model():
-    """Download SAM 3 checkpoint during image build (cached)."""
+    """Download SAM 3 checkpoint during image build (cached). No GPU needed."""
     import os
-    import sys
-    sys.path.insert(0, "/opt/sam3")
 
-    from huggingface_hub import login
+    from huggingface_hub import login, hf_hub_download
     login(token=os.environ["HF_TOKEN"])
 
-    from sam3 import build_sam3_image_model
-    model = build_sam3_image_model(enable_inst_interactivity=True)
-    print(f"SAM 3 model downloaded: {type(model)}")
+    # Download checkpoint and config without building the model (no CUDA required)
+    path = hf_hub_download(repo_id="facebook/sam3", filename="sam3.pt")
+    print(f"SAM 3 checkpoint downloaded: {path}")
+    config = hf_hub_download(repo_id="facebook/sam3", filename="config.json")
+    print(f"SAM 3 config downloaded: {config}")
 
 
 image = (
