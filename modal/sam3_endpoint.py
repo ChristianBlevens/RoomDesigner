@@ -42,19 +42,11 @@ image = (
         "numpy>=1.26,<2.0",
         "opencv-python-headless",
         "pillow",
-        "huggingface-hub",
-        "einops",
-        "timm>=1.0.17",
-        "tqdm",
-        "ftfy==6.1.1",
-        "regex",
-        "iopath>=0.1.10",
-        "scipy",
         "fastapi[standard]",
     )
     .run_commands(
         "git clone --depth 1 https://github.com/facebookresearch/sam3.git /opt/sam3",
-        "cd /opt/sam3 && pip install -e .",
+        "cd /opt/sam3 && pip install -e '.[notebooks,dev]'",
     )
     .run_function(download_model, secrets=[hf_secret])
 )
