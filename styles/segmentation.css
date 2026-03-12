@@ -88,6 +88,32 @@ body {
   color: var(--text-secondary);
 }
 
+/* === Edit Controls === */
+
+.seg-edit-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.seg-edit-btn {
+  min-height: 36px;
+  padding: 4px 12px;
+  font-size: var(--font-sm);
+}
+
+.seg-edit-btn.active {
+  background: var(--accent-primary);
+  color: var(--text-bright);
+  border-color: var(--accent-primary);
+}
+
+.seg-brush-slider {
+  width: 100px;
+  accent-color: var(--accent-primary);
+  cursor: pointer;
+}
+
 /* === Main Layout === */
 
 .seg-workspace {
@@ -259,6 +285,15 @@ body {
 }
 
 .seg-card.highlighted {
+  border-color: var(--accent-primary);
+}
+
+.seg-card.selected {
+  background: var(--accent-subtle);
+  border-color: var(--accent-primary);
+}
+
+.seg-card.selected.highlighted {
   border-color: var(--accent-primary);
 }
 

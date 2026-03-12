@@ -6,13 +6,13 @@
  * Export accepted segments as transparent PNGs in a ZIP.
  *
  * @param {HTMLImageElement} sourceImage - Original uploaded image
- * @param {Array<{name: string, mask: object}>} segments - Accepted segments with names
+ * @param {Array<{name: string, mask: object, maskCanvas: HTMLCanvasElement|null}>} segments
  */
 export async function exportSegments(sourceImage, segments) {
   const zip = new JSZip();
 
   for (const seg of segments) {
-    const pngBlob = await maskToTransparentPNG(sourceImage, seg.mask);
+    const pngBlob = await maskToTransparentPNG(sourceImage, seg.mask, seg.maskCanvas);
     zip.file(`${sanitizeFilename(seg.name)}.png`, pngBlob);
   }
 
@@ -23,21 +23,46 @@ export async function exportSegments(sourceImage, segments) {
 /**
  * Apply a binary mask to the source image, crop to bbox, return transparent PNG blob.
  */
-async function maskToTransparentPNG(sourceImage, mask) {
-  const bbox = mask.bbox; // [x, y, w, h]
-  const pad = 10;
-  const x = Math.max(0, bbox[0] - pad);
-  const y = Math.max(0, bbox[1] - pad);
-  const w = Math.min(sourceImage.naturalWidth - x, bbox[2] + pad * 2);
-  const h = Math.min(sourceImage.naturalHeight - y, bbox[3] + pad * 2);
+async function maskToTransparentPNG(sourceImage, mask, editedMaskCanvas) {
+  const maskSrc = editedMaskCanvas || mask._decodedImage;
 
-  // Get mask pixel data at full image size
-  const maskCanvas = document.createElement('canvas');
-  maskCanvas.width = sourceImage.naturalWidth;
-  maskCanvas.height = sourceImage.naturalHeight;
-  const maskCtx = maskCanvas.getContext('2d');
-  maskCtx.drawImage(mask._decodedImage, 0, 0, sourceImage.naturalWidth, sourceImage.naturalHeight);
-  const maskData = maskCtx.getImageData(x, y, w, h);
+  // Read mask at full resolution to find tight bounds
+  const fullCanvas = document.createElement('canvas');
+  fullCanvas.width = sourceImage.naturalWidth;
+  fullCanvas.height = sourceImage.naturalHeight;
+  const fullCtx = fullCanvas.getContext('2d');
+  fullCtx.drawImage(maskSrc, 0, 0, sourceImage.naturalWidth, sourceImage.naturalHeight);
+  const fullData = fullCtx.getImageData(0, 0, sourceImage.naturalWidth, sourceImage.naturalHeight);
+
+  // Compute tight bbox from mask data
+  let minX = sourceImage.naturalWidth, minY = sourceImage.naturalHeight, maxX = 0, maxY = 0;
+  const sw = sourceImage.naturalWidth;
+  for (let py = 0; py < sourceImage.naturalHeight; py++) {
+    for (let px = 0; px < sw; px++) {
+      if (fullData.data[(py * sw + px) * 4] > 128) {
+        if (px < minX) minX = px;
+        if (px > maxX) maxX = px;
+        if (py < minY) minY = py;
+        if (py > maxY) maxY = py;
+      }
+    }
+  }
+
+  if (maxX < minX) {
+    // Empty mask — return a 1x1 transparent pixel
+    const empty = document.createElement('canvas');
+    empty.width = 1;
+    empty.height = 1;
+    return new Promise((resolve) => empty.toBlob(resolve, 'image/png'));
+  }
+
+  const pad = 10;
+  const x = Math.max(0, minX - pad);
+  const y = Math.max(0, minY - pad);
+  const w = Math.min(sourceImage.naturalWidth - x, (maxX - minX + 1) + pad * 2);
+  const h = Math.min(sourceImage.naturalHeight - y, (maxY - minY + 1) + pad * 2);
+
+  const maskData = fullCtx.getImageData(x, y, w, h);
 
   // Draw cropped source
   const outCanvas = document.createElement('canvas');

@@ -33,6 +33,11 @@
         <button id="seg-btn-undo-point" class="btn-secondary" title="Remove last point from selected object">Undo Point</button>
         <button id="seg-btn-segment" class="btn-primary" title="Run segmentation" disabled>Segment</button>
         <button id="seg-btn-reset" class="btn-secondary hidden" title="Clear results and start over">Reset</button>
+        <div id="seg-edit-controls" class="seg-edit-controls hidden">
+          <button id="seg-btn-paint" class="btn-secondary seg-edit-btn" title="Paint to add to mask">Paint</button>
+          <button id="seg-btn-erase" class="btn-secondary seg-edit-btn" title="Erase to remove from mask">Erase</button>
+          <input id="seg-brush-size" type="range" min="5" max="100" value="20" class="seg-brush-slider" title="Brush size">
+        </div>
       </div>
 
       <div class="seg-main">
@@ -56,7 +61,7 @@
         <!-- Right: segment results (after segmentation) -->
         <div id="seg-results" class="seg-side-panel hidden">
           <div class="seg-panel-header">
-            <h3>Segments (<span id="seg-result-count">0</span>)</h3>
+            <h3>Objects (<span id="seg-result-count">0</span>)</h3>
             <button id="seg-btn-export" class="btn-primary">Export All</button>
           </div>
           <div id="seg-result-list" class="seg-panel-list"></div>

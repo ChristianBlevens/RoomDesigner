@@ -19,6 +19,11 @@ let rejected = new Set();     // mask IDs the user rejected
 let draggingPoint = null;     // {objectId, pointIdx} of point being dragged
 let didDrag = false;          // distinguish drag from click
 let highlightedMaskId = -1;   // mask ID hovered in results panel
+let selectedMaskId = -1;      // mask ID selected for editing
+let editMode = null;          // 'paint' | 'erase' | null
+let brushSize = 20;           // brush radius in image-space pixels
+let isDrawing = false;        // whether a paint/erase stroke is active
+let lastDrawPos = null;       // last stroke position for interpolation
 
 // --- DOM refs ---
 
@@ -43,6 +48,10 @@ const btnSegment = document.getElementById('seg-btn-segment');
 const btnExport = document.getElementById('seg-btn-export');
 const btnReset = document.getElementById('seg-btn-reset');
 const btnAddObject = document.getElementById('seg-btn-add-object');
+const editControls = document.getElementById('seg-edit-controls');
+const btnPaint = document.getElementById('seg-btn-paint');
+const btnErase = document.getElementById('seg-btn-erase');
+const brushSlider = document.getElementById('seg-brush-size');
 
 // --- Constants ---
 
@@ -122,6 +131,10 @@ function resetState() {
   draggingPoint = null;
   didDrag = false;
   highlightedMaskId = -1;
+  selectedMaskId = -1;
+  editMode = null;
+  isDrawing = false;
+  lastDrawPos = null;
 }
 
 function hasResults() {
@@ -145,6 +158,68 @@ function getObjectColorById(id) {
 
 function totalPoints() {
   return objects.reduce((sum, o) => sum + o.points.length, 0);
+}
+
+function getSelectedMask() {
+  return masks.find(m => m.id === selectedMaskId) || null;
+}
+
+function selectMask(id) {
+  selectedMaskId = id;
+  renderResults();
+  drawCanvas();
+}
+
+/** Create a mutable mask canvas from the decoded image for editing. */
+function initMaskCanvas(mask) {
+  if (!mask._decodedImage || !sourceImage) return;
+  const c = document.createElement('canvas');
+  c.width = sourceImage.naturalWidth;
+  c.height = sourceImage.naturalHeight;
+  const cCtx = c.getContext('2d');
+  cCtx.drawImage(mask._decodedImage, 0, 0, c.width, c.height);
+  mask._maskCanvas = c;
+}
+
+/** Paint or erase a circle on the mask canvas. */
+function applyBrush(mask, cx, cy, radius, mode) {
+  if (!mask._maskCanvas) return;
+  const mCtx = mask._maskCanvas.getContext('2d');
+  mCtx.beginPath();
+  mCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+  if (mode === 'paint') {
+    mCtx.fillStyle = '#ffffff';
+    mCtx.fill();
+  } else {
+    mCtx.save();
+    mCtx.globalCompositeOperation = 'destination-out';
+    mCtx.fillStyle = '#000000';
+    mCtx.fill();
+    mCtx.restore();
+  }
+}
+
+/** Interpolate between two points for smooth strokes. */
+function strokeLine(mask, x0, y0, x1, y1, radius, mode) {
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  const step = Math.max(1, radius * 0.3);
+  const steps = Math.ceil(dist / step);
+  for (let i = 0; i <= steps; i++) {
+    const t = steps === 0 ? 0 : i / steps;
+    applyBrush(mask, x0 + dx * t, y0 + dy * t, radius, mode);
+  }
+}
+
+/** Regenerate a single mask's thumbnail and update its card image. */
+function refreshThumbnail(mask) {
+  const thumbUrl = generateThumbnail(mask);
+  const card = resultList.querySelector(`[data-mask-id="${mask.id}"]`);
+  if (card) {
+    const img = card.querySelector('.seg-card-thumb');
+    if (img) img.src = thumbUrl;
+  }
 }
 
 // --- State transitions ---
@@ -264,16 +339,17 @@ function drawCanvas() {
 
       const color = MASK_COLORS[mask.id % MASK_COLORS.length];
       const isHighlighted = mask.id === highlightedMaskId;
-      const alpha = isHighlighted ? 160 : 80;
-      const maskImg = mask._decodedImage;
-      if (!maskImg) continue;
+      const isSelected = mask.id === selectedMaskId;
+      const alpha = (isHighlighted || isSelected) ? 160 : 80;
+      const maskSrc = mask._maskCanvas || mask._decodedImage;
+      if (!maskSrc) continue;
 
       const off = document.createElement('canvas');
       off.width = canvas.width;
       off.height = canvas.height;
       const offCtx = off.getContext('2d');
 
-      offCtx.drawImage(maskImg, 0, 0, canvas.width, canvas.height);
+      offCtx.drawImage(maskSrc, 0, 0, canvas.width, canvas.height);
       const maskData = offCtx.getImageData(0, 0, canvas.width, canvas.height);
 
       for (let i = 0; i < maskData.data.length; i += 4) {
@@ -289,7 +365,7 @@ function drawCanvas() {
       offCtx.putImageData(maskData, 0, 0);
       ctx.drawImage(off, 0, 0);
 
-      if (isHighlighted) {
+      if (isHighlighted || isSelected) {
         const edgeData = offCtx.createImageData(canvas.width, canvas.height);
         const w = canvas.width;
         for (let py = 1; py < canvas.height - 1; py++) {
@@ -373,8 +449,27 @@ function hitTestPoint(cx, cy) {
   return null;
 }
 
+function canEditMask() {
+  return hasResults() && selectedMaskId >= 0 && editMode && !rejected.has(selectedMaskId);
+}
+
 canvas.addEventListener('pointerdown', (e) => {
-  if (!sourceImage || hasResults()) return;
+  if (!sourceImage) return;
+
+  // Mask editing mode
+  if (canEditMask()) {
+    const mask = getSelectedMask();
+    if (!mask) return;
+    isDrawing = true;
+    lastDrawPos = canvasCoords(e);
+    canvas.setPointerCapture(e.pointerId);
+    applyBrush(mask, lastDrawPos.x, lastDrawPos.y, brushSize, editMode);
+    drawCanvas();
+    e.preventDefault();
+    return;
+  }
+
+  if (hasResults()) return;
 
   const { x, y } = canvasCoords(e);
   const hit = hitTestPoint(x, y);
@@ -391,8 +486,20 @@ canvas.addEventListener('pointerdown', (e) => {
 canvas.addEventListener('pointermove', (e) => {
   if (!sourceImage) return;
 
+  // Mask editing stroke
+  if (isDrawing && canEditMask()) {
+    const mask = getSelectedMask();
+    if (!mask) return;
+    const pos = canvasCoords(e);
+    strokeLine(mask, lastDrawPos.x, lastDrawPos.y, pos.x, pos.y, brushSize, editMode);
+    lastDrawPos = pos;
+    drawCanvas();
+    e.preventDefault();
+    return;
+  }
+
   if (hasResults()) {
-    canvas.style.cursor = 'default';
+    canvas.style.cursor = canEditMask() ? 'crosshair' : 'default';
     return;
   }
 
@@ -420,6 +527,17 @@ canvas.addEventListener('pointermove', (e) => {
 });
 
 canvas.addEventListener('pointerup', (e) => {
+  // End mask editing stroke
+  if (isDrawing) {
+    canvas.releasePointerCapture(e.pointerId);
+    isDrawing = false;
+    lastDrawPos = null;
+    const mask = getSelectedMask();
+    if (mask) refreshThumbnail(mask);
+    e.preventDefault();
+    return;
+  }
+
   if (hasResults()) return;
 
   if (draggingPoint) {
@@ -427,7 +545,6 @@ canvas.addEventListener('pointerup', (e) => {
     draggingPoint = null;
     canvas.style.cursor = 'crosshair';
     e.preventDefault();
-    // Update point count in object list
     renderObjectList();
     return;
   }
@@ -451,12 +568,16 @@ canvas.addEventListener('pointerup', (e) => {
 function updateToolbarState() {
   const tp = totalPoints();
   if (hasResults()) {
-    pointCount.textContent = `${masks.length} segment${masks.length !== 1 ? 's' : ''} found`;
+    pointCount.textContent = '';
     btnUndoPoint.classList.add('hidden');
     btnSegment.classList.add('hidden');
     btnReset.classList.remove('hidden');
+    editControls.classList.remove('hidden');
     objectPanel.classList.add('hidden');
     resultPanel.classList.remove('hidden');
+    // Update edit button states
+    btnPaint.classList.toggle('active', editMode === 'paint');
+    btnErase.classList.toggle('active', editMode === 'erase');
   } else {
     if (selectedObjectId >= 0) {
       const obj = getSelectedObject();
@@ -470,6 +591,7 @@ function updateToolbarState() {
     btnUndoPoint.classList.remove('hidden');
     btnSegment.classList.remove('hidden');
     btnReset.classList.add('hidden');
+    editControls.classList.add('hidden');
     objectPanel.classList.remove('hidden');
     resultPanel.classList.add('hidden');
     btnUndoPoint.disabled = !getSelectedObject() || getSelectedObject().points.length === 0;
@@ -499,6 +621,22 @@ btnReset.addEventListener('click', () => {
 btnAddObject.addEventListener('click', () => {
   if (hasResults()) return;
   addObject();
+});
+
+btnPaint.addEventListener('click', () => {
+  editMode = editMode === 'paint' ? null : 'paint';
+  updateToolbarState();
+  canvas.style.cursor = canEditMask() ? 'crosshair' : 'default';
+});
+
+btnErase.addEventListener('click', () => {
+  editMode = editMode === 'erase' ? null : 'erase';
+  updateToolbarState();
+  canvas.style.cursor = canEditMask() ? 'crosshair' : 'default';
+});
+
+brushSlider.addEventListener('input', () => {
+  brushSize = parseInt(brushSlider.value, 10);
 });
 
 // --- Segmentation API call ---
@@ -541,7 +679,7 @@ btnSegment.addEventListener('click', async () => {
     masks = data.masks || [];
     rejected.clear();
 
-    // Decode mask PNGs into Image elements
+    // Decode mask PNGs into Image elements and create editable mask canvases
     await Promise.all(masks.map(async (mask) => {
       const img = new Image();
       await new Promise((resolve, reject) => {
@@ -550,8 +688,11 @@ btnSegment.addEventListener('click', async () => {
         img.src = `data:image/png;base64,${mask.mask}`;
       });
       mask._decodedImage = img;
+      initMaskCanvas(mask);
     }));
 
+    selectedMaskId = -1;
+    editMode = null;
     drawCanvas();
     renderResults();
   } catch (err) {
@@ -577,7 +718,9 @@ function renderResults() {
 
   for (const mask of masks) {
     const card = document.createElement('div');
-    card.className = `seg-card${rejected.has(mask.id) ? ' rejected' : ''}`;
+    const isSelected = mask.id === selectedMaskId;
+    const isRejected = rejected.has(mask.id);
+    card.className = `seg-card${isRejected ? ' rejected' : ''}${isSelected ? ' selected' : ''}`;
     card.dataset.maskId = mask.id;
 
     const thumbUrl = generateThumbnail(mask);
@@ -586,20 +729,26 @@ function renderResults() {
     card.style.borderLeftColor = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
 
     // Use object name if available
-    const defaultName = mask.name || `item_${mask.id + 1}`;
+    const defaultName = mask._currentName || mask.name || `item_${mask.id + 1}`;
 
     card.innerHTML = `
-      <img class="seg-card-thumb" src="${thumbUrl}" alt="Segment ${mask.id + 1}">
+      <img class="seg-card-thumb" src="${thumbUrl}" alt="Object ${mask.id + 1}">
       <div class="seg-card-info">
         <input class="seg-card-name" type="text" value="${defaultName}" spellcheck="false">
         <div class="seg-card-score">Score: ${mask.score.toFixed(2)}</div>
       </div>
       <div class="seg-card-actions">
-        <button class="seg-card-btn reject" title="${rejected.has(mask.id) ? 'Restore' : 'Reject'}">
-          ${rejected.has(mask.id) ? '\u21a9' : '\u2715'}
+        <button class="seg-card-btn reject" title="${isRejected ? 'Restore' : 'Reject'}">
+          ${isRejected ? '\u21a9' : '\u2715'}
         </button>
       </div>
     `;
+
+    // Click to select for editing (but not on input or button)
+    card.addEventListener('click', (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
+      selectMask(mask.id === selectedMaskId ? -1 : mask.id);
+    });
 
     card.addEventListener('mouseenter', () => {
       card.classList.add('highlighted');
@@ -617,12 +766,22 @@ function renderResults() {
         rejected.delete(mask.id);
       } else {
         rejected.add(mask.id);
+        if (selectedMaskId === mask.id) selectedMaskId = -1;
       }
       drawCanvas();
       renderResults();
     });
 
-    mask._nameInput = card.querySelector('.seg-card-name');
+    // Persist name edits across re-renders
+    const nameInput = card.querySelector('.seg-card-name');
+    nameInput.addEventListener('input', () => {
+      mask._currentName = nameInput.value;
+    });
+    nameInput.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectMask(mask.id);
+    });
+    mask._nameInput = nameInput;
 
     resultList.appendChild(card);
   }
@@ -631,14 +790,38 @@ function renderResults() {
 }
 
 function generateThumbnail(mask) {
-  if (!mask._decodedImage || !sourceImage) return '';
+  const maskSrc = mask._maskCanvas || mask._decodedImage;
+  if (!maskSrc || !sourceImage) return '';
 
-  const bbox = mask.bbox;
+  // Read mask data at full resolution to find actual bounds
+  const fullMaskCanvas = document.createElement('canvas');
+  fullMaskCanvas.width = sourceImage.naturalWidth;
+  fullMaskCanvas.height = sourceImage.naturalHeight;
+  const fullMaskCtx = fullMaskCanvas.getContext('2d');
+  fullMaskCtx.drawImage(maskSrc, 0, 0, sourceImage.naturalWidth, sourceImage.naturalHeight);
+  const fullData = fullMaskCtx.getImageData(0, 0, sourceImage.naturalWidth, sourceImage.naturalHeight);
+
+  // Compute tight bounding box from current mask data
+  let minX = sourceImage.naturalWidth, minY = sourceImage.naturalHeight, maxX = 0, maxY = 0;
+  const sw = sourceImage.naturalWidth;
+  for (let py = 0; py < sourceImage.naturalHeight; py++) {
+    for (let px = 0; px < sw; px++) {
+      if (fullData.data[(py * sw + px) * 4] > 128) {
+        if (px < minX) minX = px;
+        if (px > maxX) maxX = px;
+        if (py < minY) minY = py;
+        if (py > maxY) maxY = py;
+      }
+    }
+  }
+
+  if (maxX < minX) return '';
+
   const pad = 10;
-  const x = Math.max(0, bbox[0] - pad);
-  const y = Math.max(0, bbox[1] - pad);
-  const w = Math.min(sourceImage.naturalWidth - x, bbox[2] + pad * 2);
-  const h = Math.min(sourceImage.naturalHeight - y, bbox[3] + pad * 2);
+  const x = Math.max(0, minX - pad);
+  const y = Math.max(0, minY - pad);
+  const w = Math.min(sourceImage.naturalWidth - x, (maxX - minX + 1) + pad * 2);
+  const h = Math.min(sourceImage.naturalHeight - y, (maxY - minY + 1) + pad * 2);
 
   const off = document.createElement('canvas');
   off.width = w;
@@ -647,13 +830,7 @@ function generateThumbnail(mask) {
 
   offCtx.drawImage(sourceImage, x, y, w, h, 0, 0, w, h);
 
-  const maskOff = document.createElement('canvas');
-  maskOff.width = sourceImage.naturalWidth;
-  maskOff.height = sourceImage.naturalHeight;
-  const maskCtx = maskOff.getContext('2d');
-  maskCtx.drawImage(mask._decodedImage, 0, 0, sourceImage.naturalWidth, sourceImage.naturalHeight);
-  const maskData = maskCtx.getImageData(x, y, w, h);
-
+  const maskData = fullMaskCtx.getImageData(x, y, w, h);
   const imgData = offCtx.getImageData(0, 0, w, h);
   for (let i = 0; i < maskData.data.length; i += 4) {
     if (maskData.data[i] < 128) {
@@ -677,6 +854,7 @@ btnExport.addEventListener('click', () => {
   const segments = accepted.map((mask) => ({
     name: mask._nameInput ? mask._nameInput.value.trim() || `item_${mask.id + 1}` : `item_${mask.id + 1}`,
     mask,
+    maskCanvas: mask._maskCanvas || null,
   }));
 
   exportSegments(sourceImage, segments);
