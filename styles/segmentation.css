@@ -9,9 +9,10 @@ body {
 }
 
 #seg-app {
-  min-height: 100dvh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .hidden { display: none !important; }
@@ -89,9 +90,17 @@ body {
 
 /* === Main Layout === */
 
+.seg-workspace {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .seg-main {
   flex: 1;
   display: flex;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -103,11 +112,13 @@ body {
   justify-content: center;
   background: var(--bg-secondary);
   overflow: hidden;
+  min-height: 0;
+  min-width: 0;
 }
 
 #seg-canvas {
   max-width: 100%;
-  max-height: calc(100dvh - 60px);
+  max-height: 100%;
   cursor: crosshair;
 }
 

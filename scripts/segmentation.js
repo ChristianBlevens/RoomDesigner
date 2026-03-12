@@ -16,6 +16,7 @@ let masks = [];               // response from server
 let rejected = new Set();     // mask IDs the user rejected
 let draggingIdx = -1;         // index of point being dragged, -1 = none
 let didDrag = false;          // distinguish drag from click
+let highlightedMaskId = -1;   // mask ID hovered in results panel, -1 = none
 
 // --- DOM refs ---
 
@@ -36,6 +37,7 @@ const btnUndoPoint = document.getElementById('seg-btn-undo-point');
 const btnClearPoints = document.getElementById('seg-btn-clear-points');
 const btnSegment = document.getElementById('seg-btn-segment');
 const btnExport = document.getElementById('seg-btn-export');
+const btnReset = document.getElementById('seg-btn-reset');
 
 // --- API base path (same detection pattern as RoomDesigner) ---
 
@@ -135,12 +137,14 @@ function drawCanvas() {
   // Draw source image
   ctx.drawImage(sourceImage, 0, 0);
 
-  // Draw mask overlays with compositing
+  // Draw mask overlays — each mask gets its own color, highlighted mask is brighter
   if (masks.length > 0) {
     for (const mask of masks) {
       if (rejected.has(mask.id)) continue;
 
       const color = MASK_COLORS[mask.id % MASK_COLORS.length];
+      const isHighlighted = mask.id === highlightedMaskId;
+      const alpha = isHighlighted ? 160 : 80;
       const maskImg = mask._decodedImage;
       if (!maskImg) continue;
 
@@ -157,7 +161,7 @@ function drawCanvas() {
           maskData.data[i] = color[0];
           maskData.data[i + 1] = color[1];
           maskData.data[i + 2] = color[2];
-          maskData.data[i + 3] = 80;
+          maskData.data[i + 3] = alpha;
         } else {
           maskData.data[i + 3] = 0;
         }
@@ -165,6 +169,34 @@ function drawCanvas() {
       offCtx.putImageData(maskData, 0, 0);
 
       ctx.drawImage(off, 0, 0);
+
+      // Draw outline border for highlighted mask
+      if (isHighlighted) {
+        // Find edge pixels (mask pixel adjacent to non-mask pixel)
+        const edgeData = offCtx.createImageData(canvas.width, canvas.height);
+        const w = canvas.width;
+        for (let py = 1; py < canvas.height - 1; py++) {
+          for (let px = 1; px < w - 1; px++) {
+            const idx = (py * w + px) * 4;
+            if (maskData.data[idx] > 128) {
+              // Check 4 neighbors
+              const up = ((py - 1) * w + px) * 4;
+              const dn = ((py + 1) * w + px) * 4;
+              const lt = (py * w + (px - 1)) * 4;
+              const rt = (py * w + (px + 1)) * 4;
+              if (maskData.data[up] <= 128 || maskData.data[dn] <= 128 ||
+                  maskData.data[lt] <= 128 || maskData.data[rt] <= 128) {
+                edgeData.data[idx] = color[0];
+                edgeData.data[idx + 1] = color[1];
+                edgeData.data[idx + 2] = color[2];
+                edgeData.data[idx + 3] = 255;
+              }
+            }
+          }
+        }
+        offCtx.putImageData(edgeData, 0, 0);
+        ctx.drawImage(off, 0, 0);
+      }
     }
   }
 
@@ -194,6 +226,12 @@ function drawCanvas() {
   updateToolbarState();
 }
 
+// --- State helpers ---
+
+function hasResults() {
+  return masks.length > 0;
+}
+
 // --- Point placement and dragging ---
 
 function canvasCoords(e) {
@@ -217,7 +255,7 @@ function hitTestPoint(cx, cy) {
 }
 
 canvas.addEventListener('pointerdown', (e) => {
-  if (!sourceImage) return;
+  if (!sourceImage || hasResults()) return;
 
   const { x, y } = canvasCoords(e);
   const hit = hitTestPoint(x, y);
@@ -234,6 +272,11 @@ canvas.addEventListener('pointerdown', (e) => {
 canvas.addEventListener('pointermove', (e) => {
   if (!sourceImage) return;
 
+  if (hasResults()) {
+    canvas.style.cursor = 'default';
+    return;
+  }
+
   const { x, y } = canvasCoords(e);
 
   if (draggingIdx >= 0) {
@@ -243,13 +286,14 @@ canvas.addEventListener('pointermove', (e) => {
     drawCanvas();
     e.preventDefault();
   } else {
-    // Update cursor based on hover
     const hit = hitTestPoint(x, y);
     canvas.style.cursor = hit >= 0 ? 'grab' : 'crosshair';
   }
 });
 
 canvas.addEventListener('pointerup', (e) => {
+  if (hasResults()) return;
+
   if (draggingIdx >= 0) {
     canvas.releasePointerCapture(e.pointerId);
     draggingIdx = -1;
@@ -258,10 +302,8 @@ canvas.addEventListener('pointerup', (e) => {
     return;
   }
 
-  // Only place new point if we didn't just finish a drag
   if (!didDrag) {
     const { x, y } = canvasCoords(e);
-    // Don't place if we're on an existing point
     if (hitTestPoint(x, y) < 0) {
       points.push({ x, y });
       drawCanvas();
@@ -273,9 +315,21 @@ canvas.addEventListener('pointerup', (e) => {
 // --- Toolbar ---
 
 function updateToolbarState() {
-  pointCount.textContent = `${points.length} point${points.length !== 1 ? 's' : ''} placed`;
-  btnUndoPoint.disabled = points.length === 0;
-  btnClearPoints.disabled = points.length === 0;
+  if (hasResults()) {
+    pointCount.textContent = `${masks.length} segment${masks.length !== 1 ? 's' : ''} found`;
+    btnUndoPoint.classList.add('hidden');
+    btnClearPoints.classList.add('hidden');
+    btnSegment.classList.add('hidden');
+    btnReset.classList.remove('hidden');
+  } else {
+    pointCount.textContent = `${points.length} point${points.length !== 1 ? 's' : ''} placed`;
+    btnUndoPoint.classList.remove('hidden');
+    btnClearPoints.classList.remove('hidden');
+    btnSegment.classList.remove('hidden');
+    btnReset.classList.add('hidden');
+    btnUndoPoint.disabled = points.length === 0;
+    btnClearPoints.disabled = points.length === 0;
+  }
 }
 
 btnUploadNew.addEventListener('click', showUpload);
@@ -287,8 +341,14 @@ btnUndoPoint.addEventListener('click', () => {
 
 btnClearPoints.addEventListener('click', () => {
   points = [];
+  drawCanvas();
+});
+
+btnReset.addEventListener('click', () => {
+  points = [];
   masks = [];
   rejected.clear();
+  highlightedMaskId = -1;
   results.classList.add('hidden');
   drawCanvas();
 });
@@ -363,6 +423,9 @@ function renderResults() {
     card.dataset.maskId = mask.id;
 
     const thumbUrl = generateThumbnail(mask);
+    const color = MASK_COLORS[mask.id % MASK_COLORS.length];
+    card.style.borderLeftWidth = '3px';
+    card.style.borderLeftColor = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
 
     card.innerHTML = `
       <img class="seg-card-thumb" src="${thumbUrl}" alt="Segment ${mask.id + 1}">
@@ -379,9 +442,13 @@ function renderResults() {
 
     card.addEventListener('mouseenter', () => {
       card.classList.add('highlighted');
+      highlightedMaskId = mask.id;
+      drawCanvas();
     });
     card.addEventListener('mouseleave', () => {
       card.classList.remove('highlighted');
+      highlightedMaskId = -1;
+      drawCanvas();
     });
 
     card.querySelector('.seg-card-btn.reject').addEventListener('click', () => {
