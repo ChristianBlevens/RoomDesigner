@@ -72,8 +72,9 @@ FIX_SEGMENT_PROMPT = (
     "in the original photograph. Reconstruct and fill in any missing, cut-off, or incomplete "
     "portions of this furniture piece so it looks whole and complete. "
     "Keep the transparent background. Only repair areas that appear incomplete — "
-    "do not alter parts that already look correct. Maintain the same style, color, "
-    "material, and lighting of the existing portions."
+    "do not alter parts that already look correct. Also clean up any jagged, rough, "
+    "or erroneous edges along the object outline so the boundary looks natural and smooth. "
+    "Maintain the same style, color, material, and lighting of the existing portions."
 )
 
 
