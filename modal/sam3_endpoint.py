@@ -33,7 +33,6 @@ image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install(
         "git",
-        "git-lfs",
         "libgl1-mesa-glx",
         "libglib2.0-0",
     )
@@ -48,9 +47,7 @@ image = (
     )
     .run_commands(
         "git clone --depth 1 https://github.com/facebookresearch/sam3.git /opt/sam3",
-        "cd /opt/sam3 && git lfs pull",
         "cd /opt/sam3 && pip install -e '.[notebooks,dev]'",
-        "ls -la /opt/sam3/assets/",
     )
     .run_function(download_model, secrets=[hf_secret])
 )
@@ -73,9 +70,7 @@ class SAM3Inference:
         import sys
         sys.path.insert(0, "/opt/sam3")
 
-        import os
         import torch
-        import sam3
         from sam3 import build_sam3_image_model
         from sam3.model.sam3_image_processor import Sam3Processor
 
@@ -83,11 +78,8 @@ class SAM3Inference:
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
 
-        sam3_root = os.path.join(os.path.dirname(sam3.__file__), "..")
-        bpe_path = os.path.join(sam3_root, "assets", "bpe_simple_vocab_16e6.txt.gz")
-
+        # bpe_path=None uses pkg_resources to find sam3/assets/bpe_simple_vocab_16e6.txt.gz
         self.model = build_sam3_image_model(
-            bpe_path=bpe_path,
             enable_inst_interactivity=True,
         )
         self.processor = Sam3Processor(self.model)
