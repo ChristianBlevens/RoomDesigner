@@ -180,7 +180,7 @@ let popupEntryId = null;
 const myMeshyTasks = new Set();
 
 // Server-provided task status (updated by polling)
-let meshyServerStatus = { tasks: [], active: 0, max: 10 };
+let meshyServerStatus = { tasks: [], active: 0, queued: 0, max: 10 };
 
 // Polling interval ID
 let meshyPollInterval = null;
@@ -2160,11 +2160,7 @@ function setupEntryEditor() {
       return;
     }
 
-    // Check server capacity
-    if (meshyServerStatus.active >= meshyServerStatus.max) {
-      showError(`Server at maximum capacity (${meshyServerStatus.max} concurrent tasks). Please wait.`);
-      return;
-    }
+    // Tasks are always accepted into the server queue
 
     // Show immediate feedback
     showActionNotification('Starting 3D generation...');
@@ -2186,7 +2182,7 @@ function setupEntryEditor() {
       myMeshyTasks.add(task_id);
 
       // Update button
-      generateBtn.textContent = 'Generating...';
+      generateBtn.textContent = 'Queued...';
       generateBtn.disabled = true;
 
       // Start polling if not already
@@ -2297,6 +2293,8 @@ async function openEntryEditor(entryId) {
   imagePreview.innerHTML = '<span>No image</span>';
   modelPreview.innerHTML = '<span>No model</span>';
   generateBtn.style.display = 'none';
+  generateBtn.textContent = 'Generate 3D Model';
+  generateBtn.disabled = false;
   tagsList.innerHTML = '';
   tagInput.value = '';
   dimX.value = '';
@@ -2341,12 +2339,12 @@ async function openEntryEditor(entryId) {
 
       // Show generate button only if: image exists AND no model exists AND not currently generating
       if (entryImageBlob && !entryModelBlob) {
-        const isGenerating = meshyServerStatus.tasks.some(t =>
+        const activeTask = meshyServerStatus.tasks.find(t =>
           t.furniture_id === entryId && !['completed', 'failed'].includes(t.status)
         );
-        if (isGenerating) {
+        if (activeTask) {
           generateBtn.style.display = 'block';
-          generateBtn.textContent = 'Generating...';
+          generateBtn.textContent = activeTask.status === 'queued' ? 'Queued...' : 'Generating...';
           generateBtn.disabled = true;
         } else {
           generateBtn.style.display = 'block';
@@ -2707,12 +2705,12 @@ function updateMeshyTrackerUI() {
   const countEl = tracker.querySelector('.meshy-tracker-count');
   const toasts = document.getElementById('meshy-toasts');
 
-  // Filter to only show active tasks (not completed/failed)
-  const activeTasks = meshyServerStatus.tasks.filter(t =>
+  // Filter to only show non-terminal tasks
+  const visibleTasks = meshyServerStatus.tasks.filter(t =>
     !['completed', 'failed'].includes(t.status)
   );
 
-  if (activeTasks.length === 0) {
+  if (visibleTasks.length === 0) {
     tracker.classList.add('hidden');
     toasts.classList.remove('with-tracker');
     return;
@@ -2721,21 +2719,36 @@ function updateMeshyTrackerUI() {
   tracker.classList.remove('hidden');
   toasts.classList.add('with-tracker');
 
-  // Show capacity: X/10
-  countEl.textContent = `${meshyServerStatus.active}/${meshyServerStatus.max}`;
+  // Show capacity + queue
+  const queueLabel = meshyServerStatus.queued > 0 ? ` +${meshyServerStatus.queued} queued` : '';
+  countEl.textContent = `${meshyServerStatus.active}/${meshyServerStatus.max}${queueLabel}`;
 
-  // Build list HTML
+  // Build list HTML — active tasks first, then queued
+  const sortedTasks = [...visibleTasks].sort((a, b) => {
+    if (a.status === 'queued' && b.status !== 'queued') return 1;
+    if (a.status !== 'queued' && b.status === 'queued') return -1;
+    return 0;
+  });
+
   let html = '';
-  for (const task of activeTasks) {
-    const statusText = task.status === 'polling' ? `${task.progress}%` : task.status;
+  for (const task of sortedTasks) {
+    let statusText;
+    if (task.status === 'queued') {
+      statusText = 'queued';
+    } else if (task.status === 'polling') {
+      statusText = `${task.progress}%`;
+    } else {
+      statusText = task.status;
+    }
+
     html += `
-      <div class="meshy-tracker-item" data-task-id="${task.id}">
+      <div class="meshy-tracker-item${task.status === 'queued' ? ' queued' : ''}" data-task-id="${task.id}">
         <div class="meshy-tracker-item-header">
           <span class="meshy-tracker-item-name" title="${task.furniture_name}">${task.furniture_name}</span>
           <span class="meshy-tracker-item-status">${statusText}</span>
         </div>
         <div class="meshy-tracker-item-progress">
-          <div class="meshy-tracker-item-progress-fill" style="width: ${task.progress}%"></div>
+          <div class="meshy-tracker-item-progress-fill" style="width: ${task.status === 'queued' ? 0 : task.progress}%"></div>
         </div>
       </div>
     `;

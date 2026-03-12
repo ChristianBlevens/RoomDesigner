@@ -896,6 +896,14 @@ input[type="date"]:focus {
   transition: width 0.3s ease;
 }
 
+.meshy-tracker-item.queued {
+  opacity: 0.6;
+}
+
+.meshy-tracker-item.queued .meshy-tracker-item-progress-fill {
+  background: var(--border-default);
+}
+
 /* ============ Completion Toasts ============ */
 
 .meshy-toasts {

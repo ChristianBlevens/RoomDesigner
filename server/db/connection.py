@@ -44,6 +44,7 @@ def init_databases():
             username VARCHAR NOT NULL UNIQUE,
             password_hash VARCHAR NOT NULL,
             wall_color_presets JSON,
+            destaging_buffer_days INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -61,12 +62,6 @@ def init_databases():
         )
     """)
 
-    # Migration: add destaging_buffer_days column if missing
-    try:
-        _auth_conn.execute("ALTER TABLE orgs ADD COLUMN destaging_buffer_days INTEGER DEFAULT 0")
-    except Exception:
-        pass
-
     # Houses database
     _houses_conn = _safe_connect(HOUSES_DB)
     _houses_conn.execute("""
@@ -76,11 +71,13 @@ def init_databases():
             name VARCHAR NOT NULL,
             start_date DATE NOT NULL,
             end_date DATE NOT NULL,
+            share_token VARCHAR,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
     _houses_conn.execute("CREATE INDEX IF NOT EXISTS idx_houses_start_date ON houses(start_date)")
     _houses_conn.execute("CREATE INDEX IF NOT EXISTS idx_houses_org_id ON houses(org_id)")
+    _houses_conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_houses_share_token ON houses(share_token)")
 
     _houses_conn.execute("""
         CREATE TABLE IF NOT EXISTS rooms (
@@ -96,35 +93,11 @@ def init_databases():
             room_scale DOUBLE DEFAULT 1.0,
             meter_stick JSON,
             wall_colors JSON,
+            original_background_key VARCHAR,
+            final_image_path VARCHAR,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-
-    # Migration: add wall_colors column if missing
-    try:
-        _houses_conn.execute("ALTER TABLE rooms ADD COLUMN wall_colors JSON")
-    except Exception:
-        pass
-
-    # Migration: add original_background_key column if missing
-    try:
-        _houses_conn.execute("ALTER TABLE rooms ADD COLUMN original_background_key VARCHAR")
-    except Exception:
-        pass
-
-    # Migration: add final_image_path column if missing
-    try:
-        _houses_conn.execute("ALTER TABLE rooms ADD COLUMN final_image_path VARCHAR")
-    except Exception:
-        pass
-
-    # Migration: add share_token column if missing
-    try:
-        _houses_conn.execute("ALTER TABLE houses ADD COLUMN share_token VARCHAR")
-    except Exception:
-        pass
-    _houses_conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_houses_share_token ON houses(share_token)")
-
     _houses_conn.execute("CREATE INDEX IF NOT EXISTS idx_rooms_house_id ON rooms(house_id)")
 
     _houses_conn.execute("""
@@ -155,27 +128,14 @@ def init_databases():
             image_path VARCHAR,
             preview_3d_path VARCHAR,
             model_path VARCHAR,
+            location VARCHAR,
+            condition VARCHAR,
+            condition_notes VARCHAR,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
     _furniture_conn.execute("CREATE INDEX IF NOT EXISTS idx_furniture_category ON furniture(category)")
     _furniture_conn.execute("CREATE INDEX IF NOT EXISTS idx_furniture_org_id ON furniture(org_id)")
-
-    # Migration: add location column if missing
-    try:
-        _furniture_conn.execute("ALTER TABLE furniture ADD COLUMN location VARCHAR")
-    except Exception:
-        pass
-
-    # Migration: add condition and condition_notes columns if missing
-    try:
-        _furniture_conn.execute("ALTER TABLE furniture ADD COLUMN condition VARCHAR")
-    except Exception:
-        pass
-    try:
-        _furniture_conn.execute("ALTER TABLE furniture ADD COLUMN condition_notes VARCHAR")
-    except Exception:
-        pass
 
     # Meshy generation tasks table
     _furniture_conn.execute("""

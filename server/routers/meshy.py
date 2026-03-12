@@ -135,7 +135,7 @@ def create_task(furniture_id: str) -> str:
     conn = get_furniture_db()
     conn.execute(
         """INSERT INTO meshy_tasks (id, furniture_id, status, progress, retry_count, created_at, updated_at)
-           VALUES (?, ?, 'pending', 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
+           VALUES (?, ?, 'queued', 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
         [task_id, furniture_id]
     )
     return task_id
@@ -177,6 +177,40 @@ def cleanup_old_tasks():
            AND updated_at < ?""",
         [cutoff]
     )
+
+
+def count_queued_tasks() -> int:
+    """Count tasks waiting in the local queue."""
+    conn = get_furniture_db()
+    result = conn.execute(
+        "SELECT COUNT(*) FROM meshy_tasks WHERE status = 'queued'"
+    ).fetchone()
+    return result[0] if result else 0
+
+
+def promote_queued_tasks():
+    """Promote queued tasks to pending when active slots are available."""
+    active = count_active_tasks()
+    available = MAX_CONCURRENT_TASKS - active
+    if available <= 0:
+        return
+
+    conn = get_furniture_db()
+    rows = conn.execute(
+        """SELECT id FROM meshy_tasks
+           WHERE status = 'queued'
+           ORDER BY created_at ASC
+           LIMIT ?""",
+        [available]
+    ).fetchall()
+
+    for row in rows:
+        conn.execute(
+            "UPDATE meshy_tasks SET status = 'pending', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            [row[0]]
+        )
+    if rows:
+        logger.info(f"Promoted {len(rows)} queued tasks to pending ({active} active, {available} slots available)")
 
 
 # ============ Meshy API Operations ============
@@ -495,6 +529,9 @@ async def polling_loop():
                 except Exception as e:
                     logger.exception(f"Error processing task {task.id}: {e}")
 
+            # Promote queued tasks when slots are available
+            promote_queued_tasks()
+
             # Cleanup old completed/failed tasks
             cleanup_old_tasks()
 
@@ -528,13 +565,6 @@ async def generate_model(furniture_id: str, org_id: str = Depends(verify_token))
     Start image-to-3D generation task.
     Returns immediately with task_id. Background loop handles the rest.
     """
-    active = count_active_tasks()
-    if active >= MAX_CONCURRENT_TASKS:
-        raise HTTPException(
-            status_code=429,
-            detail=f"Maximum concurrent tasks ({MAX_CONCURRENT_TASKS}) reached. Please wait."
-        )
-
     conn = get_furniture_db()
     row = conn.execute(
         "SELECT image_path FROM furniture WHERE id = ? AND org_id = ?",
@@ -575,10 +605,12 @@ async def get_tasks(org_id: str = Depends(verify_token)):
         for row in rows
     ]
     active = sum(1 for t in tasks if t['status'] in ('pending', 'creating', 'polling', 'downloading'))
+    queued = sum(1 for t in tasks if t['status'] == 'queued')
 
     return {
         "tasks": tasks,
         "active": active,
+        "queued": queued,
         "max": MAX_CONCURRENT_TASKS
     }
 
