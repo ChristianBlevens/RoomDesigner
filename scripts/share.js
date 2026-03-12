@@ -123,17 +123,7 @@ function renderRoomCard(room, isOwner) {
     const ul = document.createElement('ul');
     for (const item of room.furniture) {
       const li = document.createElement('li');
-      let text = item.name;
-      if (item.category) text += ` (${item.category})`;
-      if (item.condition) {
-        const badge = document.createElement('span');
-        badge.className = `share-condition-badge share-condition-${item.condition}`;
-        badge.textContent = item.condition;
-        li.textContent = text + ' ';
-        li.appendChild(badge);
-      } else {
-        li.textContent = text;
-      }
+      li.textContent = item.name;
       ul.appendChild(li);
     }
     furnSection.appendChild(ul);
