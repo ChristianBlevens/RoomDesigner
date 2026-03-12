@@ -14,6 +14,17 @@
 - On **walls**: furniture lays flat against the wall
 - On **ceilings**: furniture hangs from above
 
+## Placing On Top of Furniture
+
+You can place items on top of other furniture — for example, a vase on a table or a lamp on a nightstand.
+
+1. Tap on the furniture you want to place something on top of
+2. In the popup menu, tap the **Place On Top** button (the stacking icon)
+3. The furniture database opens — select the item you want
+4. The item appears centered on top of the parent furniture
+
+The placed item becomes a **child** of the parent furniture. See the **Stacking Furniture** tutorial for details on how children behave.
+
 ## Availability
 
 - Each furniture card shows how many are available based on your house's date range

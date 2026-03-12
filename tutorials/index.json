@@ -12,6 +12,7 @@
   { "id": "furniture", "title": "Furniture", "file": "furniture.md" },
   { "id": "placing-furniture", "title": "Placing Furniture", "file": "placing-furniture.md", "parent": "furniture" },
   { "id": "moving-rotating", "title": "Moving & Rotating", "file": "moving-rotating.md", "parent": "furniture" },
+  { "id": "stacking-furniture", "title": "Stacking Furniture", "file": "stacking-furniture.md", "parent": "furniture" },
   { "id": "furniture-database", "title": "Furniture Database", "file": "furniture-database.md", "parent": "furniture" },
   { "id": "3d-generation", "title": "3D Model Generation", "file": "3d-generation.md", "parent": "furniture" },
   { "id": "rooms", "title": "Rooms", "file": "rooms.md" },

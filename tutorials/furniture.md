@@ -12,6 +12,7 @@ The furniture system lets you place, arrange, and manage 3D furniture models in 
 ## Key Features
 
 - **Surface placement** — furniture can be placed on floors, walls, and ceilings
+- **Place on top** — place decorative items on top of other furniture (vases on tables, lamps on nightstands)
 - **Drag to reposition** — furniture slides along its surface
 - **Gizmo controls** — tap placed furniture to move, rotate, or delete it
 - **3D model generation** — create models from photos using Meshy.ai
