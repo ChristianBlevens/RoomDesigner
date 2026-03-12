@@ -14,6 +14,8 @@ let sourceImageBytes = null;  // ArrayBuffer of original file
 let points = [];              // [{x, y}] in original image coordinates
 let masks = [];               // response from server
 let rejected = new Set();     // mask IDs the user rejected
+let draggingIdx = -1;         // index of point being dragged, -1 = none
+let didDrag = false;          // distinguish drag from click
 
 // --- DOM refs ---
 
@@ -192,20 +194,80 @@ function drawCanvas() {
   updateToolbarState();
 }
 
-// --- Point placement ---
+// --- Point placement and dragging ---
 
-canvas.addEventListener('click', (e) => {
-  if (!sourceImage) return;
-
+function canvasCoords(e) {
   const rect = canvas.getBoundingClientRect();
   const scaleX = canvas.width / rect.width;
   const scaleY = canvas.height / rect.height;
+  return {
+    x: Math.round((e.clientX - rect.left) * scaleX),
+    y: Math.round((e.clientY - rect.top) * scaleY),
+  };
+}
 
-  const x = Math.round((e.clientX - rect.left) * scaleX);
-  const y = Math.round((e.clientY - rect.top) * scaleY);
+function hitTestPoint(cx, cy) {
+  const hitRadius = Math.max(16, Math.min(canvas.width, canvas.height) * 0.015);
+  for (let i = points.length - 1; i >= 0; i--) {
+    const dx = points[i].x - cx;
+    const dy = points[i].y - cy;
+    if (dx * dx + dy * dy <= hitRadius * hitRadius) return i;
+  }
+  return -1;
+}
 
-  points.push({ x, y });
-  drawCanvas();
+canvas.addEventListener('pointerdown', (e) => {
+  if (!sourceImage) return;
+
+  const { x, y } = canvasCoords(e);
+  const hit = hitTestPoint(x, y);
+
+  if (hit >= 0) {
+    draggingIdx = hit;
+    didDrag = false;
+    canvas.setPointerCapture(e.pointerId);
+    canvas.style.cursor = 'grabbing';
+    e.preventDefault();
+  }
+});
+
+canvas.addEventListener('pointermove', (e) => {
+  if (!sourceImage) return;
+
+  const { x, y } = canvasCoords(e);
+
+  if (draggingIdx >= 0) {
+    didDrag = true;
+    points[draggingIdx].x = Math.max(0, Math.min(canvas.width, x));
+    points[draggingIdx].y = Math.max(0, Math.min(canvas.height, y));
+    drawCanvas();
+    e.preventDefault();
+  } else {
+    // Update cursor based on hover
+    const hit = hitTestPoint(x, y);
+    canvas.style.cursor = hit >= 0 ? 'grab' : 'crosshair';
+  }
+});
+
+canvas.addEventListener('pointerup', (e) => {
+  if (draggingIdx >= 0) {
+    canvas.releasePointerCapture(e.pointerId);
+    draggingIdx = -1;
+    canvas.style.cursor = 'crosshair';
+    e.preventDefault();
+    return;
+  }
+
+  // Only place new point if we didn't just finish a drag
+  if (!didDrag) {
+    const { x, y } = canvasCoords(e);
+    // Don't place if we're on an existing point
+    if (hitTestPoint(x, y) < 0) {
+      points.push({ x, y });
+      drawCanvas();
+    }
+  }
+  didDrag = false;
 });
 
 // --- Toolbar ---

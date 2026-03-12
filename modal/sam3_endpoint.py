@@ -33,6 +33,7 @@ image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install(
         "git",
+        "git-lfs",
         "libgl1-mesa-glx",
         "libglib2.0-0",
     )
@@ -47,7 +48,9 @@ image = (
     )
     .run_commands(
         "git clone --depth 1 https://github.com/facebookresearch/sam3.git /opt/sam3",
+        "cd /opt/sam3 && git lfs pull",
         "cd /opt/sam3 && pip install -e '.[notebooks,dev]'",
+        "ls -la /opt/sam3/assets/",
     )
     .run_function(download_model, secrets=[hf_secret])
 )
