@@ -42,6 +42,7 @@ image = (
         "numpy>=1.26,<2.0",
         "opencv-python-headless",
         "pillow",
+        "setuptools",
         "fastapi[standard]",
     )
     .run_commands(
