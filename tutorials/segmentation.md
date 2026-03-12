@@ -29,12 +29,24 @@ After segmentation, you can refine any mask that captured too much or too little
 
 1. **Reject unwanted objects** — tap the **X** button on any object card to exclude it from export
 2. **Rename objects** — edit names in the result cards (these become filenames)
-3. **Export** — tap **"Export All"** to download a ZIP file containing one transparent PNG per accepted object, cropped to the item's bounds
+3. **Export** — tap **"Export All"** to open the export modal
+
+## AI Repair
+
+When objects overlap in the original photo, segmented items may have cut-off portions or jagged edges where a neighbor was covering them. The export modal lets you fix this with AI:
+
+1. **Review the grid** — the export modal shows a preview card for each accepted segment
+2. **Select items to fix** — tap any cards where the object looks incomplete or has rough edges. Selected cards are highlighted
+3. **Export** — tap **"Export"** to begin. Selected segments are sent to Gemini for AI repair, which reconstructs missing portions and smooths jagged boundaries. Progress is shown on each card
+4. All segments (repaired and untouched) are bundled into a ZIP download
+
+If you don't need AI repair, just tap **"Export"** without selecting any cards — segments export as-is.
 
 ## Tips
 
 - Place **multiple points** on objects with separate parts — the AI combines them into one mask
 - If the AI captures part of a neighboring item, use **Erase** to clean up the boundary
 - If the AI misses part of the item, use **Paint** to fill in the gap
+- Use **AI repair** on items that were partially hidden behind other furniture — it fills in the missing parts
 - Use **Reset** to clear all results and start over with new point placement
-- The tool works entirely in your browser after the AI segmentation step — no data is saved
+- The tool works entirely in your browser after the AI segmentation and repair steps — no data is saved
