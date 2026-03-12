@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Furniture Segmenter</title>
+  <link rel="stylesheet" href="styles/main.css">
+  <link rel="stylesheet" href="styles/segmentation.css">
+</head>
+<body>
+  <div id="seg-app">
+
+    <!-- Upload state -->
+    <div id="seg-upload" class="seg-upload">
+      <div class="seg-upload-zone" id="seg-drop-zone">
+        <p class="seg-upload-title">Furniture Segmenter</p>
+        <p class="seg-upload-subtitle">Upload a photo with multiple furniture items</p>
+        <label class="btn-primary seg-upload-btn">
+          Choose Photo
+          <input type="file" id="seg-file-input" accept="image/*" hidden>
+        </label>
+        <p class="seg-upload-hint">or drag and drop</p>
+      </div>
+    </div>
+
+    <!-- Working state -->
+    <div id="seg-workspace" class="seg-workspace hidden">
+      <div class="seg-toolbar">
+        <button id="seg-btn-upload-new" class="btn-secondary" title="Upload new photo">New Photo</button>
+        <div class="seg-toolbar-info">
+          <span id="seg-point-count">0 points placed</span>
+        </div>
+        <button id="seg-btn-undo-point" class="btn-secondary" title="Remove last point" disabled>Undo Point</button>
+        <button id="seg-btn-clear-points" class="btn-secondary" title="Clear all points" disabled>Clear</button>
+        <button id="seg-btn-segment" class="btn-primary" title="Run segmentation">Segment</button>
+      </div>
+
+      <div class="seg-main">
+        <!-- Left: source image with point markers and mask overlays -->
+        <div class="seg-canvas-container">
+          <canvas id="seg-canvas"></canvas>
+          <div id="seg-processing" class="seg-processing hidden">
+            <p>Segmenting...</p>
+          </div>
+        </div>
+
+        <!-- Right: segment results list -->
+        <div id="seg-results" class="seg-results hidden">
+          <div class="seg-results-header">
+            <h3>Segments (<span id="seg-result-count">0</span>)</h3>
+            <button id="seg-btn-export" class="btn-primary">Export All</button>
+          </div>
+          <div id="seg-result-list" class="seg-result-list"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script type="module" src="scripts/segmentation.js"></script>
+</body>
+</html>
