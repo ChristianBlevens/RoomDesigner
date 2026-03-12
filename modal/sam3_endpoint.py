@@ -24,13 +24,13 @@ def download_model():
     from huggingface_hub import login
     login(token=os.environ["HF_TOKEN"])
 
-    from sam3.build_sam import build_sam3
-    model = build_sam3(checkpoint=None)
+    from sam3 import build_sam3_image_model
+    model = build_sam3_image_model(enable_inst_interactivity=True)
     print(f"SAM 3 model downloaded: {type(model)}")
 
 
 image = (
-    modal.Image.debian_slim(python_version="3.11")
+    modal.Image.debian_slim(python_version="3.12")
     .apt_install(
         "git",
         "libgl1-mesa-glx",
@@ -69,15 +69,25 @@ class SAM3Inference:
         import sys
         sys.path.insert(0, "/opt/sam3")
 
+        import os
         import torch
-        from sam3.build_sam import build_sam3
-        from sam3.sam3_image_predictor import SAM3ImagePredictor
+        import sam3
+        from sam3 import build_sam3_image_model
+        from sam3.model.sam3_image_processor import Sam3Processor
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        model = build_sam3(checkpoint="sam3_final.pt").to(self.device)
-        model.eval()
-        self.predictor = SAM3ImagePredictor(model)
-        print(f"SAM 3 loaded on {self.device}")
+        torch.autocast("cuda", dtype=torch.bfloat16).__enter__()
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+
+        sam3_root = os.path.join(os.path.dirname(sam3.__file__), "..")
+        bpe_path = os.path.join(sam3_root, "assets", "bpe_simple_vocab_16e6.txt.gz")
+
+        self.model = build_sam3_image_model(
+            bpe_path=bpe_path,
+            enable_inst_interactivity=True,
+        )
+        self.processor = Sam3Processor(self.model)
+        print("SAM 3 loaded with point-prompt and text-prompt support")
 
     @modal.fastapi_endpoint(method="POST")
     def segment(self, request: dict):
@@ -122,31 +132,34 @@ class SAM3Inference:
         except Exception as e:
             return {"error": f"Failed to decode image: {str(e)}"}
 
-        image = np.array(Image.open(io.BytesIO(image_bytes)).convert("RGB"))
-        h, w = image.shape[:2]
+        pil_image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        orig_w, orig_h = pil_image.size
 
         # Resize large images to control memory
         MAX_SIZE = 2048
         scale = 1.0
-        if max(h, w) > MAX_SIZE:
-            scale = MAX_SIZE / max(h, w)
-            image = cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-            h, w = image.shape[:2]
+        if max(orig_w, orig_h) > MAX_SIZE:
+            scale = MAX_SIZE / max(orig_w, orig_h)
+            pil_image = pil_image.resize(
+                (int(orig_w * scale), int(orig_h * scale)), Image.LANCZOS
+            )
 
-        self.predictor.set_image(image)
+        # Set image in processor (creates inference_state)
+        inference_state = self.processor.set_image(pil_image)
 
         points = request.get("points", [])
         masks_out = []
 
         if points:
-            # Point-prompted: one mask per point
+            # Point-prompted: one mask per point via model.predict_inst
             for i, pt in enumerate(points):
                 px = int(pt["x"] * scale)
                 py = int(pt["y"] * scale)
 
-                masks, scores, _ = self.predictor.predict_inst(
-                    point_coords=[[px, py]],
-                    point_labels=[1],
+                masks, scores, logits = self.model.predict_inst(
+                    inference_state,
+                    point_coords=np.array([[px, py]]),
+                    point_labels=np.array([1]),
                     multimask_output=True,
                 )
 
@@ -155,59 +168,59 @@ class SAM3Inference:
                 mask = masks[best_idx]
                 score = float(scores[best_idx])
 
-                # Encode mask as PNG
-                mask_uint8 = (mask.astype(np.uint8)) * 255
-                _, png_bytes = cv2.imencode(".png", mask_uint8)
-                mask_b64 = base64.b64encode(png_bytes.tobytes()).decode("ascii")
-
-                # Bounding box from mask
-                ys, xs = np.where(mask)
-                if len(xs) > 0:
-                    bbox = [int(xs.min()), int(ys.min()), int(xs.max() - xs.min()), int(ys.max() - ys.min())]
-                else:
-                    bbox = [0, 0, 0, 0]
-
-                masks_out.append({
-                    "id": i,
-                    "mask": mask_b64,
-                    "bbox": bbox,
-                    "score": round(score, 4),
-                })
+                mask_result = self._encode_mask(mask, score, i, scale)
+                masks_out.append(mask_result)
         else:
-            # No points: try text prompt as fallback for auto-like behavior
+            # No points: try text prompt for auto-like behavior
             try:
-                masks = self.predictor.predict_concept(text_prompt="distinct object")
-                for i, mask in enumerate(masks):
+                output = self.processor.set_text_prompt(
+                    prompt="distinct object",
+                    state=inference_state,
+                )
+                result_masks = output.get("masks", [])
+                result_scores = output.get("scores", [])
+
+                for i, mask in enumerate(result_masks):
                     mask_np = mask.cpu().numpy() if hasattr(mask, 'cpu') else np.array(mask)
                     if mask_np.ndim > 2:
                         mask_np = mask_np.squeeze()
-                    mask_uint8 = (mask_np.astype(np.uint8)) * 255
-                    _, png_bytes = cv2.imencode(".png", mask_uint8)
-                    mask_b64 = base64.b64encode(png_bytes.tobytes()).decode("ascii")
-
-                    ys, xs = np.where(mask_np)
-                    if len(xs) > 0:
-                        bbox = [int(xs.min()), int(ys.min()), int(xs.max() - xs.min()), int(ys.max() - ys.min())]
-                    else:
-                        bbox = [0, 0, 0, 0]
-
-                    masks_out.append({
-                        "id": i,
-                        "mask": mask_b64,
-                        "bbox": bbox,
-                        "score": 1.0,
-                    })
+                    score = float(result_scores[i]) if i < len(result_scores) else 1.0
+                    mask_result = self._encode_mask(mask_np, score, i, scale)
+                    masks_out.append(mask_result)
             except Exception as e:
                 return {"error": f"Text-prompt segmentation failed: {str(e)}"}
 
-        # Scale bboxes back to original image coordinates
-        if scale != 1.0:
-            for m in masks_out:
-                m["bbox"] = [int(v / scale) for v in m["bbox"]]
-
         return {
             "masks": masks_out,
-            "imageSize": {"width": int(w / scale), "height": int(h / scale)},
+            "imageSize": {"width": orig_w, "height": orig_h},
+        }
+
+    def _encode_mask(self, mask, score, mask_id, scale):
+        """Encode a binary mask as PNG and compute bbox in original image coords."""
+        import cv2
+        import numpy as np
+
+        mask_bool = mask > 0 if mask.dtype != bool else mask
+        mask_uint8 = mask_bool.astype(np.uint8) * 255
+        _, png_bytes = cv2.imencode(".png", mask_uint8)
+        mask_b64 = base64.b64encode(png_bytes.tobytes()).decode("ascii")
+
+        ys, xs = np.where(mask_bool)
+        if len(xs) > 0:
+            bbox = [
+                int(xs.min() / scale),
+                int(ys.min() / scale),
+                int((xs.max() - xs.min()) / scale),
+                int((ys.max() - ys.min()) / scale),
+            ]
+        else:
+            bbox = [0, 0, 0, 0]
+
+        return {
+            "id": mask_id,
+            "mask": mask_b64,
+            "bbox": bbox,
+            "score": round(score, 4),
         }
 
 
