@@ -103,9 +103,9 @@ body {
 }
 
 .btn-secondary.seg-edit-btn.active {
-  background: var(--accent-primary);
-  color: var(--text-bright);
-  border-color: var(--accent-primary);
+  background: var(--accent-primary) !important;
+  color: var(--text-bright) !important;
+  border-color: var(--accent-primary) !important;
 }
 
 .seg-brush-slider {
