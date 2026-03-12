@@ -24,6 +24,8 @@ let editMode = null;          // 'paint' | 'erase' | null
 let brushSize = 20;           // brush radius in image-space pixels
 let isDrawing = false;        // whether a paint/erase stroke is active
 let lastDrawPos = null;       // last stroke position for interpolation
+let currentStroke = null;     // stroke being recorded: {points: [{x,y}], radius, mode}
+let pendingThumbnailId = 0;   // timer for deferred thumbnail update
 
 // --- DOM refs ---
 
@@ -49,6 +51,7 @@ const btnExport = document.getElementById('seg-btn-export');
 const btnReset = document.getElementById('seg-btn-reset');
 const btnAddObject = document.getElementById('seg-btn-add-object');
 const editControls = document.getElementById('seg-edit-controls');
+const btnUndoEdit = document.getElementById('seg-btn-undo-edit');
 const btnPaint = document.getElementById('seg-btn-paint');
 const btnErase = document.getElementById('seg-btn-erase');
 const brushSlider = document.getElementById('seg-brush-size');
@@ -135,6 +138,7 @@ function resetState() {
   editMode = null;
   isDrawing = false;
   lastDrawPos = null;
+  currentStroke = null;
 }
 
 function hasResults() {
@@ -170,15 +174,56 @@ function selectMask(id) {
   drawCanvas();
 }
 
-/** Create a mutable mask canvas from the decoded image for editing. */
+// --- Mask canvas management ---
+
+/**
+ * Create a mutable mask canvas (white-on-transparent) from the decoded image.
+ * Stores original state for undo replay and initializes stroke history.
+ */
 function initMaskCanvas(mask) {
   if (!mask._decodedImage || !sourceImage) return;
+  const w = sourceImage.naturalWidth;
+  const h = sourceImage.naturalHeight;
+
+  // Draw decoded mask at full resolution
+  const tmp = document.createElement('canvas');
+  tmp.width = w;
+  tmp.height = h;
+  const tmpCtx = tmp.getContext('2d', { willReadFrequently: true });
+  tmpCtx.drawImage(mask._decodedImage, 0, 0, w, h);
+
+  // Convert white-on-black to white-on-transparent
+  const data = tmpCtx.getImageData(0, 0, w, h);
+  for (let i = 0; i < data.data.length; i += 4) {
+    if (data.data[i] > 128) {
+      data.data[i] = 255;
+      data.data[i + 1] = 255;
+      data.data[i + 2] = 255;
+      data.data[i + 3] = 255;
+    } else {
+      data.data[i] = 0;
+      data.data[i + 1] = 0;
+      data.data[i + 2] = 0;
+      data.data[i + 3] = 0;
+    }
+  }
+
+  // Store original pixel data for undo replay
+  mask._originalData = new ImageData(
+    new Uint8ClampedArray(data.data),
+    w, h
+  );
+
+  // Create the editable mask canvas
   const c = document.createElement('canvas');
-  c.width = sourceImage.naturalWidth;
-  c.height = sourceImage.naturalHeight;
+  c.width = w;
+  c.height = h;
   const cCtx = c.getContext('2d');
-  cCtx.drawImage(mask._decodedImage, 0, 0, c.width, c.height);
+  cCtx.putImageData(data, 0, 0);
   mask._maskCanvas = c;
+
+  // Stroke history for undo (per-mask, persists across selection changes)
+  mask._strokes = [];
 }
 
 /** Paint or erase a circle on the mask canvas. */
@@ -210,6 +255,44 @@ function strokeLine(mask, x0, y0, x1, y1, radius, mode) {
     const t = steps === 0 ? 0 : i / steps;
     applyBrush(mask, x0 + dx * t, y0 + dy * t, radius, mode);
   }
+}
+
+/** Replay all strokes from original mask state. */
+function replayStrokes(mask) {
+  if (!mask._maskCanvas || !mask._originalData) return;
+  const mCtx = mask._maskCanvas.getContext('2d');
+  mCtx.putImageData(mask._originalData, 0, 0);
+  for (const stroke of mask._strokes) {
+    for (let i = 0; i < stroke.points.length; i++) {
+      if (i === 0) {
+        applyBrush(mask, stroke.points[0].x, stroke.points[0].y, stroke.radius, stroke.mode);
+      } else {
+        strokeLine(mask,
+          stroke.points[i - 1].x, stroke.points[i - 1].y,
+          stroke.points[i].x, stroke.points[i].y,
+          stroke.radius, stroke.mode);
+      }
+    }
+  }
+}
+
+/** Undo the last stroke on the selected mask. */
+function undoLastStroke() {
+  const mask = getSelectedMask();
+  if (!mask || !mask._strokes || mask._strokes.length === 0) return;
+  mask._strokes.pop();
+  replayStrokes(mask);
+  drawCanvas();
+  deferThumbnailUpdate(mask);
+  updateToolbarState();
+}
+
+/** Schedule a deferred thumbnail update (doesn't block painting). */
+function deferThumbnailUpdate(mask) {
+  clearTimeout(pendingThumbnailId);
+  pendingThumbnailId = setTimeout(() => {
+    refreshThumbnail(mask);
+  }, 100);
 }
 
 /** Regenerate a single mask's thumbnail and update its card image. */
@@ -293,13 +376,11 @@ function renderObjectList() {
       </div>
     `;
 
-    // Select on click (but not on input or button)
     card.addEventListener('click', (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
       selectObject(obj.id);
     });
 
-    // Name editing
     const nameInput = card.querySelector('.seg-obj-name');
     nameInput.addEventListener('input', () => {
       obj.name = nameInput.value;
@@ -309,7 +390,6 @@ function renderObjectList() {
       selectObject(obj.id);
     });
 
-    // Remove button
     card.querySelector('.seg-card-btn.remove').addEventListener('click', (e) => {
       e.stopPropagation();
       removeObject(obj.id);
@@ -322,6 +402,66 @@ function renderObjectList() {
 }
 
 // --- Canvas rendering ---
+
+/**
+ * Draw a single mask overlay using canvas compositing (no getImageData).
+ * maskSrc must be white-on-transparent.
+ */
+function drawMaskOverlay(maskSrc, color, alpha) {
+  const off = document.createElement('canvas');
+  off.width = canvas.width;
+  off.height = canvas.height;
+  const offCtx = off.getContext('2d');
+
+  // Draw white-on-transparent mask
+  offCtx.drawImage(maskSrc, 0, 0, canvas.width, canvas.height);
+
+  // Replace white with desired color+alpha using source-in compositing
+  offCtx.globalCompositeOperation = 'source-in';
+  offCtx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${(alpha / 255).toFixed(3)})`;
+  offCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.drawImage(off, 0, 0);
+}
+
+/**
+ * Draw edge highlight for a mask (only called when not actively painting).
+ * Uses getImageData but only for a single mask on hover/select — not per-frame during strokes.
+ */
+function drawMaskEdge(maskSrc, color) {
+  const w = canvas.width;
+  const h = canvas.height;
+  const off = document.createElement('canvas');
+  off.width = w;
+  off.height = h;
+  const offCtx = off.getContext('2d', { willReadFrequently: true });
+
+  offCtx.drawImage(maskSrc, 0, 0, w, h);
+  const maskData = offCtx.getImageData(0, 0, w, h);
+  const edgeData = offCtx.createImageData(w, h);
+
+  for (let py = 1; py < h - 1; py++) {
+    for (let px = 1; px < w - 1; px++) {
+      const idx = (py * w + px) * 4;
+      if (maskData.data[idx + 3] > 128) {
+        const up = ((py - 1) * w + px) * 4;
+        const dn = ((py + 1) * w + px) * 4;
+        const lt = (py * w + (px - 1)) * 4;
+        const rt = (py * w + (px + 1)) * 4;
+        if (maskData.data[up + 3] <= 128 || maskData.data[dn + 3] <= 128 ||
+            maskData.data[lt + 3] <= 128 || maskData.data[rt + 3] <= 128) {
+          edgeData.data[idx] = color[0];
+          edgeData.data[idx + 1] = color[1];
+          edgeData.data[idx + 2] = color[2];
+          edgeData.data[idx + 3] = 255;
+        }
+      }
+    }
+  }
+
+  offCtx.putImageData(edgeData, 0, 0);
+  ctx.drawImage(off, 0, 0);
+}
 
 function drawCanvas() {
   if (!sourceImage) return;
@@ -344,50 +484,12 @@ function drawCanvas() {
       const maskSrc = mask._maskCanvas || mask._decodedImage;
       if (!maskSrc) continue;
 
-      const off = document.createElement('canvas');
-      off.width = canvas.width;
-      off.height = canvas.height;
-      const offCtx = off.getContext('2d');
+      // Fast compositing overlay — no pixel loops
+      drawMaskOverlay(maskSrc, color, alpha);
 
-      offCtx.drawImage(maskSrc, 0, 0, canvas.width, canvas.height);
-      const maskData = offCtx.getImageData(0, 0, canvas.width, canvas.height);
-
-      for (let i = 0; i < maskData.data.length; i += 4) {
-        if (maskData.data[i] > 128) {
-          maskData.data[i] = color[0];
-          maskData.data[i + 1] = color[1];
-          maskData.data[i + 2] = color[2];
-          maskData.data[i + 3] = alpha;
-        } else {
-          maskData.data[i + 3] = 0;
-        }
-      }
-      offCtx.putImageData(maskData, 0, 0);
-      ctx.drawImage(off, 0, 0);
-
-      if (isHighlighted || isSelected) {
-        const edgeData = offCtx.createImageData(canvas.width, canvas.height);
-        const w = canvas.width;
-        for (let py = 1; py < canvas.height - 1; py++) {
-          for (let px = 1; px < w - 1; px++) {
-            const idx = (py * w + px) * 4;
-            if (maskData.data[idx] > 128) {
-              const up = ((py - 1) * w + px) * 4;
-              const dn = ((py + 1) * w + px) * 4;
-              const lt = (py * w + (px - 1)) * 4;
-              const rt = (py * w + (px + 1)) * 4;
-              if (maskData.data[up] <= 128 || maskData.data[dn] <= 128 ||
-                  maskData.data[lt] <= 128 || maskData.data[rt] <= 128) {
-                edgeData.data[idx] = color[0];
-                edgeData.data[idx + 1] = color[1];
-                edgeData.data[idx + 2] = color[2];
-                edgeData.data[idx + 3] = 255;
-              }
-            }
-          }
-        }
-        offCtx.putImageData(edgeData, 0, 0);
-        ctx.drawImage(off, 0, 0);
+      // Edge highlight only when not actively painting (expensive)
+      if ((isHighlighted || isSelected) && !isDrawing) {
+        drawMaskEdge(maskSrc, color);
       }
     }
   }
@@ -402,14 +504,12 @@ function drawCanvas() {
       const rgb = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
 
       for (const pt of obj.points) {
-        // Outer ring
         ctx.beginPath();
         ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
         ctx.strokeStyle = isSelected ? '#ffffff' : 'rgba(255,255,255,0.5)';
         ctx.lineWidth = isSelected ? 3 : 2;
         ctx.stroke();
 
-        // Inner fill with object color
         ctx.beginPath();
         ctx.arc(pt.x, pt.y, r * 0.6, 0, Math.PI * 2);
         ctx.fillStyle = rgb;
@@ -435,7 +535,6 @@ function canvasCoords(e) {
 
 function hitTestPoint(cx, cy) {
   const hitRadius = Math.max(16, Math.min(canvas.width, canvas.height) * 0.015);
-  // Check all objects' points, return {objectId, pointIdx} or null
   for (let oi = objects.length - 1; oi >= 0; oi--) {
     const obj = objects[oi];
     for (let pi = obj.points.length - 1; pi >= 0; pi--) {
@@ -462,6 +561,7 @@ canvas.addEventListener('pointerdown', (e) => {
     if (!mask) return;
     isDrawing = true;
     lastDrawPos = canvasCoords(e);
+    currentStroke = { points: [{ ...lastDrawPos }], radius: brushSize, mode: editMode };
     canvas.setPointerCapture(e.pointerId);
     applyBrush(mask, lastDrawPos.x, lastDrawPos.y, brushSize, editMode);
     drawCanvas();
@@ -492,6 +592,7 @@ canvas.addEventListener('pointermove', (e) => {
     if (!mask) return;
     const pos = canvasCoords(e);
     strokeLine(mask, lastDrawPos.x, lastDrawPos.y, pos.x, pos.y, brushSize, editMode);
+    currentStroke.points.push({ ...pos });
     lastDrawPos = pos;
     drawCanvas();
     e.preventDefault();
@@ -532,8 +633,15 @@ canvas.addEventListener('pointerup', (e) => {
     canvas.releasePointerCapture(e.pointerId);
     isDrawing = false;
     lastDrawPos = null;
+    // Save completed stroke to history
     const mask = getSelectedMask();
-    if (mask) refreshThumbnail(mask);
+    if (mask && currentStroke) {
+      mask._strokes.push(currentStroke);
+      currentStroke = null;
+      deferThumbnailUpdate(mask);
+    }
+    // Redraw with edge highlights now that stroke is done
+    drawCanvas();
     e.preventDefault();
     return;
   }
@@ -578,6 +686,9 @@ function updateToolbarState() {
     // Update edit button states
     btnPaint.classList.toggle('active', editMode === 'paint');
     btnErase.classList.toggle('active', editMode === 'erase');
+    // Undo edit enabled if selected mask has strokes
+    const selMask = getSelectedMask();
+    btnUndoEdit.disabled = !selMask || !selMask._strokes || selMask._strokes.length === 0;
   } else {
     if (selectedObjectId >= 0) {
       const obj = getSelectedObject();
@@ -623,6 +734,8 @@ btnAddObject.addEventListener('click', () => {
   addObject();
 });
 
+btnUndoEdit.addEventListener('click', undoLastStroke);
+
 btnPaint.addEventListener('click', () => {
   editMode = editMode === 'paint' ? null : 'paint';
   updateToolbarState();
@@ -650,7 +763,6 @@ btnSegment.addEventListener('click', async () => {
   try {
     const imageB64 = arrayBufferToBase64(sourceImageBytes);
 
-    // Send grouped points: each object's points as a group
     const pointGroups = objects
       .filter(o => o.points.length > 0)
       .map(o => ({
@@ -728,7 +840,6 @@ function renderResults() {
     card.style.borderLeftWidth = '3px';
     card.style.borderLeftColor = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
 
-    // Use object name if available
     const defaultName = mask._currentName || mask.name || `item_${mask.id + 1}`;
 
     card.innerHTML = `
@@ -744,7 +855,6 @@ function renderResults() {
       </div>
     `;
 
-    // Click to select for editing (but not on input or button)
     card.addEventListener('click', (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
       selectMask(mask.id === selectedMaskId ? -1 : mask.id);
@@ -772,7 +882,6 @@ function renderResults() {
       renderResults();
     });
 
-    // Persist name edits across re-renders
     const nameInput = card.querySelector('.seg-card-name');
     nameInput.addEventListener('input', () => {
       mask._currentName = nameInput.value;
@@ -793,20 +902,22 @@ function generateThumbnail(mask) {
   const maskSrc = mask._maskCanvas || mask._decodedImage;
   if (!maskSrc || !sourceImage) return '';
 
-  // Read mask data at full resolution to find actual bounds
-  const fullMaskCanvas = document.createElement('canvas');
-  fullMaskCanvas.width = sourceImage.naturalWidth;
-  fullMaskCanvas.height = sourceImage.naturalHeight;
-  const fullMaskCtx = fullMaskCanvas.getContext('2d');
-  fullMaskCtx.drawImage(maskSrc, 0, 0, sourceImage.naturalWidth, sourceImage.naturalHeight);
-  const fullData = fullMaskCtx.getImageData(0, 0, sourceImage.naturalWidth, sourceImage.naturalHeight);
+  const w = sourceImage.naturalWidth;
+  const h = sourceImage.naturalHeight;
 
-  // Compute tight bounding box from current mask data
-  let minX = sourceImage.naturalWidth, minY = sourceImage.naturalHeight, maxX = 0, maxY = 0;
-  const sw = sourceImage.naturalWidth;
-  for (let py = 0; py < sourceImage.naturalHeight; py++) {
-    for (let px = 0; px < sw; px++) {
-      if (fullData.data[(py * sw + px) * 4] > 128) {
+  // Read mask alpha to find tight bounds
+  const fullCanvas = document.createElement('canvas');
+  fullCanvas.width = w;
+  fullCanvas.height = h;
+  const fullCtx = fullCanvas.getContext('2d', { willReadFrequently: true });
+  fullCtx.drawImage(maskSrc, 0, 0, w, h);
+  const fullData = fullCtx.getImageData(0, 0, w, h);
+
+  let minX = w, minY = h, maxX = 0, maxY = 0;
+  for (let py = 0; py < h; py++) {
+    for (let px = 0; px < w; px++) {
+      // Check alpha channel for white-on-transparent masks
+      if (fullData.data[(py * w + px) * 4 + 3] > 128) {
         if (px < minX) minX = px;
         if (px > maxX) maxX = px;
         if (py < minY) minY = py;
@@ -818,22 +929,22 @@ function generateThumbnail(mask) {
   if (maxX < minX) return '';
 
   const pad = 10;
-  const x = Math.max(0, minX - pad);
-  const y = Math.max(0, minY - pad);
-  const w = Math.min(sourceImage.naturalWidth - x, (maxX - minX + 1) + pad * 2);
-  const h = Math.min(sourceImage.naturalHeight - y, (maxY - minY + 1) + pad * 2);
+  const cx = Math.max(0, minX - pad);
+  const cy = Math.max(0, minY - pad);
+  const cw = Math.min(w - cx, (maxX - minX + 1) + pad * 2);
+  const ch = Math.min(h - cy, (maxY - minY + 1) + pad * 2);
 
   const off = document.createElement('canvas');
-  off.width = w;
-  off.height = h;
-  const offCtx = off.getContext('2d');
+  off.width = cw;
+  off.height = ch;
+  const offCtx = off.getContext('2d', { willReadFrequently: true });
 
-  offCtx.drawImage(sourceImage, x, y, w, h, 0, 0, w, h);
+  offCtx.drawImage(sourceImage, cx, cy, cw, ch, 0, 0, cw, ch);
 
-  const maskData = fullMaskCtx.getImageData(x, y, w, h);
-  const imgData = offCtx.getImageData(0, 0, w, h);
+  const maskData = fullCtx.getImageData(cx, cy, cw, ch);
+  const imgData = offCtx.getImageData(0, 0, cw, ch);
   for (let i = 0; i < maskData.data.length; i += 4) {
-    if (maskData.data[i] < 128) {
+    if (maskData.data[i + 3] < 128) {
       imgData.data[i + 3] = 0;
     }
   }

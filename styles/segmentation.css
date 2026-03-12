@@ -102,7 +102,7 @@ body {
   font-size: var(--font-sm);
 }
 
-.seg-edit-btn.active {
+.btn-secondary.seg-edit-btn.active {
   background: var(--accent-primary);
   color: var(--text-bright);
   border-color: var(--accent-primary);

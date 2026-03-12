@@ -30,16 +30,16 @@ async function maskToTransparentPNG(sourceImage, mask, editedMaskCanvas) {
   const fullCanvas = document.createElement('canvas');
   fullCanvas.width = sourceImage.naturalWidth;
   fullCanvas.height = sourceImage.naturalHeight;
-  const fullCtx = fullCanvas.getContext('2d');
+  const fullCtx = fullCanvas.getContext('2d', { willReadFrequently: true });
   fullCtx.drawImage(maskSrc, 0, 0, sourceImage.naturalWidth, sourceImage.naturalHeight);
   const fullData = fullCtx.getImageData(0, 0, sourceImage.naturalWidth, sourceImage.naturalHeight);
 
-  // Compute tight bbox from mask data
+  // Compute tight bbox from mask alpha channel
   let minX = sourceImage.naturalWidth, minY = sourceImage.naturalHeight, maxX = 0, maxY = 0;
   const sw = sourceImage.naturalWidth;
   for (let py = 0; py < sourceImage.naturalHeight; py++) {
     for (let px = 0; px < sw; px++) {
-      if (fullData.data[(py * sw + px) * 4] > 128) {
+      if (fullData.data[(py * sw + px) * 4 + 3] > 128) {
         if (px < minX) minX = px;
         if (px > maxX) maxX = px;
         if (py < minY) minY = py;
@@ -68,13 +68,13 @@ async function maskToTransparentPNG(sourceImage, mask, editedMaskCanvas) {
   const outCanvas = document.createElement('canvas');
   outCanvas.width = w;
   outCanvas.height = h;
-  const outCtx = outCanvas.getContext('2d');
+  const outCtx = outCanvas.getContext('2d', { willReadFrequently: true });
   outCtx.drawImage(sourceImage, x, y, w, h, 0, 0, w, h);
 
-  // Apply mask: transparent outside
+  // Apply mask: transparent outside (check alpha channel)
   const imgData = outCtx.getImageData(0, 0, w, h);
   for (let i = 0; i < maskData.data.length; i += 4) {
-    if (maskData.data[i] < 128) {
+    if (maskData.data[i + 3] < 128) {
       imgData.data[i + 3] = 0;
     }
   }
