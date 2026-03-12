@@ -30,7 +30,7 @@ def download_model():
 
 
 image = (
-    modal.Image.debian_slim(python_version="3.12")
+    modal.Image.debian_slim(python_version="3.11")
     .apt_install(
         "git",
         "libgl1-mesa-glx",
