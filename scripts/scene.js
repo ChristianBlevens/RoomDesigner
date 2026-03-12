@@ -1365,63 +1365,93 @@ export function calculateFurnitureScale(model, entry) {
   return new THREE.Vector3(1, 1, 1);
 }
 
-// Collect placed furniture state for saving
+// Serialize a single furniture object to JSON-ready data
+function serializeFurnitureObject(object) {
+  const data = {
+    entryId: object.userData.entryId,
+    position: {
+      x: object.position.x,
+      y: object.position.y,
+      z: object.position.z
+    },
+    rotation: {
+      x: object.rotation.x,
+      y: object.rotation.y,
+      z: object.rotation.z
+    },
+    scale: {
+      x: object.scale.x,
+      y: object.scale.y,
+      z: object.scale.z
+    }
+  };
+
+  if (object.userData.surfaceNormal) {
+    data.surfaceNormal = {
+      x: object.userData.surfaceNormal.x,
+      y: object.userData.surfaceNormal.y,
+      z: object.userData.surfaceNormal.z
+    };
+  }
+
+  if (object.userData.contactAxis) {
+    data.contactAxis = {
+      x: object.userData.contactAxis.x,
+      y: object.userData.contactAxis.y,
+      z: object.userData.contactAxis.z
+    };
+  }
+
+  if (typeof object.userData.uprightRotation === 'number') {
+    data.uprightRotation = object.userData.uprightRotation;
+  }
+
+  if (typeof object.userData.rotationAroundNormal === 'number') {
+    data.rotationAroundNormal = object.userData.rotationAroundNormal;
+  }
+
+  if (object.userData.baseScale) {
+    data.baseScale = {
+      x: object.userData.baseScale.x,
+      y: object.userData.baseScale.y,
+      z: object.userData.baseScale.z
+    };
+  }
+
+  return data;
+}
+
+// Collect placed furniture state for saving (parents first, then children with parentIndex)
 export function collectPlacedFurniture() {
   const placedFurniture = [];
+  const uuidToIndex = new Map();
 
+  // Pass 1: serialize parents (non-child furniture)
   selectableObjects.forEach((object) => {
-    if (object.userData.isFurniture && object.userData.entryId) {
-      const data = {
-        entryId: object.userData.entryId,
-        position: {
-          x: object.position.x,
-          y: object.position.y,
-          z: object.position.z
-        },
-        rotation: {
-          x: object.rotation.x,
-          y: object.rotation.y,
-          z: object.rotation.z
-        },
-        scale: {
-          x: object.scale.x,
-          y: object.scale.y,
-          z: object.scale.z
-        }
-      };
+    if (object.userData.isFurniture && object.userData.entryId && !object.userData.isChild) {
+      const data = serializeFurnitureObject(object);
+      uuidToIndex.set(object.uuid, placedFurniture.length);
+      placedFurniture.push(data);
+    }
+  });
 
-      // Save surface orientation data
-      if (object.userData.surfaceNormal) {
-        data.surfaceNormal = {
-          x: object.userData.surfaceNormal.x,
-          y: object.userData.surfaceNormal.y,
-          z: object.userData.surfaceNormal.z
+  // Pass 2: serialize children with parentIndex and local offset
+  selectableObjects.forEach((object) => {
+    if (object.userData.isFurniture && object.userData.entryId && object.userData.isChild) {
+      const data = serializeFurnitureObject(object);
+
+      data.parentIndex = uuidToIndex.get(object.userData.parentId) ?? null;
+
+      if (object.userData.localOffset) {
+        data.localOffset = {
+          x: object.userData.localOffset.x,
+          y: object.userData.localOffset.y,
+          z: object.userData.localOffset.z
         };
       }
 
-      if (object.userData.contactAxis) {
-        data.contactAxis = {
-          x: object.userData.contactAxis.x,
-          y: object.userData.contactAxis.y,
-          z: object.userData.contactAxis.z
-        };
-      }
-
-      if (typeof object.userData.uprightRotation === 'number') {
-        data.uprightRotation = object.userData.uprightRotation;
-      }
-
-      if (typeof object.userData.rotationAroundNormal === 'number') {
-        data.rotationAroundNormal = object.userData.rotationAroundNormal;
-      }
-
-      // Save base scale for room scale recalculation on load
-      if (object.userData.baseScale) {
-        data.baseScale = {
-          x: object.userData.baseScale.x,
-          y: object.userData.baseScale.y,
-          z: object.userData.baseScale.z
-        };
+      if (typeof object.userData.localRotationY === 'number') {
+        data.localRotationY = object.userData.localRotationY;
       }
 
       placedFurniture.push(data);
@@ -1960,6 +1990,47 @@ export function applyRoomScaleToAllFurniture() {
       obj.scale.copy(obj.userData.baseScale).multiplyScalar(roomScaleFactor);
     }
   });
+
+  // Reposition children after parent scale changed (parent AABB is different now)
+  selectableObjects.forEach(obj => {
+    if (obj.userData.isFurniture && (obj.userData.childIds || []).length > 0) {
+      obj.updateMatrixWorld(true);
+      const parentBox = new THREE.Box3().setFromObject(obj);
+      const parentCenter = new THREE.Vector3();
+      parentBox.getCenter(parentCenter);
+      const parentTopY = parentBox.max.y;
+      const parentTopCenter = new THREE.Vector3(parentCenter.x, parentTopY, parentCenter.z);
+
+      for (const childId of obj.userData.childIds) {
+        const child = selectableObjects.find(c => c.uuid === childId);
+        if (!child || !child.userData.localOffset) continue;
+
+        const worldOffset = child.userData.localOffset.clone();
+        worldOffset.applyQuaternion(obj.quaternion);
+
+        // Calculate child bounding box offset for surface contact
+        const savedPos = child.position.clone();
+        child.position.set(0, 0, 0);
+        child.updateMatrixWorld(true);
+        const childBox = new THREE.Box3().setFromObject(child);
+        child.position.copy(savedPos);
+        child.updateMatrixWorld(true);
+        const bbOffset = -(childBox.min.y);
+
+        child.position.copy(parentTopCenter).add(worldOffset);
+        child.position.y = parentTopY + bbOffset;
+
+        // Reapply parent rotation + child local Y rotation
+        const childLocalY = child.userData.localRotationY || 0;
+        child.rotation.set(0, 0, 0);
+        child.quaternion.copy(obj.quaternion);
+        const localYQuat = new THREE.Quaternion();
+        localYQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), childLocalY);
+        child.quaternion.multiply(localYQuat);
+      }
+    }
+  });
+
   // Update hitboxes to match new scale
   updateAllFurnitureHitBoxes();
 }

@@ -16,6 +16,9 @@ class PlacedFurniture(BaseModel):
     uprightRotation: Optional[float] = None
     rotationAroundNormal: Optional[float] = None
     baseScale: Optional[Position] = None
+    parentIndex: Optional[int] = None
+    localOffset: Optional[Position] = None
+    localRotationY: Optional[float] = None
 
 class MogeData(BaseModel):
     meshUrl: Optional[str] = None

@@ -40,6 +40,9 @@ let mouseDownPosition = null;
 let dragStartPosition = null;
 let activePointerId = null;
 
+// Place-on-top mode state
+let placeOnTopTarget = null;
+
 // Drag offset preservation (keeps grab point stable)
 let dragOffset = new THREE.Vector3();
 
@@ -524,7 +527,12 @@ function onPointerDown(event) {
     dragStartQuaternion.copy(hit.object.quaternion);
 
     // Store the spawn surface normal - this is the surface the furniture stays on
-    spawnSurfaceNormal.copy(hit.object.userData.surfaceNormal || new THREE.Vector3(0, 1, 0));
+    if (hit.object.userData.isChild) {
+      // Child always drags on horizontal plane at parent top
+      spawnSurfaceNormal.set(0, 1, 0);
+    } else {
+      spawnSurfaceNormal.copy(hit.object.userData.surfaceNormal || new THREE.Vector3(0, 1, 0));
+    }
 
     // Create drag plane at grab point, oriented to spawn surface
     dragPlane.setFromNormalAndCoplanarPoint(spawnSurfaceNormal, hit.point);
@@ -582,6 +590,15 @@ function onPointerMove(event) {
 
   // Continue dragging - furniture slides on drag plane, raycasts to surface for snapping
   if (isDragging && hoveredObject) {
+    if (hoveredObject.userData.isChild) {
+      dragChildOnParent(event);
+    } else {
+      dragOnRoomSurface(event);
+    }
+  }
+}
+
+function dragOnRoomSurface(event) {
     // Raycast to drag plane for smooth sliding
     const planePoint = raycastDragPlane(event);
     if (!planePoint) return;
@@ -639,7 +656,40 @@ function onPointerMove(event) {
       // No hit - use last valid position
       hoveredObject.position.copy(lastValidPosition);
     }
-  }
+
+    // Propagate to children if parent has any
+    if (hasChildren(hoveredObject)) {
+      updateChildPositions(hoveredObject);
+    }
+}
+
+function dragChildOnParent(event) {
+  const parent = getParentModel(hoveredObject);
+  if (!parent) return;
+
+  const planePoint = raycastDragPlane(event);
+  if (!planePoint) return;
+
+  const candidatePosition = planePoint.clone().add(dragOffset);
+
+  // Clamp to parent's AABB XZ footprint
+  parent.updateMatrixWorld(true);
+  const parentBox = new THREE.Box3().setFromObject(parent);
+  const margin = 0.01;
+  candidatePosition.x = Math.max(parentBox.min.x + margin, Math.min(parentBox.max.x - margin, candidatePosition.x));
+  candidatePosition.z = Math.max(parentBox.min.z + margin, Math.min(parentBox.max.z - margin, candidatePosition.z));
+
+  // Keep on parent top surface
+  const bbOffset = calculateBoundingBoxOffset(hoveredObject, new THREE.Vector3(0, 1, 0));
+  candidatePosition.y = parentBox.max.y + bbOffset;
+
+  hoveredObject.position.copy(candidatePosition);
+
+  // Update local offset for serialization
+  hoveredObject.userData.localOffset = computeLocalOffset(parent, hoveredObject);
+
+  // Store as last valid state
+  lastValidPosition.copy(hoveredObject.position);
 }
 
 function onPointerUp(event) {
@@ -660,13 +710,23 @@ function onPointerUp(event) {
     // Drag completed - record undo action
     const endPosition = hoveredObject.position.clone();
     if (!dragStartPosition.equals(endPosition)) {
-      undoManager.record(new MoveFurnitureCommand(
+      const moveCmd = new MoveFurnitureCommand(
         hoveredObject,
         dragStartPosition,
         endPosition
-      ));
+      );
+      moveCmd.captureChildEndPositions();
+      undoManager.record(moveCmd);
       // Update hitbox position
       updateFurnitureHitBox(hoveredObject);
+
+      // Update local offset if this is a child
+      if (hoveredObject.userData.isChild) {
+        const parent = getParentModel(hoveredObject);
+        if (parent) {
+          hoveredObject.userData.localOffset = computeLocalOffset(parent, hoveredObject);
+        }
+      }
     }
     // Don't auto-select after drag - user can tap to select if needed
   } else if (hoveredObject && mouseDownPosition) {
@@ -778,6 +838,13 @@ export function deselectFurniture() {
 function showGizmoMenu(event) {
   if (!gizmoMenu || !selectedObject) return;
 
+  // Hide Place On Top for children and meter stick
+  const placeOnBtn = document.getElementById('gizmo-place-on-btn');
+  if (placeOnBtn) {
+    const shouldHide = selectedObject.userData.isChild || selectedObject.userData.isMeterStick;
+    placeOnBtn.style.display = shouldHide ? 'none' : '';
+  }
+
   // Position gizmo above the clicked point
   gizmoMenu.style.left = `${event.clientX}px`;
   gizmoMenu.style.top = `${event.clientY - 10}px`;
@@ -793,6 +860,7 @@ function hideGizmoMenu() {
 function setupGizmoButtons() {
   const dragBtn = document.getElementById('gizmo-drag-btn');
   const rotateBtn = document.getElementById('gizmo-rotate-btn');
+  const placeOnBtn = document.getElementById('gizmo-place-on-btn');
   const deleteBtn = document.getElementById('gizmo-delete-btn');
 
   const transformControls = getTransformControls();
@@ -813,6 +881,19 @@ function setupGizmoButtons() {
       showActionNotification('Rotate mode');
       transformControls.attach(selectedObject);
       transformControls.setMode('rotate');
+    }
+    hideGizmoMenu();
+  });
+
+  placeOnBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (selectedObject && !selectedObject.userData.isChild) {
+      placeOnTopTarget = selectedObject;
+      deselectFurniture();
+      showActionNotification('Select furniture to place on top');
+      if (onOpenFurnitureModal) {
+        onOpenFurnitureModal();
+      }
     }
     hideGizmoMenu();
   });
@@ -839,6 +920,26 @@ function setupTransformControls() {
     }
   });
 
+  // Live update: propagate parent movement/rotation to children during gizmo drag
+  transformControls.addEventListener('objectChange', () => {
+    if (!selectedObject) return;
+
+    if (hasChildren(selectedObject)) {
+      updateChildPositions(selectedObject);
+    }
+
+    // If rotating a child, track its local Y rotation relative to parent
+    if (selectedObject.userData.isChild) {
+      const parent = getParentModel(selectedObject);
+      if (parent) {
+        const parentQuatInverse = parent.quaternion.clone().invert();
+        const relativeQuat = parentQuatInverse.clone().multiply(selectedObject.quaternion);
+        const relativeEuler = new THREE.Euler().setFromQuaternion(relativeQuat, 'YXZ');
+        selectedObject.userData.localRotationY = relativeEuler.y;
+      }
+    }
+  });
+
   transformControls.addEventListener('mouseUp', () => {
     if (selectedObject && transformStartPosition) {
       const mode = transformControls.getMode();
@@ -846,22 +947,34 @@ function setupTransformControls() {
       if (mode === 'translate') {
         const endPosition = selectedObject.position.clone();
         if (!transformStartPosition.equals(endPosition)) {
-          undoManager.record(new MoveFurnitureCommand(
+          const moveCmd = new MoveFurnitureCommand(
             selectedObject,
             transformStartPosition,
             selectedObject.position.clone()
-          ));
+          );
+          moveCmd.captureChildEndPositions();
+          undoManager.record(moveCmd);
           // Update hitbox position
           updateFurnitureHitBox(selectedObject);
+
+          // Update local offset if this is a child
+          if (selectedObject.userData.isChild) {
+            const parent = getParentModel(selectedObject);
+            if (parent) {
+              selectedObject.userData.localOffset = computeLocalOffset(parent, selectedObject);
+            }
+          }
         }
       } else if (mode === 'rotate') {
         const endRotation = selectedObject.rotation.clone();
         if (!transformStartRotation.equals(endRotation)) {
-          undoManager.record(new RotateFurnitureCommand(
+          const rotateCmd = new RotateFurnitureCommand(
             selectedObject,
             transformStartRotation,
             endRotation
-          ));
+          );
+          rotateCmd.captureChildEndRotations();
+          undoManager.record(rotateCmd);
           // Update hitbox after rotation (AABB changes)
           updateFurnitureHitBox(selectedObject);
         }
@@ -907,7 +1020,17 @@ function deleteSelectedFurniture() {
   if (!selectedObject) return;
 
   const isMeterStick = selectedObject.userData.isMeterStick;
-  const message = isMeterStick ? 'Delete meter stick?' : 'Delete this furniture?';
+  const children = getChildModels(selectedObject);
+  const childCount = children.length;
+
+  let message;
+  if (isMeterStick) {
+    message = 'Delete meter stick?';
+  } else if (childCount > 0) {
+    message = `Delete this furniture and ${childCount} item${childCount > 1 ? 's' : ''} on top of it?`;
+  } else {
+    message = 'Delete this furniture?';
+  }
 
   showConfirmDialog(message, () => {
     modalManager.closeModal();
@@ -920,6 +1043,21 @@ function deleteSelectedFurniture() {
     }
 
     const scene = getScene();
+
+    // If deleting a child, unlink from parent first
+    if (selectedObject.userData.isChild) {
+      unlinkChild(selectedObject);
+    }
+
+    // Delete children first
+    for (let i = children.length - 1; i >= 0; i--) {
+      const child = children[i];
+      unlinkChild(child);
+      const childCmd = new DeleteFurnitureCommand(scene, child, selectableObjects);
+      undoManager.execute(childCmd);
+    }
+
+    // Delete the selected object
     const command = new DeleteFurnitureCommand(scene, selectedObject, selectableObjects);
     undoManager.execute(command);
 
@@ -978,10 +1116,21 @@ export async function placeFurniture(entryId, position, surfaceNormal = null) {
 
 // Remove all furniture with a specific entry ID (when entry is deleted from database)
 export function removeAllFurnitureByEntryId(entryId) {
-  const scene = getScene();
   const toRemove = selectableObjects.filter(obj => obj.userData.entryId === entryId);
 
   toRemove.forEach(obj => {
+    // If this is a parent, remove its children first
+    const children = getChildModels(obj);
+    children.forEach(child => {
+      unlinkChild(child);
+      removeFurnitureFromScene(child);
+    });
+
+    // If this is a child, unlink from parent
+    if (obj.userData.isChild) {
+      unlinkChild(obj);
+    }
+
     removeFurnitureFromScene(obj);
   });
 
@@ -991,4 +1140,157 @@ export function removeAllFurnitureByEntryId(entryId) {
   }
 
   return toRemove.length;
+}
+
+// ============ Child Furniture (Place-on-Top) ============
+
+// Get/set place-on-top target
+export function getPlaceOnTopTarget() {
+  return placeOnTopTarget;
+}
+
+export function clearPlaceOnTopTarget() {
+  placeOnTopTarget = null;
+}
+
+// Place furniture as a child on top of a parent
+export async function placeChildFurniture(parentModel, entryId) {
+  const entry = await getFurnitureEntry(entryId);
+  if (!entry || !entry.model) {
+    throw new Error('Furniture entry has no 3D model');
+  }
+
+  const extractedData = await extractModelFromZip(entry.model);
+  const model = await loadModelFromExtractedZip(extractedData);
+  const scene = getScene();
+
+  // Calculate base scale from entry dimensions
+  const baseScale = calculateFurnitureScale(model, entry);
+  model.userData.baseScale = baseScale.clone();
+  model.scale.copy(baseScale).multiplyScalar(getRoomScale());
+
+  // Child surface is always parent top face — horizontal, normal (0,1,0)
+  const surfaceNormal = new THREE.Vector3(0, 1, 0);
+  model.userData.surfaceNormal = surfaceNormal.clone();
+  model.userData.contactAxis = surfaceNormal.clone();
+
+  // Compute parent top surface center
+  parentModel.updateMatrixWorld(true);
+  const parentBox = new THREE.Box3().setFromObject(parentModel);
+  const parentCenter = new THREE.Vector3();
+  parentBox.getCenter(parentCenter);
+  const parentTopY = parentBox.max.y;
+
+  // Position child at parent center, on top surface
+  const bbOffset = calculateBoundingBoxOffset(model, surfaceNormal);
+  model.position.set(parentCenter.x, parentTopY + bbOffset, parentCenter.z);
+
+  // Set up parent-child relationship
+  model.userData.isChild = true;
+  model.userData.parentId = parentModel.uuid;
+  model.userData.localOffset = computeLocalOffset(parentModel, model);
+  model.userData.localRotationY = 0;
+
+  if (!parentModel.userData.childIds) {
+    parentModel.userData.childIds = [];
+  }
+  parentModel.userData.childIds.push(model.uuid);
+
+  // Add to scene
+  addFurnitureToScene(model, entryId);
+
+  // Record undo action
+  const command = new PlaceFurnitureCommand(scene, model, selectableObjects);
+  undoManager.record(command);
+
+  return model;
+}
+
+// Compute child's local offset relative to parent's center-top point
+function computeLocalOffset(parent, child) {
+  parent.updateMatrixWorld(true);
+  const parentBox = new THREE.Box3().setFromObject(parent);
+  const parentCenter = new THREE.Vector3();
+  parentBox.getCenter(parentCenter);
+  const parentTopY = parentBox.max.y;
+
+  const parentTopCenter = new THREE.Vector3(parentCenter.x, parentTopY, parentCenter.z);
+
+  // World-space offset from parent top center to child position
+  const worldOffset = child.position.clone().sub(parentTopCenter);
+
+  // Rotate into parent's local frame so it survives parent rotation
+  const parentQuatInverse = parent.quaternion.clone().invert();
+  worldOffset.applyQuaternion(parentQuatInverse);
+
+  return worldOffset;
+}
+
+// Update all child positions/rotations when parent moves or rotates
+export function updateChildPositions(parentModel) {
+  const children = getChildModels(parentModel);
+  if (children.length === 0) return;
+
+  parentModel.updateMatrixWorld(true);
+  const parentBox = new THREE.Box3().setFromObject(parentModel);
+  const parentCenter = new THREE.Vector3();
+  parentBox.getCenter(parentCenter);
+  const parentTopY = parentBox.max.y;
+  const parentTopCenter = new THREE.Vector3(parentCenter.x, parentTopY, parentCenter.z);
+
+  for (const child of children) {
+    // Convert local offset back to world space using parent's current rotation
+    const worldOffset = child.userData.localOffset.clone();
+    worldOffset.applyQuaternion(parentModel.quaternion);
+
+    // Position child on parent top surface with offset
+    const childBBOffset = calculateBoundingBoxOffset(child, new THREE.Vector3(0, 1, 0));
+    child.position.copy(parentTopCenter).add(worldOffset);
+    child.position.y = parentTopY + childBBOffset;
+
+    // Apply parent rotation + child's own local Y rotation
+    const childLocalY = child.userData.localRotationY || 0;
+    child.rotation.set(0, 0, 0);
+    child.quaternion.copy(parentModel.quaternion);
+    const localYQuat = new THREE.Quaternion();
+    localYQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), childLocalY);
+    child.quaternion.multiply(localYQuat);
+
+    updateFurnitureHitBox(child);
+  }
+}
+
+// Get child model objects for a parent
+export function getChildModels(parentModel) {
+  const childIds = parentModel.userData.childIds || [];
+  return childIds.map(id =>
+    selectableObjects.find(obj => obj.uuid === id)
+  ).filter(Boolean);
+}
+
+// Get parent model for a child
+export function getParentModel(childModel) {
+  if (!childModel.userData.parentId) return null;
+  return selectableObjects.find(obj => obj.uuid === childModel.userData.parentId) || null;
+}
+
+// Check if a model has children
+export function hasChildren(model) {
+  return (model.userData.childIds || []).length > 0;
+}
+
+// Unlink a child from its parent (does not remove from scene)
+export function unlinkChild(childModel) {
+  if (!childModel.userData.isChild || !childModel.userData.parentId) return;
+
+  const parent = getParentModel(childModel);
+  if (parent && parent.userData.childIds) {
+    const idx = parent.userData.childIds.indexOf(childModel.uuid);
+    if (idx > -1) parent.userData.childIds.splice(idx, 1);
+  }
+
+  childModel.userData.isChild = false;
+  childModel.userData.parentId = null;
+  childModel.userData.localOffset = null;
+  childModel.userData.localRotationY = null;
 }

@@ -115,6 +115,9 @@ import {
   setOpenFurnitureModalCallback,
   getLastClickPosition,
   placeFurniture,
+  placeChildFurniture,
+  getPlaceOnTopTarget,
+  clearPlaceOnTopTarget,
   removeAllFurnitureByEntryId,
   deselectFurniture,
   setMeterStickDeletedCallback,
@@ -1046,11 +1049,13 @@ async function applyLayout(layout) {
     }
 
     const missingItems = [];
+    const loadedModels = [];
     for (const furniture of layoutData.placedFurniture) {
       try {
         const entry = await getFurnitureEntry(furniture.entryId);
         if (!entry || !entry.model) {
           missingItems.push({ name: entry?.name || furniture.entryId, reason: 'No 3D model' });
+          loadedModels.push(null);
           continue;
         }
 
@@ -1088,9 +1093,31 @@ async function applyLayout(layout) {
         }
 
         addFurnitureToScene(model, furniture.entryId);
+        loadedModels.push(model);
       } catch (err) {
         missingItems.push({ name: furniture.entryId, reason: err.message });
+        loadedModels.push(null);
       }
+    }
+
+    // Link parent-child relationships
+    for (let i = 0; i < layoutData.placedFurniture.length; i++) {
+      const data = layoutData.placedFurniture[i];
+      const model = loadedModels[i];
+      if (!model || data.parentIndex == null) continue;
+
+      const parent = loadedModels[data.parentIndex];
+      if (!parent) continue;
+
+      model.userData.isChild = true;
+      model.userData.parentId = parent.uuid;
+      model.userData.localOffset = data.localOffset
+        ? new THREE.Vector3(data.localOffset.x, data.localOffset.y, data.localOffset.z)
+        : new THREE.Vector3(0, 0, 0);
+      model.userData.localRotationY = data.localRotationY || 0;
+
+      if (!parent.userData.childIds) parent.userData.childIds = [];
+      parent.userData.childIds.push(model.uuid);
     }
 
     applyRoomScaleToAllFurniture();
@@ -1951,20 +1978,28 @@ async function placeEntryInScene(entryId) {
 
     if (available <= 0) {
       showError('This item is not available. All stock is in use.');
+      clearPlaceOnTopTarget();
       return;
     }
 
     // Show immediate feedback
     showActionNotification('Placing furniture...');
 
-    // NOW load the model (only when actually placing)
-    const position = getLastClickPosition();
-    await placeFurniture(entryId, position);
+    // Check if placing on top of another piece
+    const parentTarget = getPlaceOnTopTarget();
+    if (parentTarget) {
+      await placeChildFurniture(parentTarget, entryId);
+      clearPlaceOnTopTarget();
+    } else {
+      const position = getLastClickPosition();
+      await placeFurniture(entryId, position);
+    }
 
     // Close furniture modal after placing
     modalManager.closeModal();
   } catch (err) {
     showError('Failed to place furniture: ' + err.message);
+    clearPlaceOnTopTarget();
   }
 }
 
@@ -4064,10 +4099,15 @@ async function loadRoomById(roomId) {
 
   // Load placed furniture
   if (room.placedFurniture) {
+    const loadedModels = [];
+
     for (const furniture of room.placedFurniture) {
       try {
         const entry = await getFurnitureEntry(furniture.entryId);
-        if (!entry || !entry.model) continue;
+        if (!entry || !entry.model) {
+          loadedModels.push(null);
+          continue;
+        }
 
         const extractedData = await extractModelFromZip(entry.model);
         const model = await loadModelFromExtractedZip(extractedData);
@@ -4115,9 +4155,31 @@ async function loadRoomById(roomId) {
         }
 
         addFurnitureToScene(model, furniture.entryId);
+        loadedModels.push(model);
       } catch (err) {
         console.warn(`Failed to load furniture ${furniture.entryId}:`, err);
+        loadedModels.push(null);
       }
+    }
+
+    // Link parent-child relationships
+    for (let i = 0; i < room.placedFurniture.length; i++) {
+      const data = room.placedFurniture[i];
+      const model = loadedModels[i];
+      if (!model || data.parentIndex == null) continue;
+
+      const parent = loadedModels[data.parentIndex];
+      if (!parent) continue;
+
+      model.userData.isChild = true;
+      model.userData.parentId = parent.uuid;
+      model.userData.localOffset = data.localOffset
+        ? new THREE.Vector3(data.localOffset.x, data.localOffset.y, data.localOffset.z)
+        : new THREE.Vector3(0, 0, 0);
+      model.userData.localRotationY = data.localRotationY || 0;
+
+      if (!parent.userData.childIds) parent.userData.childIds = [];
+      parent.userData.childIds.push(model.uuid);
     }
   }
 
