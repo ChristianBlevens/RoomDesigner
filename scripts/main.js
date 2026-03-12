@@ -3319,12 +3319,14 @@ function setupSessionModal() {
   const shareBtn = document.getElementById('share-session-btn');
   const closeHouseBtn = document.getElementById('close-house-session-btn');
   const deleteHouseBtn = document.getElementById('delete-house-session-btn');
+  const segmentationBtn = document.getElementById('segmentation-session-btn');
 
   const signoutBtn = document.getElementById('signout-session-btn');
 
   sessionBtn.addEventListener('click', openSessionModal);
   editHouseBtn.addEventListener('click', handleEditHouseFromSession);
   shareBtn.addEventListener('click', handleShareHouse);
+  segmentationBtn.addEventListener('click', handleOpenSegmentation);
   closeHouseBtn.addEventListener('click', handleCloseHouseFromSession);
   deleteHouseBtn.addEventListener('click', handleDeleteHouseFromSession);
   if (signoutBtn) {
@@ -3370,6 +3372,15 @@ async function openSessionModal() {
 function handleEditHouseFromSession() {
   modalManager.closeModal(); // Close session modal
   openHouseEditor(currentHouseId);
+}
+
+function handleOpenSegmentation() {
+  modalManager.closeModal();
+  // Build segmentation URL relative to current base path
+  const path = window.location.pathname;
+  const parts = path.split('/').filter(Boolean);
+  const base = parts.length > 0 ? '/' + parts.join('/') + '/' : '/';
+  window.open(base + 'segmentation.html', '_blank');
 }
 
 async function handleShareHouse() {

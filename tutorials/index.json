@@ -21,5 +21,6 @@
   { "id": "houses", "title": "Houses", "file": "houses.md" },
   { "id": "calendar", "title": "Calendar", "file": "calendar.md", "parent": "houses" },
   { "id": "creating-house", "title": "Creating a House", "file": "creating-house.md", "parent": "houses" },
-  { "id": "sharing", "title": "Sharing", "file": "sharing.md", "parent": "houses" }
+  { "id": "sharing", "title": "Sharing", "file": "sharing.md", "parent": "houses" },
+  { "id": "segmentation", "title": "Furniture Segmenter", "file": "segmentation.md" }
 ]
