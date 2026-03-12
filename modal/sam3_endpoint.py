@@ -88,19 +88,26 @@ class SAM3Inference:
     @modal.fastapi_endpoint(method="POST")
     def segment(self, request: dict):
         """
-        Segment objects at specified points.
+        Segment objects using grouped point prompts.
 
         Request:
             {
                 "image": base64-encoded image,
-                "points": [{"x": int, "y": int}, ...] (optional)
+                "point_groups": [
+                    {"id": int, "name": str, "points": [{"x": int, "y": int}, ...]},
+                    ...
+                ] (optional)
             }
+
+        Each group's points are sent to SAM 3 together, producing one mask per group.
+        If no groups provided, tries text-prompt fallback.
 
         Response:
             {
                 "masks": [
                     {
                         "id": int,
+                        "name": str,
                         "mask": base64-encoded PNG (binary mask, white on black),
                         "bbox": [x, y, w, h],
                         "score": float
@@ -143,31 +150,35 @@ class SAM3Inference:
         # Set image in processor (creates inference_state)
         inference_state = self.processor.set_image(pil_image)
 
-        points = request.get("points", [])
+        point_groups = request.get("point_groups", [])
         masks_out = []
 
-        if points:
-            # Point-prompted: one mask per point via model.predict_inst
-            for i, pt in enumerate(points):
-                px = int(pt["x"] * scale)
-                py = int(pt["y"] * scale)
+        if point_groups:
+            # One mask per group: all points in a group are positive prompts
+            for i, group in enumerate(point_groups):
+                pts = group.get("points", [])
+                if not pts:
+                    continue
+
+                coords = np.array([[int(p["x"] * scale), int(p["y"] * scale)] for p in pts])
+                labels = np.ones(len(pts), dtype=np.int32)  # all foreground
 
                 masks, scores, logits = self.model.predict_inst(
                     inference_state,
-                    point_coords=np.array([[px, py]]),
-                    point_labels=np.array([1]),
+                    point_coords=coords,
+                    point_labels=labels,
                     multimask_output=True,
                 )
 
-                # Take highest-scoring mask
                 best_idx = int(np.argmax(scores))
                 mask = masks[best_idx]
                 score = float(scores[best_idx])
 
                 mask_result = self._encode_mask(mask, score, i, scale)
+                mask_result["name"] = group.get("name", f"item_{i + 1}")
                 masks_out.append(mask_result)
         else:
-            # No points: try text prompt for auto-like behavior
+            # No groups: try text prompt for auto-like behavior
             try:
                 output = self.processor.set_text_prompt(
                     prompt="distinct object",
@@ -182,6 +193,7 @@ class SAM3Inference:
                         mask_np = mask_np.squeeze()
                     score = float(result_scores[i]) if i < len(result_scores) else 1.0
                     mask_result = self._encode_mask(mask_np, score, i, scale)
+                    mask_result["name"] = f"item_{i + 1}"
                     masks_out.append(mask_result)
             except Exception as e:
                 return {"error": f"Text-prompt segmentation failed: {str(e)}"}

@@ -1,7 +1,7 @@
 /**
  * Furniture Segmentation Tool
  *
- * Upload -> tap items -> segment -> review -> export
+ * Upload -> create objects -> tap points per object -> segment -> review -> export
  * Stateless: nothing persisted. Closing the tab loses all state.
  */
 
@@ -11,12 +11,14 @@ import { exportSegments } from './segmentation-export.js';
 
 let sourceImage = null;       // HTMLImageElement
 let sourceImageBytes = null;  // ArrayBuffer of original file
-let points = [];              // [{x, y}] in original image coordinates
-let masks = [];               // response from server
+let objects = [];             // [{id, name, points: [{x, y}]}]
+let selectedObjectId = -1;    // which object receives new points
+let nextObjectId = 0;         // auto-increment ID
+let masks = [];               // response from server (1 mask per object)
 let rejected = new Set();     // mask IDs the user rejected
-let draggingIdx = -1;         // index of point being dragged, -1 = none
+let draggingPoint = null;     // {objectId, pointIdx} of point being dragged
 let didDrag = false;          // distinguish drag from click
-let highlightedMaskId = -1;   // mask ID hovered in results panel, -1 = none
+let highlightedMaskId = -1;   // mask ID hovered in results panel
 
 // --- DOM refs ---
 
@@ -27,24 +29,41 @@ const fileInput = document.getElementById('seg-file-input');
 const canvas = document.getElementById('seg-canvas');
 const ctx = canvas.getContext('2d');
 const processing = document.getElementById('seg-processing');
-const results = document.getElementById('seg-results');
+const objectPanel = document.getElementById('seg-object-panel');
+const objectList = document.getElementById('seg-object-list');
+const objectCount = document.getElementById('seg-object-count');
+const resultPanel = document.getElementById('seg-results');
 const resultList = document.getElementById('seg-result-list');
 const resultCount = document.getElementById('seg-result-count');
 const pointCount = document.getElementById('seg-point-count');
 
 const btnUploadNew = document.getElementById('seg-btn-upload-new');
 const btnUndoPoint = document.getElementById('seg-btn-undo-point');
-const btnClearPoints = document.getElementById('seg-btn-clear-points');
 const btnSegment = document.getElementById('seg-btn-segment');
 const btnExport = document.getElementById('seg-btn-export');
 const btnReset = document.getElementById('seg-btn-reset');
+const btnAddObject = document.getElementById('seg-btn-add-object');
 
-// --- API base path (same detection pattern as RoomDesigner) ---
+// --- Constants ---
+
+const MASK_COLORS = [
+  [26, 159, 255],   // blue
+  [46, 204, 113],   // green
+  [231, 76, 60],    // red
+  [241, 196, 15],   // yellow
+  [155, 89, 182],   // purple
+  [230, 126, 34],   // orange
+  [26, 188, 156],   // teal
+  [236, 100, 165],  // pink
+  [52, 152, 219],   // light blue
+  [211, 84, 0],     // dark orange
+];
+
+// --- API base path ---
 
 function getApiBase() {
   const path = window.location.pathname;
   const parts = path.split('/').filter(Boolean);
-  // If served under /room/segmentation.html, API is at /room/api/segmentation
   if (parts.length > 1) {
     return '/' + parts.slice(0, -1).join('/') + '/api/segmentation';
   }
@@ -64,9 +83,7 @@ function handleFile(file) {
     const img = new Image();
     img.onload = () => {
       sourceImage = img;
-      points = [];
-      masks = [];
-      rejected.clear();
+      resetState();
       showWorkspace();
       drawCanvas();
     };
@@ -94,12 +111,50 @@ dropZone.addEventListener('drop', (e) => {
   if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
 });
 
+// --- State management ---
+
+function resetState() {
+  objects = [];
+  selectedObjectId = -1;
+  nextObjectId = 0;
+  masks = [];
+  rejected.clear();
+  draggingPoint = null;
+  didDrag = false;
+  highlightedMaskId = -1;
+}
+
+function hasResults() {
+  return masks.length > 0;
+}
+
+function getSelectedObject() {
+  return objects.find(o => o.id === selectedObjectId) || null;
+}
+
+function getObjectColor(obj) {
+  const idx = objects.indexOf(obj);
+  return MASK_COLORS[idx % MASK_COLORS.length];
+}
+
+function getObjectColorById(id) {
+  const obj = objects.find(o => o.id === id);
+  if (!obj) return MASK_COLORS[0];
+  return getObjectColor(obj);
+}
+
+function totalPoints() {
+  return objects.reduce((sum, o) => sum + o.points.length, 0);
+}
+
 // --- State transitions ---
 
 function showWorkspace() {
   uploadSection.classList.add('hidden');
   workspace.classList.remove('hidden');
-  results.classList.add('hidden');
+  resultPanel.classList.add('hidden');
+  objectPanel.classList.remove('hidden');
+  renderObjectList();
 }
 
 function showUpload() {
@@ -107,26 +162,91 @@ function showUpload() {
   uploadSection.classList.remove('hidden');
   sourceImage = null;
   sourceImageBytes = null;
-  points = [];
-  masks = [];
-  rejected.clear();
+  resetState();
   fileInput.value = '';
 }
 
-// --- Canvas rendering ---
+// --- Object management ---
 
-const MASK_COLORS = [
-  [26, 159, 255],   // blue
-  [46, 204, 113],   // green
-  [231, 76, 60],    // red
-  [241, 196, 15],   // yellow
-  [155, 89, 182],   // purple
-  [230, 126, 34],   // orange
-  [26, 188, 156],   // teal
-  [236, 100, 165],  // pink
-  [52, 152, 219],   // light blue
-  [211, 84, 0],     // dark orange
-];
+function addObject() {
+  const id = nextObjectId++;
+  const name = `Object ${objects.length + 1}`;
+  objects.push({ id, name, points: [] });
+  selectedObjectId = id;
+  renderObjectList();
+  drawCanvas();
+}
+
+function selectObject(id) {
+  if (hasResults()) return;
+  selectedObjectId = id;
+  renderObjectList();
+  drawCanvas();
+}
+
+function removeObject(id) {
+  if (hasResults()) return;
+  objects = objects.filter(o => o.id !== id);
+  if (selectedObjectId === id) {
+    selectedObjectId = objects.length > 0 ? objects[objects.length - 1].id : -1;
+  }
+  renderObjectList();
+  drawCanvas();
+}
+
+// --- Object list panel ---
+
+function renderObjectList() {
+  objectCount.textContent = String(objects.length);
+  objectList.innerHTML = '';
+
+  for (const obj of objects) {
+    const color = getObjectColor(obj);
+    const isSelected = obj.id === selectedObjectId;
+    const card = document.createElement('div');
+    card.className = `seg-obj-card${isSelected ? ' selected' : ''}`;
+    card.style.borderLeftWidth = '3px';
+    card.style.borderLeftColor = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+
+    card.innerHTML = `
+      <div class="seg-obj-info">
+        <input class="seg-obj-name" type="text" value="${obj.name}" spellcheck="false">
+        <div class="seg-obj-points">${obj.points.length} point${obj.points.length !== 1 ? 's' : ''}</div>
+      </div>
+      <div class="seg-obj-actions">
+        <button class="seg-card-btn remove" title="Remove object">\u2715</button>
+      </div>
+    `;
+
+    // Select on click (but not on input or button)
+    card.addEventListener('click', (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
+      selectObject(obj.id);
+    });
+
+    // Name editing
+    const nameInput = card.querySelector('.seg-obj-name');
+    nameInput.addEventListener('input', () => {
+      obj.name = nameInput.value;
+    });
+    nameInput.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectObject(obj.id);
+    });
+
+    // Remove button
+    card.querySelector('.seg-card-btn.remove').addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeObject(obj.id);
+    });
+
+    objectList.appendChild(card);
+  }
+
+  updateToolbarState();
+}
+
+// --- Canvas rendering ---
 
 function drawCanvas() {
   if (!sourceImage) return;
@@ -137,8 +257,8 @@ function drawCanvas() {
   // Draw source image
   ctx.drawImage(sourceImage, 0, 0);
 
-  // Draw mask overlays — each mask gets its own color, highlighted mask is brighter
-  if (masks.length > 0) {
+  // Draw mask overlays if we have results
+  if (hasResults()) {
     for (const mask of masks) {
       if (rejected.has(mask.id)) continue;
 
@@ -167,19 +287,15 @@ function drawCanvas() {
         }
       }
       offCtx.putImageData(maskData, 0, 0);
-
       ctx.drawImage(off, 0, 0);
 
-      // Draw outline border for highlighted mask
       if (isHighlighted) {
-        // Find edge pixels (mask pixel adjacent to non-mask pixel)
         const edgeData = offCtx.createImageData(canvas.width, canvas.height);
         const w = canvas.width;
         for (let py = 1; py < canvas.height - 1; py++) {
           for (let px = 1; px < w - 1; px++) {
             const idx = (py * w + px) * 4;
             if (maskData.data[idx] > 128) {
-              // Check 4 neighbors
               const up = ((py - 1) * w + px) * 4;
               const dn = ((py + 1) * w + px) * 4;
               const lt = (py * w + (px - 1)) * 4;
@@ -200,36 +316,33 @@ function drawCanvas() {
     }
   }
 
-  // Draw point markers on top
-  for (let i = 0; i < points.length; i++) {
-    const pt = points[i];
+  // Draw point markers (only before results)
+  if (!hasResults()) {
     const r = Math.max(8, Math.min(canvas.width, canvas.height) * 0.008);
 
-    ctx.beginPath();
-    ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 3;
-    ctx.stroke();
+    for (const obj of objects) {
+      const color = getObjectColor(obj);
+      const isSelected = obj.id === selectedObjectId;
+      const rgb = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
 
-    ctx.beginPath();
-    ctx.arc(pt.x, pt.y, r * 0.5, 0, Math.PI * 2);
-    ctx.fillStyle = '#1a9fff';
-    ctx.fill();
+      for (const pt of obj.points) {
+        // Outer ring
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
+        ctx.strokeStyle = isSelected ? '#ffffff' : 'rgba(255,255,255,0.5)';
+        ctx.lineWidth = isSelected ? 3 : 2;
+        ctx.stroke();
 
-    ctx.font = `bold ${Math.round(r * 1.4)}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(String(i + 1), pt.x, pt.y - r * 2);
+        // Inner fill with object color
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, r * 0.6, 0, Math.PI * 2);
+        ctx.fillStyle = rgb;
+        ctx.fill();
+      }
+    }
   }
 
   updateToolbarState();
-}
-
-// --- State helpers ---
-
-function hasResults() {
-  return masks.length > 0;
 }
 
 // --- Point placement and dragging ---
@@ -246,12 +359,18 @@ function canvasCoords(e) {
 
 function hitTestPoint(cx, cy) {
   const hitRadius = Math.max(16, Math.min(canvas.width, canvas.height) * 0.015);
-  for (let i = points.length - 1; i >= 0; i--) {
-    const dx = points[i].x - cx;
-    const dy = points[i].y - cy;
-    if (dx * dx + dy * dy <= hitRadius * hitRadius) return i;
+  // Check all objects' points, return {objectId, pointIdx} or null
+  for (let oi = objects.length - 1; oi >= 0; oi--) {
+    const obj = objects[oi];
+    for (let pi = obj.points.length - 1; pi >= 0; pi--) {
+      const dx = obj.points[pi].x - cx;
+      const dy = obj.points[pi].y - cy;
+      if (dx * dx + dy * dy <= hitRadius * hitRadius) {
+        return { objectId: obj.id, pointIdx: pi };
+      }
+    }
   }
-  return -1;
+  return null;
 }
 
 canvas.addEventListener('pointerdown', (e) => {
@@ -260,8 +379,8 @@ canvas.addEventListener('pointerdown', (e) => {
   const { x, y } = canvasCoords(e);
   const hit = hitTestPoint(x, y);
 
-  if (hit >= 0) {
-    draggingIdx = hit;
+  if (hit) {
+    draggingPoint = hit;
     didDrag = false;
     canvas.setPointerCapture(e.pointerId);
     canvas.style.cursor = 'grabbing';
@@ -279,34 +398,49 @@ canvas.addEventListener('pointermove', (e) => {
 
   const { x, y } = canvasCoords(e);
 
-  if (draggingIdx >= 0) {
+  if (draggingPoint) {
     didDrag = true;
-    points[draggingIdx].x = Math.max(0, Math.min(canvas.width, x));
-    points[draggingIdx].y = Math.max(0, Math.min(canvas.height, y));
-    drawCanvas();
+    const obj = objects.find(o => o.id === draggingPoint.objectId);
+    if (obj) {
+      obj.points[draggingPoint.pointIdx].x = Math.max(0, Math.min(canvas.width, x));
+      obj.points[draggingPoint.pointIdx].y = Math.max(0, Math.min(canvas.height, y));
+      drawCanvas();
+    }
     e.preventDefault();
   } else {
     const hit = hitTestPoint(x, y);
-    canvas.style.cursor = hit >= 0 ? 'grab' : 'crosshair';
+    if (hit) {
+      canvas.style.cursor = 'grab';
+    } else if (selectedObjectId >= 0) {
+      canvas.style.cursor = 'crosshair';
+    } else {
+      canvas.style.cursor = 'default';
+    }
   }
 });
 
 canvas.addEventListener('pointerup', (e) => {
   if (hasResults()) return;
 
-  if (draggingIdx >= 0) {
+  if (draggingPoint) {
     canvas.releasePointerCapture(e.pointerId);
-    draggingIdx = -1;
+    draggingPoint = null;
     canvas.style.cursor = 'crosshair';
     e.preventDefault();
+    // Update point count in object list
+    renderObjectList();
     return;
   }
 
-  if (!didDrag) {
+  if (!didDrag && selectedObjectId >= 0) {
     const { x, y } = canvasCoords(e);
-    if (hitTestPoint(x, y) < 0) {
-      points.push({ x, y });
-      drawCanvas();
+    if (!hitTestPoint(x, y)) {
+      const obj = getSelectedObject();
+      if (obj) {
+        obj.points.push({ x, y });
+        renderObjectList();
+        drawCanvas();
+      }
     }
   }
   didDrag = false;
@@ -315,48 +449,62 @@ canvas.addEventListener('pointerup', (e) => {
 // --- Toolbar ---
 
 function updateToolbarState() {
+  const tp = totalPoints();
   if (hasResults()) {
     pointCount.textContent = `${masks.length} segment${masks.length !== 1 ? 's' : ''} found`;
     btnUndoPoint.classList.add('hidden');
-    btnClearPoints.classList.add('hidden');
     btnSegment.classList.add('hidden');
     btnReset.classList.remove('hidden');
+    objectPanel.classList.add('hidden');
+    resultPanel.classList.remove('hidden');
   } else {
-    pointCount.textContent = `${points.length} point${points.length !== 1 ? 's' : ''} placed`;
+    if (selectedObjectId >= 0) {
+      const obj = getSelectedObject();
+      const objPts = obj ? obj.points.length : 0;
+      pointCount.textContent = `${tp} point${tp !== 1 ? 's' : ''} (${objPts} on ${obj ? obj.name : '?'})`;
+    } else {
+      pointCount.textContent = objects.length > 0
+        ? `${tp} point${tp !== 1 ? 's' : ''} — select an object to place`
+        : 'Add an object to start';
+    }
     btnUndoPoint.classList.remove('hidden');
-    btnClearPoints.classList.remove('hidden');
     btnSegment.classList.remove('hidden');
     btnReset.classList.add('hidden');
-    btnUndoPoint.disabled = points.length === 0;
-    btnClearPoints.disabled = points.length === 0;
+    objectPanel.classList.remove('hidden');
+    resultPanel.classList.add('hidden');
+    btnUndoPoint.disabled = !getSelectedObject() || getSelectedObject().points.length === 0;
+    btnSegment.disabled = tp === 0;
   }
 }
 
 btnUploadNew.addEventListener('click', showUpload);
 
 btnUndoPoint.addEventListener('click', () => {
-  points.pop();
-  drawCanvas();
-});
-
-btnClearPoints.addEventListener('click', () => {
-  points = [];
-  drawCanvas();
+  const obj = getSelectedObject();
+  if (obj && obj.points.length > 0) {
+    obj.points.pop();
+    renderObjectList();
+    drawCanvas();
+  }
 });
 
 btnReset.addEventListener('click', () => {
-  points = [];
-  masks = [];
-  rejected.clear();
-  highlightedMaskId = -1;
-  results.classList.add('hidden');
+  resetState();
+  resultPanel.classList.add('hidden');
+  objectPanel.classList.remove('hidden');
+  renderObjectList();
   drawCanvas();
+});
+
+btnAddObject.addEventListener('click', () => {
+  if (hasResults()) return;
+  addObject();
 });
 
 // --- Segmentation API call ---
 
 btnSegment.addEventListener('click', async () => {
-  if (!sourceImageBytes) return;
+  if (!sourceImageBytes || totalPoints() === 0) return;
 
   processing.classList.remove('hidden');
   btnSegment.disabled = true;
@@ -364,10 +512,19 @@ btnSegment.addEventListener('click', async () => {
   try {
     const imageB64 = arrayBufferToBase64(sourceImageBytes);
 
-    const payload = { image: imageB64 };
-    if (points.length > 0) {
-      payload.points = points;
-    }
+    // Send grouped points: each object's points as a group
+    const pointGroups = objects
+      .filter(o => o.points.length > 0)
+      .map(o => ({
+        id: o.id,
+        name: o.name,
+        points: o.points,
+      }));
+
+    const payload = {
+      image: imageB64,
+      point_groups: pointGroups,
+    };
 
     const response = await fetch(`${API_BASE}/segment`, {
       method: 'POST',
@@ -384,7 +541,7 @@ btnSegment.addEventListener('click', async () => {
     masks = data.masks || [];
     rejected.clear();
 
-    // Decode mask PNGs into Image elements for canvas rendering
+    // Decode mask PNGs into Image elements
     await Promise.all(masks.map(async (mask) => {
       const img = new Image();
       await new Promise((resolve, reject) => {
@@ -409,11 +566,12 @@ btnSegment.addEventListener('click', async () => {
 
 function renderResults() {
   if (masks.length === 0) {
-    results.classList.add('hidden');
+    resultPanel.classList.add('hidden');
     return;
   }
 
-  results.classList.remove('hidden');
+  resultPanel.classList.remove('hidden');
+  objectPanel.classList.add('hidden');
   resultCount.textContent = String(masks.length);
   resultList.innerHTML = '';
 
@@ -427,10 +585,13 @@ function renderResults() {
     card.style.borderLeftWidth = '3px';
     card.style.borderLeftColor = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
 
+    // Use object name if available
+    const defaultName = mask.name || `item_${mask.id + 1}`;
+
     card.innerHTML = `
       <img class="seg-card-thumb" src="${thumbUrl}" alt="Segment ${mask.id + 1}">
       <div class="seg-card-info">
-        <input class="seg-card-name" type="text" value="item_${mask.id + 1}" spellcheck="false">
+        <input class="seg-card-name" type="text" value="${defaultName}" spellcheck="false">
         <div class="seg-card-score">Score: ${mask.score.toFixed(2)}</div>
       </div>
       <div class="seg-card-actions">
@@ -465,12 +626,14 @@ function renderResults() {
 
     resultList.appendChild(card);
   }
+
+  updateToolbarState();
 }
 
 function generateThumbnail(mask) {
   if (!mask._decodedImage || !sourceImage) return '';
 
-  const bbox = mask.bbox; // [x, y, w, h]
+  const bbox = mask.bbox;
   const pad = 10;
   const x = Math.max(0, bbox[0] - pad);
   const y = Math.max(0, bbox[1] - pad);

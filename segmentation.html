@@ -28,11 +28,10 @@
       <div class="seg-toolbar">
         <button id="seg-btn-upload-new" class="btn-secondary" title="Upload new photo">New Photo</button>
         <div class="seg-toolbar-info">
-          <span id="seg-point-count">0 points placed</span>
+          <span id="seg-point-count">Add an object to start</span>
         </div>
-        <button id="seg-btn-undo-point" class="btn-secondary" title="Remove last point" disabled>Undo Point</button>
-        <button id="seg-btn-clear-points" class="btn-secondary" title="Clear all points" disabled>Clear</button>
-        <button id="seg-btn-segment" class="btn-primary" title="Run segmentation">Segment</button>
+        <button id="seg-btn-undo-point" class="btn-secondary" title="Remove last point from selected object">Undo Point</button>
+        <button id="seg-btn-segment" class="btn-primary" title="Run segmentation" disabled>Segment</button>
         <button id="seg-btn-reset" class="btn-secondary hidden" title="Clear results and start over">Reset</button>
       </div>
 
@@ -45,13 +44,22 @@
           </div>
         </div>
 
-        <!-- Right: segment results list -->
-        <div id="seg-results" class="seg-results hidden">
-          <div class="seg-results-header">
+        <!-- Right: object list (during point placement) -->
+        <div id="seg-object-panel" class="seg-side-panel">
+          <div class="seg-panel-header">
+            <h3>Objects (<span id="seg-object-count">0</span>)</h3>
+            <button id="seg-btn-add-object" class="btn-primary seg-btn-add" title="Add new object">+</button>
+          </div>
+          <div id="seg-object-list" class="seg-panel-list"></div>
+        </div>
+
+        <!-- Right: segment results (after segmentation) -->
+        <div id="seg-results" class="seg-side-panel hidden">
+          <div class="seg-panel-header">
             <h3>Segments (<span id="seg-result-count">0</span>)</h3>
             <button id="seg-btn-export" class="btn-primary">Export All</button>
           </div>
-          <div id="seg-result-list" class="seg-result-list"></div>
+          <div id="seg-result-list" class="seg-panel-list"></div>
         </div>
       </div>
     </div>

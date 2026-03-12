@@ -18,17 +18,17 @@ class SAM3Error(Exception):
     pass
 
 
-async def segment_image(image_bytes: bytes, points: list[dict] | None = None) -> dict:
+async def segment_image(image_bytes: bytes, point_groups: list[dict] | None = None) -> dict:
     """
-    Send image and optional points to SAM 3 Modal endpoint.
+    Send image and optional point groups to SAM 3 Modal endpoint.
 
     Args:
         image_bytes: Raw image bytes (JPEG/PNG)
-        points: Optional list of {"x": int, "y": int} in original image coordinates
+        point_groups: Optional list of {"id": int, "name": str, "points": [{"x": int, "y": int}]}
 
     Returns:
         {
-            "masks": [{"id": int, "mask": base64 PNG, "bbox": [x,y,w,h], "score": float}, ...],
+            "masks": [{"id": int, "name": str, "mask": base64 PNG, "bbox": [x,y,w,h], "score": float}],
             "imageSize": {"width": int, "height": int}
         }
 
@@ -41,10 +41,11 @@ async def segment_image(image_bytes: bytes, points: list[dict] | None = None) ->
     image_b64 = base64.b64encode(image_bytes).decode("ascii")
 
     payload = {"image": image_b64}
-    if points:
-        payload["points"] = points
+    if point_groups:
+        payload["point_groups"] = point_groups
 
-    logger.info(f"Sending image to SAM 3 ({len(image_bytes) / 1024:.1f} KB, {len(points or [])} points)")
+    total_points = sum(len(g.get("points", [])) for g in (point_groups or []))
+    logger.info(f"Sending image to SAM 3 ({len(image_bytes) / 1024:.1f} KB, {len(point_groups or [])} groups, {total_points} points)")
 
     async with httpx.AsyncClient(timeout=SAM3_TIMEOUT) as client:
         try:

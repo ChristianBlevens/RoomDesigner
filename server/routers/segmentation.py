@@ -13,9 +13,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+class PointGroup(BaseModel):
+    id: int
+    name: str
+    points: list[dict]  # [{"x": int, "y": int}, ...]
+
+
 class SegmentRequest(BaseModel):
     image: str  # base64-encoded
-    points: Optional[list[dict]] = None  # [{"x": int, "y": int}, ...]
+    point_groups: Optional[list[PointGroup]] = None
 
 
 @router.post("/segment")
@@ -23,8 +29,8 @@ async def segment_image(request: SegmentRequest):
     """
     Segment objects in an image using SAM 3.
 
-    Accepts base64 image and optional point prompts.
-    Returns masks as base64 PNGs with bounding boxes and scores.
+    Accepts base64 image and grouped point prompts (one group per object).
+    Returns one mask per group.
     """
     image_b64 = request.image
     if "base64," in image_b64:
@@ -35,8 +41,17 @@ async def segment_image(request: SegmentRequest):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid base64 image data")
 
+    # Convert point groups to the format the SAM 3 client expects
+    groups = None
+    if request.point_groups:
+        groups = [
+            {"id": g.id, "name": g.name, "points": g.points}
+            for g in request.point_groups
+            if len(g.points) > 0
+        ]
+
     try:
-        result = await sam3_client.segment_image(image_bytes, request.points)
+        result = await sam3_client.segment_image(image_bytes, groups)
     except sam3_client.SAM3Error as e:
         raise HTTPException(status_code=502, detail=str(e))
 
