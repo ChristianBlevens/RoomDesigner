@@ -916,13 +916,22 @@ def scan_r2_orphans(is_admin: bool = Depends(verify_admin)):
     # Collect all expected R2 keys from DB
     expected = set()
 
-    # Room backgrounds
+    # Room backgrounds, original backgrounds, wall color variants, final images
     rows = houses_db.execute(
-        "SELECT background_image_path FROM rooms WHERE background_image_path IS NOT NULL"
+        "SELECT background_image_path, original_background_key, wall_colors, final_image_path FROM rooms"
     ).fetchall()
     for row in rows:
         if row[0]:
             expected.add(row[0])
+        if row[1]:
+            expected.add(row[1])
+        if row[2]:
+            wc = json.loads(row[2])
+            for variant in wc.get("variants", []):
+                if variant.get("imagePath"):
+                    expected.add(variant["imagePath"])
+        if row[3]:
+            expected.add(row[3])
 
     # Room meshes (implicit key for rooms with moge_data)
     rows = houses_db.execute(
