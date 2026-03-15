@@ -14,7 +14,7 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from gemini_client import edit_image
 from db.connection import get_houses_db
-from routers.auth import verify_token
+from routers.auth import verify_token, verify_token_with_demo, check_demo_restriction
 import r2
 
 logger = logging.getLogger(__name__)
@@ -80,8 +80,9 @@ class WallColorResponse(BaseModel):
 
 
 @router.post("/screenshot", response_model=EnhanceResponse)
-async def enhance_screenshot(request: EnhanceRequest, org_id: str = Depends(verify_token)):
+async def enhance_screenshot(request: EnhanceRequest, token_info: tuple = Depends(verify_token_with_demo)):
     """Enhance a room screenshot for export."""
+    org_id = check_demo_restriction(token_info)
     try:
         composite_b64 = request.composite_base64
         if "base64," in composite_b64:
@@ -106,8 +107,9 @@ async def enhance_screenshot(request: EnhanceRequest, org_id: str = Depends(veri
 
 
 @router.post("/wall-color", response_model=WallColorResponse)
-async def generate_wall_color(request: WallColorRequest, org_id: str = Depends(verify_token)):
+async def generate_wall_color(request: WallColorRequest, token_info: tuple = Depends(verify_token_with_demo)):
     """Generate a wall color variant of the room's background image."""
+    org_id = check_demo_restriction(token_info)
     db = get_houses_db()
 
     row = db.execute("""

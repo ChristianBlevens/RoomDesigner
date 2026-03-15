@@ -18,7 +18,7 @@ import httpx
 
 from model_processor import ModelProcessor
 from db.connection import get_furniture_db
-from routers.auth import verify_token
+from routers.auth import verify_token, verify_token_with_demo, check_demo_restriction
 
 logger = logging.getLogger(__name__)
 
@@ -560,11 +560,12 @@ def stop_polling():
 # ============ API Endpoints ============
 
 @router.post("/generate/{furniture_id}")
-async def generate_model(furniture_id: str, org_id: str = Depends(verify_token)):
+async def generate_model(furniture_id: str, token_info: tuple = Depends(verify_token_with_demo)):
     """
     Start image-to-3D generation task.
     Returns immediately with task_id. Background loop handles the rest.
     """
+    org_id = check_demo_restriction(token_info)
     conn = get_furniture_db()
     row = conn.execute(
         "SELECT image_path FROM furniture WHERE id = ? AND org_id = ?",

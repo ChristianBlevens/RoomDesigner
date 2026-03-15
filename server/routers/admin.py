@@ -6,15 +6,17 @@ Provides full CRUD access to all org data for support and diagnostics.
 
 import json
 import logging
+import uuid
 import sys
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Query
+import bcrypt
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.connection import get_auth_db, get_houses_db, get_furniture_db
-from routers.auth import verify_admin
+from routers.auth import verify_admin, create_impersonation_token
 from model_processor import ModelProcessor
 from moge_client import process_image_with_modal, MoGeError
 import r2
@@ -37,12 +39,12 @@ def list_orgs(
 
     if q:
         orgs = auth_db.execute(
-            "SELECT id, username, created_at FROM orgs WHERE username ILIKE ?",
+            "SELECT id, username, created_at, demo_mode FROM orgs WHERE username ILIKE ?",
             [f"%{q}%"]
         ).fetchall()
     else:
         orgs = auth_db.execute(
-            "SELECT id, username, created_at FROM orgs ORDER BY created_at DESC"
+            "SELECT id, username, created_at, demo_mode FROM orgs ORDER BY created_at DESC"
         ).fetchall()
 
     result = []
@@ -58,11 +60,101 @@ def list_orgs(
             "id": org_id,
             "username": org[1],
             "createdAt": str(org[2]) if org[2] else None,
+            "demoMode": bool(org[3]),
             "houseCount": house_count,
             "furnitureCount": furniture_count,
         })
 
     return result
+
+
+@router.post("/orgs")
+def create_org(body: dict, is_admin: bool = Depends(verify_admin)):
+    """Create a new org account (admin only)."""
+    username = body.get("username", "").strip()
+    password = body.get("password", "")
+    demo_mode = body.get("demo_mode", False)
+
+    if not username or len(username) < 2:
+        raise HTTPException(400, "Username must be at least 2 characters")
+    if len(password) < 6:
+        raise HTTPException(400, "Password must be at least 6 characters")
+
+    auth_db = get_auth_db()
+    existing = auth_db.execute(
+        "SELECT id FROM orgs WHERE username = ?", [username]
+    ).fetchone()
+    if existing:
+        raise HTTPException(409, "Username already taken")
+
+    org_id = str(uuid.uuid4())
+    password_hash = bcrypt.hashpw(
+        password.encode('utf-8'), bcrypt.gensalt()
+    ).decode('utf-8')
+
+    auth_db.execute(
+        "INSERT INTO orgs (id, username, password_hash, demo_mode) VALUES (?, ?, ?, ?)",
+        [org_id, username, password_hash, demo_mode]
+    )
+
+    return {"id": org_id, "username": username, "demo_mode": demo_mode}
+
+
+@router.post("/impersonate/{org_id}")
+def impersonate_org(org_id: str, is_admin: bool = Depends(verify_admin)):
+    """Generate an impersonation token for the given org."""
+    auth_db = get_auth_db()
+    row = auth_db.execute(
+        "SELECT id, username, demo_mode FROM orgs WHERE id = ?", [org_id]
+    ).fetchone()
+    if not row:
+        raise HTTPException(404, "Org not found")
+
+    token = create_impersonation_token(org_id)
+
+    return {
+        "token": token,
+        "org_id": row[0],
+        "username": row[1],
+        "demo_mode": bool(row[2]) if row[2] is not None else False
+    }
+
+
+@router.put("/orgs/{org_id}/demo-mode")
+def set_demo_mode(org_id: str, body: dict, is_admin: bool = Depends(verify_admin)):
+    """Toggle demo mode for an org."""
+    demo_mode = body.get("demo_mode", False)
+    auth_db = get_auth_db()
+    row = auth_db.execute("SELECT id FROM orgs WHERE id = ?", [org_id]).fetchone()
+    if not row:
+        raise HTTPException(404, "Org not found")
+    auth_db.execute(
+        "UPDATE orgs SET demo_mode = ? WHERE id = ?",
+        [demo_mode, org_id]
+    )
+    return {"status": "updated", "demo_mode": demo_mode}
+
+
+@router.put("/orgs/{org_id}/password")
+def reset_org_password(org_id: str, body: dict, is_admin: bool = Depends(verify_admin)):
+    """Reset an org's password (admin only)."""
+    password = body.get("password", "")
+    if len(password) < 6:
+        raise HTTPException(400, "Password must be at least 6 characters")
+
+    auth_db = get_auth_db()
+    row = auth_db.execute("SELECT id FROM orgs WHERE id = ?", [org_id]).fetchone()
+    if not row:
+        raise HTTPException(404, "Org not found")
+
+    password_hash = bcrypt.hashpw(
+        password.encode('utf-8'), bcrypt.gensalt()
+    ).decode('utf-8')
+    auth_db.execute(
+        "UPDATE orgs SET password_hash = ? WHERE id = ?",
+        [password_hash, org_id]
+    )
+    return {"status": "updated"}
 
 
 @router.delete("/orgs/{org_id}")

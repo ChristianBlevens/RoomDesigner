@@ -38,10 +38,26 @@
         </div>
       </form>
       <div class="auth-toggle">
-        <a href="#" id="auth-toggle-link">Don't have an account? Sign up</a>
+        <a href="landing.html">Learn about Room Furniture Planner</a>
       </div>
     </div>
+    <button class="auth-help-btn" id="auth-help-btn" type="button" title="Help">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+        <line x1="12" y1="17" x2="12.01" y2="17"/>
+      </svg>
+    </button>
   </div>
+
+  <!-- Impersonation Banner -->
+  <div class="impersonation-banner hidden" id="impersonation-banner">
+    <span>Viewing as: <strong id="impersonation-username"></strong></span>
+    <button class="impersonation-exit-btn" id="impersonation-exit-btn">Exit</button>
+  </div>
+
+  <!-- Demo Mode Badge -->
+  <div class="demo-badge hidden" id="demo-badge">DEMO</div>
 
   <!-- Background image container -->
   <div id="background-container"></div>

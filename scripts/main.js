@@ -132,7 +132,7 @@ import {
 } from './utils.js';
 import { adjustUrlForProxy } from './api.js';
 import { invalidateCache } from './cache.js';
-import { isAuthenticated, signIn, signUp, logout, getUsername, getToken, isAdmin } from './auth.js';
+import { isAuthenticated, signIn, logout, getUsername, getToken, isAdmin, isDemoMode, isImpersonating, getImpersonateUsername, exitImpersonation } from './auth.js';
 
 // Application state
 let currentHouseId = null;
@@ -265,6 +265,23 @@ async function init() {
     authModal.classList.add('modal-hidden');
   }
 
+  // Show impersonation banner if admin is impersonating
+  if (isImpersonating()) {
+    const banner = document.getElementById('impersonation-banner');
+    document.getElementById('impersonation-username').textContent = getImpersonateUsername();
+    banner.classList.remove('hidden');
+    document.getElementById('impersonation-exit-btn').addEventListener('click', exitImpersonation);
+  }
+
+  // Show demo badge and apply restrictions
+  if (isDemoMode()) {
+    const demoBadge = document.getElementById('demo-badge');
+    if (demoBadge) demoBadge.classList.remove('hidden');
+    if (!isImpersonating()) {
+      document.body.classList.add('demo-mode');
+    }
+  }
+
   // Initialize Three.js scene
   initScene();
 
@@ -378,20 +395,8 @@ async function init() {
 
 function setupAuthModal() {
   const form = document.getElementById('auth-form');
-  const toggleLink = document.getElementById('auth-toggle-link');
-  const title = document.getElementById('auth-title');
   const submitBtn = document.getElementById('auth-submit-btn');
   const errorEl = document.getElementById('auth-error');
-  let isSignUp = false;
-
-  toggleLink.addEventListener('click', (e) => {
-    e.preventDefault();
-    isSignUp = !isSignUp;
-    title.textContent = isSignUp ? 'Create Organization' : 'Sign In';
-    submitBtn.textContent = isSignUp ? 'Create Account' : 'Sign In';
-    toggleLink.textContent = isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up";
-    errorEl.classList.add('hidden');
-  });
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -403,31 +408,34 @@ function setupAuthModal() {
     submitBtn.textContent = 'Please wait...';
 
     try {
-      if (isSignUp) {
-        await signUp(username, password);
-      } else {
-        const result = await signIn(username, password);
-        if (result.admin) {
-          window.location.href = `${window.location.pathname.replace(/\/+$/, '').replace(/\/index\.html$/i, '')}/admin.html`;
-          return;
-        }
+      const result = await signIn(username, password);
+      if (result.admin) {
+        window.location.href = `${window.location.pathname.replace(/\/+$/, '').replace(/\/index\.html$/i, '')}/admin.html`;
+        return;
       }
       window.location.reload();
     } catch (err) {
       errorEl.textContent = err.message;
       errorEl.classList.remove('hidden');
       submitBtn.disabled = false;
-      submitBtn.textContent = isSignUp ? 'Create Account' : 'Sign In';
+      submitBtn.textContent = 'Sign In';
     }
   });
+
+  const helpBtn = document.getElementById('auth-help-btn');
+  if (helpBtn) {
+    helpBtn.addEventListener('click', () => {
+      showFirstVisitTutorial(true);
+    });
+  }
 }
 
 function showAuthModal() {
   document.getElementById('auth-modal').classList.remove('modal-hidden');
 }
 
-async function showFirstVisitTutorial() {
-  if (localStorage.getItem('tutorialShown')) return;
+async function showFirstVisitTutorial(force = false) {
+  if (!force && localStorage.getItem('tutorialShown')) return;
   localStorage.setItem('tutorialShown', '1');
 
   try {
@@ -439,6 +447,14 @@ async function showFirstVisitTutorial() {
     const modal = document.getElementById('tutorial-content-modal');
     const rendered = document.getElementById('tutorial-content-rendered');
     rendered.innerHTML = marked.parse(markdown);
+
+    // Append license link at bottom
+    const licenseLink = document.createElement('a');
+    licenseLink.href = `${basePath}/license.html`;
+    licenseLink.target = '_blank';
+    licenseLink.className = 'tutorial-license-link';
+    licenseLink.textContent = 'Software License';
+    rendered.appendChild(licenseLink);
 
     // Show above auth modal
     modal.style.zIndex = '10001';
@@ -2966,6 +2982,15 @@ async function openTutorialHub() {
     });
     list.appendChild(item);
   }
+
+  // Append license link at bottom of tutorial list
+  const licenseItem = document.createElement('a');
+  licenseItem.className = 'tutorial-hub-item tutorial-license-link';
+  licenseItem.textContent = 'Software License';
+  const basePath = window.location.pathname.replace(/\/+$/, '').replace(/\/index\.html$/i, '');
+  licenseItem.href = `${basePath}/license.html`;
+  licenseItem.target = '_blank';
+  list.appendChild(licenseItem);
 
   modalManager.openModal('tutorial-hub-modal');
 }

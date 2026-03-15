@@ -157,7 +157,7 @@ function updateExtraFilters() {
 // ============ Table Rendering ============
 
 const TAB_COLUMNS = {
-  orgs: ['Username', 'Houses', 'Furniture', 'Created'],
+  orgs: ['Username', 'Demo', 'Houses', 'Furniture', 'Created'],
   houses: ['Name', 'Org', 'Dates', 'Rooms', 'Created'],
   rooms: ['Name', 'House', 'Org', 'Status', 'Furniture'],
   furniture: ['Name', 'Org', 'Category', 'Qty', 'Image', 'Model'],
@@ -209,8 +209,13 @@ async function loadTabData() {
       const data = await apiGet(`/orgs?${params}`);
       renderTable(TAB_COLUMNS.orgs, data.map(o => ({
         id: o.id,
-        cells: [o.username, o.houseCount, o.furnitureCount, o.createdAt?.split('T')[0] || ''],
-        actions: actionBtn('View', 'btn-secondary', `window._adminDetail('org','${o.id}')`)
+        cells: [
+          o.username,
+          o.demoMode ? badge('DEMO', 'warning') : '',
+          o.houseCount, o.furnitureCount, o.createdAt?.split('T')[0] || ''
+        ],
+        actions: actionBtn('Enter', 'btn-primary', `window._adminEnterOrg('${o.id}','${o.username}')`)
+          + actionBtn('View', 'btn-secondary', `window._adminDetail('org','${o.id}')`)
           + actionBtn('Delete', 'btn-danger', `window._adminDeleteOrg('${o.id}','${o.username}')`)
       })));
     }
@@ -300,11 +305,28 @@ async function showOrgDetail(orgId) {
 
   const org = orgList.find(o => o.id === orgId);
   const name = org ? org.username : orgId;
+  const isDemo = org ? org.demoMode : false;
 
   showDetail(`Org: ${name}`, `
     <div class="detail-section">
       <h3>ID</h3>
       <p class="detail-mono">${orgId}</p>
+    </div>
+    <div class="detail-section">
+      <h3>Demo Mode</h3>
+      <label class="detail-toggle">
+        <input type="checkbox" id="detail-demo-toggle" ${isDemo ? 'checked' : ''}>
+        <span>${isDemo ? 'Demo mode enabled' : 'Demo mode disabled'}</span>
+      </label>
+    </div>
+    <div class="detail-section">
+      <h3>Reset Password</h3>
+      <form id="detail-reset-password" class="detail-form">
+        <div class="form-group">
+          <input type="password" name="password" placeholder="New password" minlength="6" required>
+        </div>
+        <button type="submit" class="btn-secondary">Reset Password</button>
+      </form>
     </div>
     <div class="detail-section">
       <h3>Houses (${houses.length})</h3>
@@ -320,6 +342,33 @@ async function showOrgDetail(orgId) {
       <p class="detail-sub">${furniture.filter(f => f.hasModel).length} with models, ${furniture.filter(f => f.hasImage).length} with images</p>
     </div>
   `);
+
+  // Demo mode toggle
+  document.getElementById('detail-demo-toggle').addEventListener('change', async (e) => {
+    try {
+      await apiPut(`/orgs/${orgId}/demo-mode`, { demo_mode: e.target.checked });
+      showToast(e.target.checked ? 'Demo mode enabled' : 'Demo mode disabled');
+      e.target.nextElementSibling.textContent = e.target.checked ? 'Demo mode enabled' : 'Demo mode disabled';
+      await loadOrgFilter();
+      loadTabData();
+    } catch (err) {
+      showToast(`Error: ${err.message}`, 5000);
+      e.target.checked = !e.target.checked;
+    }
+  });
+
+  // Password reset
+  document.getElementById('detail-reset-password').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const password = e.target.password.value;
+    try {
+      await apiPut(`/orgs/${orgId}/password`, { password });
+      showToast('Password updated');
+      e.target.reset();
+    } catch (err) {
+      showToast(`Error: ${err.message}`, 5000);
+    }
+  });
 }
 
 async function showHouseDetail(houseId) {
@@ -672,6 +721,37 @@ window._adminDetail = async (type, id) => {
   }
 };
 
+window._adminEnterOrg = async (id, username) => {
+  try {
+    const result = await apiPost(`/impersonate/${id}`);
+    if (!result) return;
+
+    // Save admin token for later restoration
+    localStorage.setItem('roomdesigner_admin_token', getToken());
+    localStorage.setItem('roomdesigner_admin_org', localStorage.getItem('roomdesigner_org'));
+    localStorage.setItem('roomdesigner_admin_username', localStorage.getItem('roomdesigner_username'));
+
+    // Set impersonation state
+    localStorage.setItem('roomdesigner_token', result.token);
+    localStorage.setItem('roomdesigner_org', result.org_id);
+    localStorage.setItem('roomdesigner_username', result.username);
+    localStorage.setItem('roomdesigner_impersonating', 'true');
+    localStorage.setItem('roomdesigner_impersonate_username', result.username);
+    localStorage.removeItem('roomdesigner_admin');
+
+    if (result.demo_mode) {
+      localStorage.setItem('roomdesigner_demo_mode', 'true');
+    } else {
+      localStorage.removeItem('roomdesigner_demo_mode');
+    }
+
+    // Navigate to main app
+    window.location.href = `${BASE_PATH}/`;
+  } catch (err) {
+    showToast(`Failed to enter org: ${err.message}`);
+  }
+};
+
 window._adminDeleteOrg = async (id, name) => {
   if (await confirm(`Delete org "${name}" and ALL their data? This cannot be undone.`)) {
     await apiDelete(`/orgs/${id}`);
@@ -761,10 +841,54 @@ function init() {
   // R2 orphan cleanup
   document.getElementById('admin-r2-cleanup').addEventListener('click', handleR2Cleanup);
 
+  // Create org button
+  document.getElementById('admin-create-org-btn').addEventListener('click', showCreateOrgForm);
+
   // Load initial data
   loadOrgFilter();
   updateExtraFilters();
   loadTabData();
+}
+
+function showCreateOrgForm() {
+  showDetail('Create Organization', `
+    <form id="detail-create-org" class="detail-form">
+      <div class="form-group">
+        <label>Username</label>
+        <input type="text" name="username" required minlength="2" placeholder="Organization username">
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" name="password" required minlength="6" placeholder="Password (min 6 characters)">
+      </div>
+      <div class="form-group">
+        <label class="detail-toggle">
+          <input type="checkbox" name="demo_mode">
+          <span>Demo mode</span>
+        </label>
+      </div>
+      <button type="submit" class="btn-primary">Create Organization</button>
+    </form>
+  `);
+
+  document.getElementById('detail-create-org').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = new FormData(e.target);
+    const body = {
+      username: form.get('username'),
+      password: form.get('password'),
+      demo_mode: form.has('demo_mode') && form.get('demo_mode') === 'on',
+    };
+    try {
+      const result = await apiPost('/orgs', body);
+      showToast(`Organization "${result.username}" created`);
+      hideDetail();
+      await loadOrgFilter();
+      loadTabData();
+    } catch (err) {
+      showToast(`Error: ${err.message}`, 5000);
+    }
+  });
 }
 
 async function handleR2Cleanup() {

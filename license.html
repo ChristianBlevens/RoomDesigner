@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Software License - Room Furniture Planner</title>
+  <link rel="stylesheet" href="styles/main.css">
+  <link rel="stylesheet" href="styles/modal.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js"></script>
+</head>
+<body style="overflow: auto;">
+  <div class="license-page">
+    <div class="license-content tutorial-content-body">
+      <div id="license-rendered"></div>
+    </div>
+  </div>
+  <script>
+    (async () => {
+      const basePath = window.location.pathname.replace(/\/license\.html$/i, '').replace(/\/+$/, '');
+      try {
+        const res = await fetch(`${basePath}/tutorials/license.md`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const md = await res.text();
+        document.getElementById('license-rendered').innerHTML = marked.parse(md);
+      } catch (err) {
+        document.getElementById('license-rendered').innerHTML = '<p>Failed to load license.</p>';
+      }
+    })();
+  </script>
+</body>
+</html>

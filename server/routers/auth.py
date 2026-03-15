@@ -79,6 +79,19 @@ def create_admin_token() -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
+def create_impersonation_token(org_id: str) -> str:
+    """Create a JWT for admin impersonating an org."""
+    payload = {
+        "org_id": org_id,
+        "admin": True,
+        "admin_impersonating": True,
+        "jti": uuid.uuid4().hex,
+        "exp": datetime.utcnow() + timedelta(days=1),
+        "iat": datetime.utcnow(),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
 def verify_admin(credentials: HTTPAuthorizationCredentials = Depends(security)) -> bool:
     """Verify JWT token has admin claim. Use as FastAPI dependency."""
     try:
@@ -116,54 +129,49 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) 
         raise HTTPException(401, "Invalid token")
 
 
-# ============ Schemas ============
+def verify_token_with_demo(credentials: HTTPAuthorizationCredentials = Depends(security)) -> tuple:
+    """Verify JWT and return (org_id, is_demo, is_admin_impersonating).
+    For use on endpoints that need demo mode checking."""
+    try:
+        payload = jwt.decode(
+            credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM]
+        )
+        org_id = payload.get("org_id")
+        if not org_id:
+            raise HTTPException(401, "Invalid token")
+        jti = payload.get("jti")
+        if jti and _is_token_revoked(jti):
+            raise HTTPException(401, "Token revoked")
 
-class SignUpRequest(BaseModel):
-    username: str
-    password: str
+        is_admin_impersonating = payload.get("admin_impersonating", False)
+
+        db = get_auth_db()
+        row = db.execute("SELECT demo_mode FROM orgs WHERE id = ?", [org_id]).fetchone()
+        is_demo = bool(row and row[0])
+
+        return (org_id, is_demo, is_admin_impersonating)
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(401, "Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(401, "Invalid token")
+
+
+def check_demo_restriction(token_info: tuple) -> str:
+    """Raises 403 if demo account (unless admin impersonating). Returns org_id."""
+    org_id, is_demo, is_admin_impersonating = token_info
+    if is_demo and not is_admin_impersonating:
+        raise HTTPException(403, "This feature is not available in demo mode")
+    return org_id
+
+
+# ============ Schemas ============
 
 class SignInRequest(BaseModel):
     username: str
     password: str
 
-class AuthResponse(BaseModel):
-    token: str
-    org_id: str
-    username: str
-
 
 # ============ Endpoints ============
-
-@router.post("/signup", response_model=AuthResponse)
-@limiter.limit("5/minute")
-def sign_up(request: Request, body: SignUpRequest):
-    db = get_auth_db()
-
-    username = body.username.strip()
-    if not username or len(username) < 2:
-        raise HTTPException(400, "Username must be at least 2 characters")
-    if len(body.password) < 6:
-        raise HTTPException(400, "Password must be at least 6 characters")
-
-    existing = db.execute(
-        "SELECT id FROM orgs WHERE username = ?", [username]
-    ).fetchone()
-    if existing:
-        raise HTTPException(409, "Username already taken")
-
-    org_id = str(uuid.uuid4())
-    password_hash = bcrypt.hashpw(
-        body.password.encode('utf-8'), bcrypt.gensalt()
-    ).decode('utf-8')
-
-    db.execute(
-        "INSERT INTO orgs (id, username, password_hash) VALUES (?, ?, ?)",
-        [org_id, username, password_hash]
-    )
-
-    token = create_token(org_id)
-    return AuthResponse(token=token, org_id=org_id, username=username)
-
 
 @router.post("/signin")
 @limiter.limit("10/minute")
@@ -182,14 +190,14 @@ def sign_in(request: Request, body: SignInRequest):
     db = get_auth_db()
 
     row = db.execute(
-        "SELECT id, username, password_hash FROM orgs WHERE username = ?",
+        "SELECT id, username, password_hash, demo_mode FROM orgs WHERE username = ?",
         [body.username.strip()]
     ).fetchone()
 
     if not row:
         raise HTTPException(401, "Invalid username or password")
 
-    org_id, username, password_hash = row
+    org_id, username, password_hash, demo_mode = row
 
     if not bcrypt.checkpw(
         body.password.encode('utf-8'), password_hash.encode('utf-8')
@@ -197,7 +205,12 @@ def sign_in(request: Request, body: SignInRequest):
         raise HTTPException(401, "Invalid username or password")
 
     token = create_token(org_id)
-    return AuthResponse(token=token, org_id=org_id, username=username)
+    return {
+        "token": token,
+        "org_id": org_id,
+        "username": username,
+        "demo_mode": bool(demo_mode)
+    }
 
 
 @router.post("/logout")

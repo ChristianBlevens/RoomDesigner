@@ -1167,6 +1167,127 @@ select option {
   text-decoration: underline;
 }
 
+/* ============ Auth Help Button ============ */
+
+.auth-help-btn {
+  position: fixed;
+  bottom: var(--spacing-lg);
+  right: var(--spacing-lg);
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s, color 0.2s;
+  z-index: 10000;
+}
+
+.auth-help-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--text-bright);
+}
+
+/* ============ Impersonation Banner ============ */
+
+.impersonation-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  background: var(--accent-primary);
+  color: var(--text-bright);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-md);
+  font-size: var(--font-sm);
+  z-index: 9999;
+}
+
+.impersonation-banner.hidden {
+  display: none;
+}
+
+.impersonation-exit-btn {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: var(--text-bright);
+  padding: 2px var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--font-xs);
+}
+
+.impersonation-exit-btn:hover {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+/* ============ Demo Mode ============ */
+
+.demo-badge {
+  position: fixed;
+  top: var(--spacing-sm);
+  left: var(--spacing-sm);
+  background: rgba(255, 165, 0, 0.2);
+  border: 1px solid rgba(255, 165, 0, 0.4);
+  color: #ffa500;
+  padding: 2px var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  z-index: 9998;
+  letter-spacing: 1px;
+}
+
+.demo-badge.hidden {
+  display: none;
+}
+
+.demo-mode #add-room-tab {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* ============ Tutorial License Link ============ */
+
+.tutorial-license-link {
+  display: block;
+  text-align: center;
+  margin-top: var(--spacing-lg);
+  padding-top: var(--spacing-md);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  text-decoration: none;
+}
+
+.tutorial-license-link:hover {
+  color: var(--accent-primary);
+  text-decoration: underline;
+}
+
+/* ============ License Page ============ */
+
+.license-page {
+  min-height: 100dvh;
+  display: flex;
+  justify-content: center;
+  padding: var(--spacing-lg);
+  background: var(--bg-primary);
+}
+
+.license-content {
+  max-width: 700px;
+  width: 100%;
+}
+
 /* ============ Layouts Panel ============ */
 
 .layouts-panel {

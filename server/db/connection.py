@@ -45,10 +45,17 @@ def init_databases():
             password_hash VARCHAR NOT NULL,
             wall_color_presets JSON,
             destaging_buffer_days INTEGER DEFAULT 0,
+            demo_mode BOOLEAN DEFAULT FALSE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
     _auth_conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_orgs_username ON orgs(username)")
+
+    # Migration: add demo_mode column to existing databases
+    try:
+        _auth_conn.execute("ALTER TABLE orgs ADD COLUMN demo_mode BOOLEAN DEFAULT FALSE")
+    except Exception:
+        pass
     _auth_conn.execute("""
         CREATE TABLE IF NOT EXISTS settings (
             key VARCHAR PRIMARY KEY,

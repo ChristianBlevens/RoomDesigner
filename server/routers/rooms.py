@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.connection import get_houses_db
 from models.room import RoomUpdate, RoomResponse
 from moge_client import process_image_with_modal, MoGeError
-from routers.auth import verify_token
+from routers.auth import verify_token, verify_token_with_demo, check_demo_restriction
 import r2
 
 logger = logging.getLogger(__name__)
@@ -135,13 +135,14 @@ async def create_room(
     image: UploadFile = File(...),
     clearFurniture: str = Form("false"),
     floorHint: str = Form(""),
-    org_id: str = Depends(verify_token)
+    token_info: tuple = Depends(verify_token_with_demo)
 ):
     """
     Create a new room with background image.
     Optionally clears furniture from image via Gemini before MoGe-2 processing.
     Synchronous: waits for processing (30-90 seconds depending on clearing).
     """
+    org_id = check_demo_restriction(token_info)
     verify_house_ownership(houseId, org_id)
     db = get_houses_db()
 

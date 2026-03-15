@@ -416,12 +416,19 @@ body {
   white-space: nowrap;
 }
 
-/* ============ R2 Cleanup Button ============ */
+/* ============ Bottom Action Buttons ============ */
 
-.admin-r2-cleanup-btn {
+.admin-bottom-actions {
   position: fixed;
   bottom: var(--spacing-lg);
   right: var(--spacing-lg);
+  display: flex;
+  gap: var(--spacing-sm);
+  z-index: 100;
+}
+
+.admin-r2-cleanup-btn,
+.admin-create-org-btn {
   background: var(--bg-surface-light);
   color: var(--text-secondary);
   border: 1px solid var(--border-default);
@@ -429,18 +436,37 @@ body {
   padding: var(--spacing-sm) var(--spacing-md);
   font-size: var(--font-sm);
   cursor: pointer;
-  z-index: 100;
   transition: background 0.2s, color 0.2s;
 }
 
-.admin-r2-cleanup-btn:hover {
+.admin-r2-cleanup-btn:hover,
+.admin-create-org-btn:hover {
   background: var(--accent-primary);
   color: var(--text-bright);
 }
 
-.admin-r2-cleanup-btn:disabled {
+.admin-r2-cleanup-btn:disabled,
+.admin-create-org-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ============ Detail Toggle ============ */
+
+.detail-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  cursor: pointer;
+  font-size: var(--font-sm);
+  color: var(--text-primary);
+}
+
+.detail-toggle input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent-primary);
+  cursor: pointer;
 }
 
 /* ============ Utilities ============ */
