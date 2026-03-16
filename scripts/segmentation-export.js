@@ -3,6 +3,8 @@
  * Optionally fix selected segments via Gemini AI before export.
  */
 
+import { getToken } from './auth.js';
+
 // --- API base path (mirrors segmentation.js) ---
 
 function getApiBase() {
@@ -135,7 +137,10 @@ export async function exportSegments(sourceImage, segments) {
         const base64 = await blobToBase64(pngBlob);
         const response = await fetch(`${API_BASE}/fix-segment`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${getToken()}`,
+          },
           body: JSON.stringify({ image_base64: base64 }),
         });
 

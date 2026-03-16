@@ -4,6 +4,7 @@ import sys
 import base64
 import json
 import logging
+import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -14,7 +15,8 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from gemini_client import edit_image
 from db.connection import get_houses_db
-from routers.auth import verify_token, verify_token_with_demo, check_demo_restriction
+from routers.auth import verify_token, verify_token_full
+from usage import check_allowance, log_usage, get_allowance_warning
 import r2
 
 logger = logging.getLogger(__name__)
@@ -65,6 +67,7 @@ class EnhanceRequest(BaseModel):
 
 class EnhanceResponse(BaseModel):
     image_base64: str
+    allowance_warning: Optional[dict] = None
 
 
 class WallColorRequest(BaseModel):
@@ -77,12 +80,19 @@ class WallColorResponse(BaseModel):
     variant_id: str
     image_base64: str
     image_url: str
+    allowance_warning: Optional[dict] = None
 
 
 @router.post("/screenshot", response_model=EnhanceResponse)
-async def enhance_screenshot(request: EnhanceRequest, token_info: tuple = Depends(verify_token_with_demo)):
+async def enhance_screenshot(request: EnhanceRequest, token: dict = Depends(verify_token_full)):
     """Enhance a room screenshot for export."""
-    org_id = check_demo_restriction(token_info)
+    org_id = token["org_id"]
+    is_admin = token["is_admin_impersonating"]
+
+    allowed, msg = check_allowance(org_id, "gemini", is_admin)
+    if not allowed:
+        raise HTTPException(429, msg)
+
     try:
         composite_b64 = request.composite_base64
         if "base64," in composite_b64:
@@ -95,21 +105,43 @@ async def enhance_screenshot(request: EnhanceRequest, token_info: tuple = Depend
     if request.custom_prompt:
         prompt += f" Additional instructions: {request.custom_prompt}"
 
+    start = time.time()
     try:
         result_bytes = await edit_image(image_bytes, prompt)
+        duration_ms = int((time.time() - start) * 1000)
+        log_usage(
+            org_id=org_id, service_category="gemini", action="enhance_screenshot",
+            success=True, duration_ms=duration_ms, admin_initiated=is_admin,
+            metadata={"room_id": request.room_id, "custom_prompt": request.custom_prompt, "full_prompt": prompt},
+        )
     except Exception as e:
+        duration_ms = int((time.time() - start) * 1000)
+        log_usage(
+            org_id=org_id, service_category="gemini", action="enhance_screenshot",
+            success=False, duration_ms=duration_ms, error_message=str(e), admin_initiated=is_admin,
+            metadata={"room_id": request.room_id, "custom_prompt": request.custom_prompt, "full_prompt": prompt},
+        )
         logger.error(f"Screenshot enhancement failed: {e}")
         raise HTTPException(502, f"Enhancement failed: {str(e)}")
 
+    warning = get_allowance_warning(org_id, "gemini") if not is_admin else None
+
     return EnhanceResponse(
-        image_base64=base64.b64encode(result_bytes).decode("ascii")
+        image_base64=base64.b64encode(result_bytes).decode("ascii"),
+        allowance_warning=warning,
     )
 
 
 @router.post("/wall-color", response_model=WallColorResponse)
-async def generate_wall_color(request: WallColorRequest, token_info: tuple = Depends(verify_token_with_demo)):
+async def generate_wall_color(request: WallColorRequest, token: dict = Depends(verify_token_full)):
     """Generate a wall color variant of the room's background image."""
-    org_id = check_demo_restriction(token_info)
+    org_id = token["org_id"]
+    is_admin = token["is_admin_impersonating"]
+
+    allowed, msg = check_allowance(org_id, "gemini", is_admin)
+    if not allowed:
+        raise HTTPException(429, msg)
+
     db = get_houses_db()
 
     row = db.execute("""
@@ -137,9 +169,22 @@ async def generate_wall_color(request: WallColorRequest, token_info: tuple = Dep
     else:
         prompt = WALL_COLOR_PROMPT_NAME_ONLY.format(color_name=request.color_name)
 
+    start = time.time()
     try:
         result_bytes = await edit_image(bg_bytes, prompt, mime_type="image/jpeg")
+        duration_ms = int((time.time() - start) * 1000)
+        log_usage(
+            org_id=org_id, service_category="gemini", action="wall_color",
+            success=True, duration_ms=duration_ms, admin_initiated=is_admin,
+            metadata={"room_id": request.room_id, "color_name": request.color_name, "color_hex": request.color_hex},
+        )
     except Exception as e:
+        duration_ms = int((time.time() - start) * 1000)
+        log_usage(
+            org_id=org_id, service_category="gemini", action="wall_color",
+            success=False, duration_ms=duration_ms, error_message=str(e), admin_initiated=is_admin,
+            metadata={"room_id": request.room_id, "color_name": request.color_name, "color_hex": request.color_hex},
+        )
         logger.error(f"Wall color generation failed: {e}")
         raise HTTPException(502, f"Wall color generation failed: {str(e)}")
 
@@ -167,10 +212,13 @@ async def generate_wall_color(request: WallColorRequest, token_info: tuple = Dep
         [json.dumps(wall_colors), request.room_id]
     )
 
+    warning = get_allowance_warning(org_id, "gemini") if not is_admin else None
+
     return WallColorResponse(
         variant_id=variant_id,
         image_base64=base64.b64encode(result_bytes).decode("ascii"),
-        image_url=r2.get_public_url(variant_key)
+        image_url=r2.get_public_url(variant_key),
+        allowance_warning=warning,
     )
 
 

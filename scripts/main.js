@@ -85,7 +85,9 @@ import {
   getLayouts,
   createLayout,
   getLayout,
-  deleteLayout
+  deleteLayout,
+  submitFeedback,
+  getMyFeedback
 } from './api.js';
 import {
   captureRoomScreenshot,
@@ -313,6 +315,9 @@ async function init() {
   setupWallColorControls();
   setupTutorials();
   setupControlsBarLayout();
+  setupUtilityModal();
+  setupFeedbackModal();
+  setupWarningModal();
 
   // Close control bar panels when clicking outside (capture phase to intercept before canvas)
   document.addEventListener('pointerdown', (event) => {
@@ -3267,6 +3272,7 @@ async function applyWallColor(colorName, colorHex) {
     const blob = base64ToBlob(result.image_base64, 'image/png');
     await setBackgroundImagePlane(blob);
 
+    checkAllowanceWarning(result);
     showActionNotification(`Wall color: ${displayName}`);
   } catch (err) {
     showActionNotification('Failed to generate wall color');
@@ -3400,6 +3406,8 @@ function setupSessionModal() {
   editHouseBtn.addEventListener('click', handleEditHouseFromSession);
   shareBtn.addEventListener('click', handleShareHouse);
   segmentationBtn.addEventListener('click', handleOpenSegmentation);
+  const feedbackSessionBtn = document.getElementById('feedback-session-btn');
+  if (feedbackSessionBtn) feedbackSessionBtn.addEventListener('click', openFeedbackModal);
   closeHouseBtn.addEventListener('click', handleCloseHouseFromSession);
   deleteHouseBtn.addEventListener('click', handleDeleteHouseFromSession);
   if (signoutBtn) {
@@ -3454,6 +3462,101 @@ function handleOpenSegmentation() {
   const parts = path.split('/').filter(Boolean);
   const base = parts.length > 0 ? '/' + parts.join('/') + '/' : '/';
   window.open(base + 'segmentation.html', '_blank');
+}
+
+// ============ Utility Modal ============
+
+function setupUtilityModal() {
+  document.getElementById('calendar-util-btn').addEventListener('click', () => {
+    modalManager.openModal('util-modal');
+  });
+
+  const basePath = window.location.pathname.replace(/\/+$/, '').replace(/\/index\.html$/i, '');
+  document.getElementById('util-segmentation-btn').addEventListener('click', () => {
+    window.open(`${basePath}/segmentation.html`, '_blank');
+  });
+  document.getElementById('util-feedback-btn').addEventListener('click', openFeedbackModal);
+}
+
+// ============ Feedback ============
+
+function setupFeedbackModal() {
+  document.getElementById('feedback-form').addEventListener('submit', handleFeedbackSubmit);
+  document.getElementById('feedback-cancel-btn').addEventListener('click', () => {
+    modalManager.closeModal();
+  });
+}
+
+async function openFeedbackModal() {
+  document.getElementById('feedback-message').value = '';
+  document.getElementById('feedback-submit-btn').disabled = false;
+  document.getElementById('feedback-submit-btn').textContent = 'Send';
+  modalManager.openModal('feedback-modal');
+
+  // Load feedback history
+  try {
+    const history = await getMyFeedback();
+    const container = document.getElementById('feedback-history');
+    if (history.length === 0) {
+      container.innerHTML = '';
+      return;
+    }
+    container.innerHTML = '<h4 style="margin-bottom:8px;">Previous Feedback</h4>'
+      + history.map(f => `
+        <div class="feedback-item" style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.1);">
+          <div style="font-size:0.85em;color:var(--text-secondary);">${new Date(f.createdAt).toLocaleDateString()}</div>
+          <div style="margin:4px 0;">${f.message}</div>
+          <span class="admin-badge ${f.status === 'completed' ? 'success' : f.status === 'in_progress' ? 'warning' : ''}">${f.status}</span>
+        </div>
+      `).join('');
+  } catch (_) {
+    // Non-critical
+  }
+}
+
+async function handleFeedbackSubmit(e) {
+  e.preventDefault();
+  const message = document.getElementById('feedback-message').value.trim();
+  if (!message) return;
+
+  const btn = document.getElementById('feedback-submit-btn');
+  btn.disabled = true;
+  btn.textContent = 'Sending...';
+
+  try {
+    await submitFeedback(message);
+    showActionNotification('Feedback sent!');
+    modalManager.closeModal();
+  } catch (err) {
+    showError(`Failed to send feedback: ${err.message}`);
+    btn.disabled = false;
+    btn.textContent = 'Send';
+  }
+}
+
+// ============ Allowance Warning ============
+
+function setupWarningModal() {
+  document.getElementById('warning-modal-ok').addEventListener('click', () => {
+    document.getElementById('warning-modal').classList.add('modal-hidden');
+  });
+}
+
+function showWarningModal(title, message) {
+  document.getElementById('warning-modal-title').textContent = title;
+  document.getElementById('warning-modal-message').textContent = message;
+  document.getElementById('warning-modal').classList.remove('modal-hidden');
+}
+
+/**
+ * Check API response for allowance warning and show warning modal if present.
+ * Call after any paid API response that may include allowance_warning.
+ */
+function checkAllowanceWarning(responseData) {
+  if (responseData && responseData.allowance_warning) {
+    const w = responseData.allowance_warning;
+    showWarningModal('Usage Warning', w.warning);
+  }
 }
 
 async function handleShareHouse() {

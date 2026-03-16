@@ -469,6 +469,59 @@ body {
   cursor: pointer;
 }
 
+/* ============ Usage Summary ============ */
+
+.admin-usage-summary {
+  padding: 0 16px 16px;
+}
+
+.usage-summary-cards {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.usage-summary-card {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.usage-summary-label {
+  font-size: 0.8em;
+  color: var(--text-secondary, #9ca3af);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+.usage-summary-value {
+  font-size: 2em;
+  font-weight: 600;
+  color: var(--text-primary, #e5e7eb);
+  line-height: 1.2;
+}
+
+.usage-summary-breakdown {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 0.85em;
+  color: var(--text-secondary, #9ca3af);
+}
+
+.usage-org-table {
+  color: var(--text-secondary, #9ca3af);
+  font-size: 0.9em;
+}
+
+.usage-org-table h4 {
+  color: var(--text-primary, #e5e7eb);
+  font-weight: 500;
+}
+
 /* ============ Utilities ============ */
 
 .hidden {

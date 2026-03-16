@@ -42,6 +42,13 @@ async function apiFetch(path, options = {}) {
     return;
   }
 
+  if (response.status === 429) {
+    const error = await response.json().catch(() => ({ detail: 'Daily limit reached' }));
+    const err = new Error(error.detail || 'Daily limit reached — contact admin');
+    err.isAllowanceLimit = true;
+    throw err;
+  }
+
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
     let message;
@@ -217,6 +224,13 @@ export async function createRoom(houseId, name, imageFile, clearFurniture = fals
   if (response.status === 401) {
     logout();
     return;
+  }
+
+  if (response.status === 429) {
+    const error = await response.json().catch(() => ({ detail: 'Daily limit reached' }));
+    const err = new Error(error.detail || 'Daily limit reached — contact admin');
+    err.isAllowanceLimit = true;
+    throw err;
   }
 
   if (!response.ok) {
@@ -805,5 +819,20 @@ export async function uploadFinalImage(roomId, imageBase64) {
 
 export async function deleteFinalImage(roomId) {
   await apiFetch(`/rooms/${roomId}/final-image`, { method: 'DELETE' });
+}
+
+// ============ Feedback ============
+
+export async function submitFeedback(message) {
+  const response = await apiFetch('/feedback/', {
+    method: 'POST',
+    body: JSON.stringify({ message }),
+  });
+  return response.json();
+}
+
+export async function getMyFeedback() {
+  const response = await apiFetch('/feedback/');
+  return response.json();
 }
 

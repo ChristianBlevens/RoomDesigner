@@ -10,7 +10,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.connection import get_houses_db
 from models.room import RoomUpdate, RoomResponse
 from moge_client import process_image_with_modal, MoGeError
-from routers.auth import verify_token, verify_token_with_demo, check_demo_restriction
+from routers.auth import verify_token, verify_token_full
+from usage import check_allowance, log_usage, get_allowance_warning
+import time
 import r2
 
 logger = logging.getLogger(__name__)
@@ -135,20 +137,33 @@ async def create_room(
     image: UploadFile = File(...),
     clearFurniture: str = Form("false"),
     floorHint: str = Form(""),
-    token_info: tuple = Depends(verify_token_with_demo)
+    token: dict = Depends(verify_token_full)
 ):
     """
     Create a new room with background image.
     Optionally clears furniture from image via Gemini before MoGe-2 processing.
     Synchronous: waits for processing (30-90 seconds depending on clearing).
     """
-    org_id = check_demo_restriction(token_info)
+    org_id = token["org_id"]
+    is_admin = token["is_admin_impersonating"]
+
+    # Check modal allowance for MoGe
+    allowed, msg = check_allowance(org_id, "modal", is_admin)
+    if not allowed:
+        raise HTTPException(429, msg)
+
+    should_clear = clearFurniture.lower() == "true"
+    if should_clear:
+        # Also need gemini allowance for clearing
+        allowed_g, msg_g = check_allowance(org_id, "gemini", is_admin)
+        if not allowed_g:
+            raise HTTPException(429, msg_g)
+
     verify_house_ownership(houseId, org_id)
     db = get_houses_db()
 
     room_id = str(uuid.uuid4())
     image_bytes = await image.read()
-    should_clear = clearFurniture.lower() == "true"
 
     ext = "jpg"
     if image.content_type == "image/png":
@@ -164,24 +179,51 @@ async def create_room(
         r2.upload_bytes(original_bg_key, image_bytes, image.content_type or "image/jpeg")
 
         logger.info(f"Clearing furniture from room {room_id} via Gemini...")
+        from gemini_client import edit_image
+        from routers.enhance import ROOM_CLEAR_PROMPT
+        clear_prompt = ROOM_CLEAR_PROMPT
+        if floorHint.strip():
+            clear_prompt += f" The floor beneath the furniture is {floorHint.strip()}."
+
+        start_clear = time.time()
         try:
-            from gemini_client import edit_image
-            from routers.enhance import ROOM_CLEAR_PROMPT
-            clear_prompt = ROOM_CLEAR_PROMPT
-            if floorHint.strip():
-                clear_prompt += f" The floor beneath the furniture is {floorHint.strip()}."
             cleared_bytes = await edit_image(image_bytes, clear_prompt, mime_type=image.content_type or "image/jpeg")
+            duration_ms = int((time.time() - start_clear) * 1000)
+            log_usage(
+                org_id=org_id, service_category="gemini", action="room_clear",
+                success=True, duration_ms=duration_ms, admin_initiated=is_admin,
+                metadata={"room_id": room_id, "floor_hint": floorHint.strip(), "full_prompt": clear_prompt},
+            )
             moge_input_bytes = cleared_bytes
             image_bytes = cleared_bytes
         except Exception as e:
+            duration_ms = int((time.time() - start_clear) * 1000)
+            log_usage(
+                org_id=org_id, service_category="gemini", action="room_clear",
+                success=False, duration_ms=duration_ms, error_message=str(e), admin_initiated=is_admin,
+                metadata={"room_id": room_id, "floor_hint": floorHint.strip(), "full_prompt": clear_prompt},
+            )
             logger.error(f"Room {room_id} furniture clearing failed: {e}")
             r2.delete_object(original_bg_key)
             raise HTTPException(status_code=502, detail=f"Furniture clearing failed: {str(e)}")
 
     logger.info(f"Processing room {room_id} with Modal...")
+    start_moge = time.time()
     try:
         result = await process_image_with_modal(moge_input_bytes)
+        duration_ms = int((time.time() - start_moge) * 1000)
+        log_usage(
+            org_id=org_id, service_category="modal", action="room_create",
+            success=True, duration_ms=duration_ms, admin_initiated=is_admin,
+            metadata={"room_id": room_id, "house_id": houseId, "clear_furniture": should_clear},
+        )
     except MoGeError as e:
+        duration_ms = int((time.time() - start_moge) * 1000)
+        log_usage(
+            org_id=org_id, service_category="modal", action="room_create",
+            success=False, duration_ms=duration_ms, error_message=str(e), admin_initiated=is_admin,
+            metadata={"room_id": room_id, "house_id": houseId, "clear_furniture": should_clear},
+        )
         logger.error(f"Room {room_id} mesh generation failed: {e}")
         if original_bg_key:
             r2.delete_object(original_bg_key)

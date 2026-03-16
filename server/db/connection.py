@@ -51,11 +51,6 @@ def init_databases():
     """)
     _auth_conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_orgs_username ON orgs(username)")
 
-    # Migration: add demo_mode column to existing databases
-    try:
-        _auth_conn.execute("ALTER TABLE orgs ADD COLUMN demo_mode BOOLEAN DEFAULT FALSE")
-    except Exception:
-        pass
     _auth_conn.execute("""
         CREATE TABLE IF NOT EXISTS settings (
             key VARCHAR PRIMARY KEY,
@@ -68,6 +63,47 @@ def init_databases():
             revoked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    _auth_conn.execute("""
+        CREATE TABLE IF NOT EXISTS usage_log (
+            id VARCHAR PRIMARY KEY,
+            org_id VARCHAR NOT NULL,
+            service_category VARCHAR NOT NULL,
+            action VARCHAR NOT NULL,
+            success BOOLEAN NOT NULL,
+            duration_ms INTEGER,
+            error_message VARCHAR,
+            admin_initiated BOOLEAN DEFAULT FALSE,
+            metadata JSON,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    _auth_conn.execute("CREATE INDEX IF NOT EXISTS idx_usage_org ON usage_log(org_id)")
+    _auth_conn.execute("CREATE INDEX IF NOT EXISTS idx_usage_service ON usage_log(service_category)")
+    _auth_conn.execute("CREATE INDEX IF NOT EXISTS idx_usage_created ON usage_log(created_at)")
+
+    _auth_conn.execute("""
+        CREATE TABLE IF NOT EXISTS org_allowances (
+            org_id VARCHAR NOT NULL,
+            service_category VARCHAR NOT NULL,
+            daily_limit INTEGER,
+            PRIMARY KEY (org_id, service_category)
+        )
+    """)
+
+    _auth_conn.execute("""
+        CREATE TABLE IF NOT EXISTS feedback (
+            id VARCHAR PRIMARY KEY,
+            org_id VARCHAR NOT NULL,
+            message TEXT NOT NULL,
+            status VARCHAR DEFAULT 'open',
+            admin_notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    _auth_conn.execute("CREATE INDEX IF NOT EXISTS idx_feedback_org ON feedback(org_id)")
+    _auth_conn.execute("CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status)")
 
     # Houses database
     _houses_conn = _safe_connect(HOUSES_DB)

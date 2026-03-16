@@ -332,6 +332,13 @@
       </div>
     </div>
     <div class="calendar-footer">
+      <button id="calendar-util-btn" class="btn-secondary" title="Tools & Feedback">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+        Tools
+      </button>
       <button id="calendar-signout-btn" class="btn-secondary">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
@@ -340,6 +347,60 @@
         </svg>
         Sign Out
       </button>
+    </div>
+  </div>
+
+  <!-- Utility Modal (non-house-specific tools) -->
+  <div class="modal-overlay modal-hidden" id="util-modal">
+    <div class="modal-content session-modal-content">
+      <div class="session-house-info">
+        <h3>Tools</h3>
+      </div>
+      <div class="session-buttons">
+        <button id="util-segmentation-btn" class="btn-secondary">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+            <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+            <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+            <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+          </svg>
+          Furniture Segmenter
+        </button>
+        <button id="util-feedback-btn" class="btn-secondary">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+          </svg>
+          Send Feedback
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Feedback Modal -->
+  <div class="modal-overlay modal-hidden" id="feedback-modal">
+    <div class="modal-content confirm-modal-content">
+      <h3>Send Feedback</h3>
+      <form id="feedback-form">
+        <div class="form-group">
+          <textarea id="feedback-message" rows="4" placeholder="Tell us what's on your mind..." required style="width:100%;resize:vertical;"></textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="feedback-cancel-btn" class="btn-secondary">Cancel</button>
+          <button type="submit" id="feedback-submit-btn" class="btn-primary">Send</button>
+        </div>
+      </form>
+      <div id="feedback-history" class="feedback-history" style="margin-top:16px;"></div>
+    </div>
+  </div>
+
+  <!-- Reusable Warning Modal -->
+  <div class="modal-overlay modal-hidden" id="warning-modal">
+    <div class="modal-content confirm-modal-content">
+      <h3 id="warning-modal-title">Warning</h3>
+      <p id="warning-modal-message"></p>
+      <div class="modal-actions">
+        <button id="warning-modal-ok" class="btn-primary">OK</button>
+      </div>
     </div>
   </div>
 
@@ -570,6 +631,12 @@
             <rect x="14" y="14" width="7" height="7" rx="1"></rect>
           </svg>
           Furniture Segmenter
+        </button>
+        <button id="feedback-session-btn" class="btn-secondary">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+          </svg>
+          Send Feedback
         </button>
         <button id="close-house-session-btn" class="btn-secondary">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

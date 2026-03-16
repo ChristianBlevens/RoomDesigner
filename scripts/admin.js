@@ -97,6 +97,9 @@ function switchTab(tab) {
   });
   document.getElementById('admin-search').value = '';
   hideDetail();
+  // Hide usage summary when not on usage tab
+  const usageSummary = document.getElementById('admin-usage-summary');
+  if (usageSummary) usageSummary.classList.toggle('hidden', tab !== 'usage');
   updateExtraFilters();
   loadTabData();
 }
@@ -152,6 +155,50 @@ function updateExtraFilters() {
     select.id = 'admin-filter-status';
     container.appendChild(select);
   }
+
+  if (currentTab === 'usage') {
+    const serviceSelect = document.createElement('select');
+    serviceSelect.className = 'admin-filter';
+    serviceSelect.id = 'admin-filter-service';
+    serviceSelect.innerHTML = `
+      <option value="">All Services</option>
+      <option value="model_3d">3D Generation</option>
+      <option value="modal">Modal (MoGe/SAM3)</option>
+      <option value="gemini">Gemini</option>
+    `;
+    serviceSelect.addEventListener('change', () => loadTabData());
+    container.appendChild(serviceSelect);
+
+    const fromInput = document.createElement('input');
+    fromInput.type = 'date';
+    fromInput.className = 'admin-filter';
+    fromInput.id = 'admin-filter-from';
+    fromInput.title = 'From date';
+    fromInput.addEventListener('change', () => loadTabData());
+    container.appendChild(fromInput);
+
+    const toInput = document.createElement('input');
+    toInput.type = 'date';
+    toInput.className = 'admin-filter';
+    toInput.id = 'admin-filter-to';
+    toInput.title = 'To date';
+    toInput.addEventListener('change', () => loadTabData());
+    container.appendChild(toInput);
+  }
+
+  if (currentTab === 'feedback') {
+    const statusSelect = document.createElement('select');
+    statusSelect.className = 'admin-filter';
+    statusSelect.id = 'admin-filter-fb-status';
+    statusSelect.innerHTML = `
+      <option value="">All Status</option>
+      <option value="open">Open</option>
+      <option value="in_progress">In Progress</option>
+      <option value="completed">Completed</option>
+    `;
+    statusSelect.addEventListener('change', () => loadTabData());
+    container.appendChild(statusSelect);
+  }
 }
 
 // ============ Table Rendering ============
@@ -162,6 +209,8 @@ const TAB_COLUMNS = {
   rooms: ['Name', 'House', 'Org', 'Status', 'Furniture'],
   furniture: ['Name', 'Org', 'Category', 'Qty', 'Image', 'Model'],
   meshy: ['Furniture', 'Org', 'Status', 'Progress', 'Retries', 'Created'],
+  usage: ['Time', 'Org', 'Service', 'Action', 'Success', 'Duration', 'Admin'],
+  feedback: ['Date', 'Org', 'Message', 'Status'],
 };
 
 function renderTable(columns, rows) {
@@ -282,6 +331,49 @@ async function loadTabData() {
         actions: actionBtn('Delete', 'btn-danger', `window._adminDeleteTask('${t.id}')`)
       })));
     }
+
+    else if (currentTab === 'usage') {
+      const serviceFilter = document.getElementById('admin-filter-service');
+      const fromFilter = document.getElementById('admin-filter-from');
+      const toFilter = document.getElementById('admin-filter-to');
+      if (serviceFilter && serviceFilter.value) params.set('service', serviceFilter.value);
+      if (fromFilter && fromFilter.value) params.set('from', fromFilter.value);
+      if (toFilter && toFilter.value) params.set('to', toFilter.value);
+
+      await renderUsageSummary(orgFilter);
+
+      const data = await apiGet(`/usage?${params}`);
+      renderTable(TAB_COLUMNS.usage, data.rows.map(r => ({
+        id: r.id,
+        cells: [
+          r.createdAt?.split('.')[0] || '',
+          r.orgUsername,
+          badge(r.serviceCategory, ''),
+          r.action,
+          r.success ? badge('Yes', 'success') : badge('No', 'danger'),
+          r.durationMs ? `${r.durationMs}ms` : '-',
+          r.adminInitiated ? badge('Admin', 'warning') : '',
+        ],
+        actions: actionBtn('View', 'btn-secondary', `window._adminDetailUsage('${r.id}')`)
+      })));
+    }
+
+    else if (currentTab === 'feedback') {
+      const fbStatus = document.getElementById('admin-filter-fb-status');
+      if (fbStatus && fbStatus.value) params.set('status', fbStatus.value);
+
+      const data = await apiGet(`/feedback?${params}`);
+      renderTable(TAB_COLUMNS.feedback, data.map(f => ({
+        id: f.id,
+        cells: [
+          f.createdAt?.split('T')[0] || '',
+          f.orgUsername,
+          f.message.length > 80 ? f.message.substring(0, 80) + '...' : f.message,
+          badge(f.status, f.status === 'completed' ? 'success' : f.status === 'in_progress' ? 'warning' : ''),
+        ],
+        actions: actionBtn('View', 'btn-secondary', `window._adminDetailFeedback('${f.id}')`)
+      })));
+    }
   } catch (err) {
     showToast(`Error: ${err.message}`, 5000);
   }
@@ -341,6 +433,12 @@ async function showOrgDetail(orgId) {
       <h3>Furniture (${furniture.length})</h3>
       <p class="detail-sub">${furniture.filter(f => f.hasModel).length} with models, ${furniture.filter(f => f.hasImage).length} with images</p>
     </div>
+    <div class="detail-section">
+      <h3>Daily Allowances</h3>
+      <div id="detail-allowances" class="detail-form">
+        <p class="detail-sub">Loading...</p>
+      </div>
+    </div>
   `);
 
   // Demo mode toggle
@@ -369,6 +467,43 @@ async function showOrgDetail(orgId) {
       showToast(`Error: ${err.message}`, 5000);
     }
   });
+
+  // Load allowances
+  try {
+    const allowances = await apiGet(`/allowances/${orgId}`);
+    const container = document.getElementById('detail-allowances');
+    const cats = [
+      { key: 'model_3d', label: '3D Generation (Meshy/TRELLIS)' },
+      { key: 'modal', label: 'Modal (MoGe/SAM3)' },
+      { key: 'gemini', label: 'Gemini (enhance/wall-color/clear/fix)' },
+    ];
+    container.innerHTML = cats.map(c => {
+      const a = allowances[c.key] || { dailyLimit: null, usedToday: 0 };
+      return `
+        <div class="form-group" style="margin-bottom:8px;">
+          <label>${c.label}</label>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input type="number" class="admin-filter" data-service="${c.key}"
+              value="${a.dailyLimit !== null ? a.dailyLimit : ''}"
+              placeholder="Unlimited" min="0" style="width:100px;">
+            <span class="detail-sub">Used today: ${a.usedToday}</span>
+          </div>
+        </div>
+      `;
+    }).join('') + '<button id="detail-save-allowances" class="btn-secondary">Save Allowances</button>';
+
+    document.getElementById('detail-save-allowances').addEventListener('click', async () => {
+      const body = {};
+      container.querySelectorAll('input[data-service]').forEach(input => {
+        const val = input.value.trim();
+        body[input.dataset.service] = val === '' ? null : parseInt(val);
+      });
+      await apiPut(`/allowances/${orgId}`, body);
+      showToast('Allowances saved');
+    });
+  } catch (err) {
+    document.getElementById('detail-allowances').innerHTML = `<p class="detail-sub">Error loading allowances</p>`;
+  }
 }
 
 async function showHouseDetail(houseId) {
@@ -808,6 +943,183 @@ async function loadOrgFilter() {
     // Non-critical
   }
 }
+
+// ============ Usage Summary ============
+
+async function renderUsageSummary(orgFilter) {
+  let summaryEl = document.getElementById('admin-usage-summary');
+  if (!summaryEl) {
+    summaryEl = document.createElement('div');
+    summaryEl.id = 'admin-usage-summary';
+    summaryEl.className = 'admin-usage-summary';
+    const tableContainer = document.querySelector('.admin-table-container');
+    tableContainer.parentNode.insertBefore(summaryEl, tableContainer);
+  }
+
+  try {
+    const now = new Date();
+    const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    const today = now.toISOString().split('T')[0];
+
+    const summaryParams = new URLSearchParams();
+    summaryParams.set('from', monthStart);
+    if (orgFilter) summaryParams.set('org_id', orgFilter);
+
+    const summaryData = await apiGet(`/usage/summary?${summaryParams}`);
+
+    const todayTotals = { model_3d: 0, modal: 0, gemini: 0 };
+    const monthTotals = { model_3d: 0, modal: 0, gemini: 0 };
+    const perOrg = {};
+
+    for (const row of summaryData) {
+      const cat = row.serviceCategory;
+      const count = row.totalCalls;
+
+      if (monthTotals.hasOwnProperty(cat)) {
+        monthTotals[cat] += count;
+      }
+
+      if (row.day === today && todayTotals.hasOwnProperty(cat)) {
+        todayTotals[cat] += count;
+      }
+
+      if (!perOrg[row.orgUsername]) {
+        perOrg[row.orgUsername] = { model_3d: 0, modal: 0, gemini: 0, total: 0 };
+      }
+      if (perOrg[row.orgUsername].hasOwnProperty(cat)) {
+        perOrg[row.orgUsername][cat] += count;
+      }
+      perOrg[row.orgUsername].total += count;
+    }
+
+    const todayTotal = todayTotals.model_3d + todayTotals.modal + todayTotals.gemini;
+    const monthTotal = monthTotals.model_3d + monthTotals.modal + monthTotals.gemini;
+
+    const sortedOrgs = Object.entries(perOrg).sort((a, b) => b[1].total - a[1].total);
+
+    summaryEl.innerHTML = `
+      <div class="usage-summary-cards">
+        <div class="usage-summary-card">
+          <div class="usage-summary-label">Today</div>
+          <div class="usage-summary-value">${todayTotal}</div>
+          <div class="usage-summary-breakdown">
+            ${todayTotals.model_3d ? `<span>3D: ${todayTotals.model_3d}</span>` : ''}
+            ${todayTotals.modal ? `<span>Modal: ${todayTotals.modal}</span>` : ''}
+            ${todayTotals.gemini ? `<span>Gemini: ${todayTotals.gemini}</span>` : ''}
+            ${todayTotal === 0 ? '<span>No activity</span>' : ''}
+          </div>
+        </div>
+        <div class="usage-summary-card">
+          <div class="usage-summary-label">This Month</div>
+          <div class="usage-summary-value">${monthTotal}</div>
+          <div class="usage-summary-breakdown">
+            ${monthTotals.model_3d ? `<span>3D: ${monthTotals.model_3d}</span>` : ''}
+            ${monthTotals.modal ? `<span>Modal: ${monthTotals.modal}</span>` : ''}
+            ${monthTotals.gemini ? `<span>Gemini: ${monthTotals.gemini}</span>` : ''}
+            ${monthTotal === 0 ? '<span>No activity</span>' : ''}
+          </div>
+        </div>
+      </div>
+      ${sortedOrgs.length > 0 && !orgFilter ? `
+        <div class="usage-org-table">
+          <h4 style="margin:12px 0 8px;">This Month by Org</h4>
+          <table class="admin-table" style="margin:0;">
+            <thead>
+              <tr><th>Org</th><th>3D Gen</th><th>Modal</th><th>Gemini</th><th>Total</th></tr>
+            </thead>
+            <tbody>
+              ${sortedOrgs.map(([name, counts]) => `
+                <tr>
+                  <td>${name}</td>
+                  <td>${counts.model_3d || '-'}</td>
+                  <td>${counts.modal || '-'}</td>
+                  <td>${counts.gemini || '-'}</td>
+                  <td><strong>${counts.total}</strong></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : ''}
+    `;
+
+    summaryEl.classList.remove('hidden');
+  } catch (err) {
+    summaryEl.innerHTML = '';
+    summaryEl.classList.add('hidden');
+  }
+}
+
+// ============ Usage Detail ============
+
+window._adminDetailUsage = async (id) => {
+  try {
+    const data = await apiGet(`/usage?${new URLSearchParams()}`);
+    const row = data.rows.find(r => r.id === id);
+    if (!row) return;
+
+    showDetail(`Usage: ${row.action}`, `
+      <div class="detail-section">
+        <h3>Details</h3>
+        <p><strong>Org:</strong> ${row.orgUsername}</p>
+        <p><strong>Service:</strong> ${row.serviceCategory}</p>
+        <p><strong>Action:</strong> ${row.action}</p>
+        <p><strong>Success:</strong> ${row.success ? 'Yes' : 'No'}</p>
+        <p><strong>Duration:</strong> ${row.durationMs ? row.durationMs + 'ms' : 'N/A'}</p>
+        <p><strong>Admin Initiated:</strong> ${row.adminInitiated ? 'Yes' : 'No'}</p>
+        <p><strong>Time:</strong> ${row.createdAt}</p>
+        ${row.errorMessage ? `<p><strong>Error:</strong> ${row.errorMessage}</p>` : ''}
+      </div>
+      <div class="detail-section">
+        <h3>Metadata</h3>
+        <pre style="white-space:pre-wrap;word-break:break-all;font-size:0.85em;background:rgba(0,0,0,0.3);padding:12px;border-radius:8px;">${row.metadata ? JSON.stringify(row.metadata, null, 2) : 'None'}</pre>
+      </div>
+    `);
+  } catch (err) {
+    showToast(`Error: ${err.message}`, 5000);
+  }
+};
+
+// ============ Feedback Detail ============
+
+window._adminDetailFeedback = async (id) => {
+  try {
+    const data = await apiGet(`/feedback`);
+    const fb = data.find(f => f.id === id);
+    if (!fb) return;
+
+    showDetail(`Feedback from ${fb.orgUsername}`, `
+      <div class="detail-section">
+        <h3>Message</h3>
+        <p style="white-space:pre-wrap;">${fb.message}</p>
+        <p class="detail-sub">${fb.createdAt}</p>
+      </div>
+      <div class="detail-section">
+        <h3>Status</h3>
+        <select id="detail-fb-status" class="admin-filter" style="width:auto;">
+          <option value="open" ${fb.status === 'open' ? 'selected' : ''}>Open</option>
+          <option value="in_progress" ${fb.status === 'in_progress' ? 'selected' : ''}>In Progress</option>
+          <option value="completed" ${fb.status === 'completed' ? 'selected' : ''}>Completed</option>
+        </select>
+      </div>
+      <div class="detail-section">
+        <h3>Admin Notes</h3>
+        <textarea id="detail-fb-notes" rows="3" class="admin-search" style="width:100%;">${fb.adminNotes || ''}</textarea>
+      </div>
+      <button id="detail-fb-save" class="btn-primary">Save</button>
+    `);
+
+    document.getElementById('detail-fb-save').addEventListener('click', async () => {
+      const status = document.getElementById('detail-fb-status').value;
+      const notes = document.getElementById('detail-fb-notes').value;
+      await apiPut(`/feedback/${id}`, { status, admin_notes: notes });
+      showToast('Feedback updated');
+      loadTabData();
+    });
+  } catch (err) {
+    showToast(`Error: ${err.message}`, 5000);
+  }
+};
 
 // ============ Init ============
 

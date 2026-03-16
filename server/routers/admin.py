@@ -17,6 +17,7 @@ import bcrypt
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.connection import get_auth_db, get_houses_db, get_furniture_db
 from routers.auth import verify_admin, create_impersonation_token
+from usage import DEFAULT_ALLOWANCES, create_default_allowances
 from model_processor import ModelProcessor
 from moge_client import process_image_with_modal, MoGeError
 import r2
@@ -96,6 +97,8 @@ def create_org(body: dict, is_admin: bool = Depends(verify_admin)):
         "INSERT INTO orgs (id, username, password_hash, demo_mode) VALUES (?, ?, ?, ?)",
         [org_id, username, password_hash, demo_mode]
     )
+
+    create_default_allowances(org_id)
 
     return {"id": org_id, "username": username, "demo_mode": demo_mode}
 
@@ -997,3 +1000,234 @@ def delete_meshy_task(task_id: str, is_admin: bool = Depends(verify_admin)):
         raise HTTPException(404, "Task not found")
     db.execute("DELETE FROM meshy_tasks WHERE id = ?", [task_id])
     return {"status": "deleted"}
+
+
+# ============ Usage Tracking ============
+
+@router.get("/usage")
+def get_usage_log(
+    org_id: Optional[str] = Query(None),
+    service: Optional[str] = Query(None),
+    action: Optional[str] = Query(None),
+    from_date: Optional[str] = Query(None, alias="from"),
+    to_date: Optional[str] = Query(None, alias="to"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    is_admin: bool = Depends(verify_admin),
+):
+    """Get paginated usage log with filters."""
+    db = get_auth_db()
+
+    conditions = []
+    params = []
+
+    if org_id:
+        conditions.append("u.org_id = ?")
+        params.append(org_id)
+    if service:
+        conditions.append("u.service_category = ?")
+        params.append(service)
+    if action:
+        conditions.append("u.action = ?")
+        params.append(action)
+    if from_date:
+        conditions.append("u.created_at >= ?")
+        params.append(from_date)
+    if to_date:
+        conditions.append("u.created_at <= ?")
+        params.append(to_date + " 23:59:59")
+
+    where = " AND ".join(conditions) if conditions else "1=1"
+    offset = (page - 1) * limit
+
+    count = db.execute(
+        f"SELECT COUNT(*) FROM usage_log u WHERE {where}", params
+    ).fetchone()[0]
+
+    rows = db.execute(
+        f"""SELECT u.id, u.org_id, u.service_category, u.action, u.success,
+                   u.duration_ms, u.error_message, u.admin_initiated, u.metadata, u.created_at,
+                   COALESCE(o.username, u.org_id) as org_username
+            FROM usage_log u
+            LEFT JOIN orgs o ON u.org_id = o.id
+            WHERE {where}
+            ORDER BY u.created_at DESC
+            LIMIT ? OFFSET ?""",
+        params + [limit, offset]
+    ).fetchall()
+
+    return {
+        "total": count,
+        "page": page,
+        "limit": limit,
+        "rows": [
+            {
+                "id": r[0], "orgId": r[1], "serviceCategory": r[2], "action": r[3],
+                "success": r[4], "durationMs": r[5], "errorMessage": r[6],
+                "adminInitiated": r[7], "metadata": json.loads(r[8]) if r[8] else None,
+                "createdAt": str(r[9]), "orgUsername": r[10],
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.get("/usage/summary")
+def get_usage_summary(
+    org_id: Optional[str] = Query(None),
+    from_date: Optional[str] = Query(None, alias="from"),
+    to_date: Optional[str] = Query(None, alias="to"),
+    is_admin: bool = Depends(verify_admin),
+):
+    """Get usage aggregated by org x service x day."""
+    db = get_auth_db()
+
+    conditions = []
+    params = []
+
+    if org_id:
+        conditions.append("u.org_id = ?")
+        params.append(org_id)
+    if from_date:
+        conditions.append("u.created_at >= ?")
+        params.append(from_date)
+    if to_date:
+        conditions.append("u.created_at <= ?")
+        params.append(to_date + " 23:59:59")
+
+    where = " AND ".join(conditions) if conditions else "1=1"
+
+    rows = db.execute(
+        f"""SELECT u.org_id, COALESCE(o.username, u.org_id) as org_username,
+                   u.service_category,
+                   CAST(u.created_at AS DATE) as day,
+                   COUNT(*) as total_calls,
+                   SUM(CASE WHEN u.success THEN 1 ELSE 0 END) as success_count,
+                   SUM(CASE WHEN NOT u.success THEN 1 ELSE 0 END) as fail_count
+            FROM usage_log u
+            LEFT JOIN orgs o ON u.org_id = o.id
+            WHERE {where}
+            GROUP BY u.org_id, o.username, u.service_category, CAST(u.created_at AS DATE)
+            ORDER BY day DESC, org_username, u.service_category""",
+        params
+    ).fetchall()
+
+    return [
+        {
+            "orgId": r[0], "orgUsername": r[1], "serviceCategory": r[2],
+            "day": str(r[3]), "totalCalls": r[4], "successCount": r[5], "failCount": r[6],
+        }
+        for r in rows
+    ]
+
+
+# ============ Allowances ============
+
+@router.get("/allowances/{org_id}")
+def get_org_allowances(org_id: str, is_admin: bool = Depends(verify_admin)):
+    """Get allowances and today's usage for an org."""
+    from usage import get_usage_today
+
+    db = get_auth_db()
+    rows = db.execute(
+        "SELECT service_category, daily_limit FROM org_allowances WHERE org_id = ?",
+        [org_id]
+    ).fetchall()
+
+    allowances = {}
+    for r in rows:
+        allowances[r[0]] = {
+            "dailyLimit": r[1],
+            "usedToday": get_usage_today(org_id, r[0]),
+        }
+
+    # Fill in defaults for any missing categories
+    for cat in DEFAULT_ALLOWANCES:
+        if cat not in allowances:
+            allowances[cat] = {
+                "dailyLimit": None,
+                "usedToday": get_usage_today(org_id, cat),
+            }
+
+    return allowances
+
+
+@router.put("/allowances/{org_id}")
+def update_org_allowances(org_id: str, body: dict, is_admin: bool = Depends(verify_admin)):
+    """Set daily limits per service category. Body: {service_category: daily_limit_or_null}"""
+    db = get_auth_db()
+    for service_category, daily_limit in body.items():
+        if service_category not in DEFAULT_ALLOWANCES:
+            continue
+        db.execute(
+            """INSERT INTO org_allowances (org_id, service_category, daily_limit)
+               VALUES (?, ?, ?)
+               ON CONFLICT (org_id, service_category)
+               DO UPDATE SET daily_limit = ?""",
+            [org_id, service_category, daily_limit, daily_limit]
+        )
+    return {"status": "saved"}
+
+
+# ============ Feedback (Admin) ============
+
+@router.get("/feedback")
+def list_feedback(
+    org_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    is_admin: bool = Depends(verify_admin),
+):
+    """Get all feedback, optionally filtered."""
+    db = get_auth_db()
+
+    conditions = []
+    params = []
+    if org_id:
+        conditions.append("f.org_id = ?")
+        params.append(org_id)
+    if status:
+        conditions.append("f.status = ?")
+        params.append(status)
+
+    where = " AND ".join(conditions) if conditions else "1=1"
+
+    rows = db.execute(
+        f"""SELECT f.id, f.org_id, COALESCE(o.username, f.org_id) as org_username,
+                   f.message, f.status, f.admin_notes, f.created_at, f.updated_at
+            FROM feedback f
+            LEFT JOIN orgs o ON f.org_id = o.id
+            WHERE {where}
+            ORDER BY f.created_at DESC""",
+        params
+    ).fetchall()
+
+    return [
+        {
+            "id": r[0], "orgId": r[1], "orgUsername": r[2], "message": r[3],
+            "status": r[4], "adminNotes": r[5], "createdAt": str(r[6]), "updatedAt": str(r[7]),
+        }
+        for r in rows
+    ]
+
+
+@router.put("/feedback/{feedback_id}")
+def update_feedback(feedback_id: str, body: dict, is_admin: bool = Depends(verify_admin)):
+    """Update feedback status and/or admin notes."""
+    db = get_auth_db()
+
+    updates = ["updated_at = CURRENT_TIMESTAMP"]
+    values = []
+
+    if "status" in body:
+        updates.append("status = ?")
+        values.append(body["status"])
+    if "admin_notes" in body:
+        updates.append("admin_notes = ?")
+        values.append(body["admin_notes"])
+
+    if len(values) == 0:
+        raise HTTPException(400, "No fields to update")
+
+    values.append(feedback_id)
+    db.execute(f"UPDATE feedback SET {', '.join(updates)} WHERE id = ?", values)
+    return {"status": "saved"}

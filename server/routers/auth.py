@@ -164,6 +164,29 @@ def check_demo_restriction(token_info: tuple) -> str:
     return org_id
 
 
+def verify_token_full(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+    """Verify JWT and return {org_id, is_admin_impersonating}.
+    For use on paid endpoints that need allowance checking."""
+    try:
+        payload = jwt.decode(
+            credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM]
+        )
+        org_id = payload.get("org_id")
+        if not org_id:
+            raise HTTPException(401, "Invalid token")
+        jti = payload.get("jti")
+        if jti and _is_token_revoked(jti):
+            raise HTTPException(401, "Token revoked")
+
+        is_admin_impersonating = payload.get("admin_impersonating", False)
+
+        return {"org_id": org_id, "is_admin_impersonating": is_admin_impersonating}
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(401, "Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(401, "Invalid token")
+
+
 # ============ Schemas ============
 
 class SignInRequest(BaseModel):

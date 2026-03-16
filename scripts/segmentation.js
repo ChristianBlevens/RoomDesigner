@@ -6,6 +6,22 @@
  */
 
 import { exportSegments } from './segmentation-export.js';
+import { getToken } from './auth.js';
+
+// --- Auth gate ---
+
+function getBasePath() {
+  const path = window.location.pathname;
+  const parts = path.split('/').filter(Boolean);
+  if (parts.length > 1) {
+    return '/' + parts.slice(0, -1).join('/');
+  }
+  return '';
+}
+
+if (!getToken()) {
+  window.location.href = getBasePath() + '/';
+}
 
 // --- State ---
 
@@ -778,12 +794,19 @@ btnSegment.addEventListener('click', async () => {
 
     const response = await fetch(`${API_BASE}/segment`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${getToken()}`,
+      },
       body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        window.location.href = getBasePath() + '/';
+        return;
+      }
       throw new Error(err.detail || `Server error ${response.status}`);
     }
 
@@ -980,4 +1003,60 @@ function arrayBufferToBase64(buffer) {
     binary += String.fromCharCode(bytes[i]);
   }
   return btoa(binary);
+}
+
+// --- Feedback ---
+
+function getAuthApiBase() {
+  const path = window.location.pathname;
+  const parts = path.split('/').filter(Boolean);
+  if (parts.length > 1) {
+    return '/' + parts.slice(0, -1).join('/') + '/api';
+  }
+  return '/api';
+}
+
+const feedbackBtn = document.getElementById('seg-feedback-btn');
+const feedbackModal = document.getElementById('seg-feedback-modal');
+const feedbackForm = document.getElementById('seg-feedback-form');
+const feedbackCancel = document.getElementById('seg-feedback-cancel');
+
+if (feedbackBtn) {
+  feedbackBtn.addEventListener('click', () => {
+    document.getElementById('seg-feedback-message').value = '';
+    feedbackModal.classList.remove('hidden');
+  });
+}
+
+if (feedbackCancel) {
+  feedbackCancel.addEventListener('click', () => {
+    feedbackModal.classList.add('hidden');
+  });
+}
+
+if (feedbackForm) {
+  feedbackForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const msg = document.getElementById('seg-feedback-message').value.trim();
+    if (!msg) return;
+    const btn = document.getElementById('seg-feedback-submit');
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+    try {
+      await fetch(`${getAuthApiBase()}/feedback/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${getToken()}`,
+        },
+        body: JSON.stringify({ message: msg }),
+      });
+      feedbackModal.classList.add('hidden');
+      alert('Feedback sent!');
+    } catch (err) {
+      alert('Failed to send feedback');
+    }
+    btn.disabled = false;
+    btn.textContent = 'Send';
+  });
 }

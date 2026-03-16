@@ -18,7 +18,8 @@ import httpx
 
 from model_processor import ModelProcessor
 from db.connection import get_furniture_db
-from routers.auth import verify_token, verify_token_with_demo, check_demo_restriction
+from routers.auth import verify_token, verify_token_full
+from usage import check_allowance, log_usage
 
 logger = logging.getLogger(__name__)
 
@@ -560,12 +561,18 @@ def stop_polling():
 # ============ API Endpoints ============
 
 @router.post("/generate/{furniture_id}")
-async def generate_model(furniture_id: str, token_info: tuple = Depends(verify_token_with_demo)):
+async def generate_model(furniture_id: str, token: dict = Depends(verify_token_full)):
     """
     Start image-to-3D generation task.
     Returns immediately with task_id. Background loop handles the rest.
     """
-    org_id = check_demo_restriction(token_info)
+    org_id = token["org_id"]
+    is_admin = token["is_admin_impersonating"]
+
+    allowed, msg = check_allowance(org_id, "model_3d", is_admin)
+    if not allowed:
+        raise HTTPException(status_code=429, detail=msg)
+
     conn = get_furniture_db()
     row = conn.execute(
         "SELECT image_path FROM furniture WHERE id = ? AND org_id = ?",
@@ -580,6 +587,13 @@ async def generate_model(furniture_id: str, token_info: tuple = Depends(verify_t
     # Create task
     task_id = create_task(furniture_id)
     logger.info(f"Created task {task_id} for furniture {furniture_id}")
+
+    # Log usage at task creation (cost is incurred when the task runs, but we track intent here)
+    log_usage(
+        org_id=org_id, service_category="model_3d", action="model_generate",
+        success=True, admin_initiated=is_admin,
+        metadata={"furniture_id": furniture_id, "task_id": task_id, "backend": MODEL_3D_BACKEND},
+    )
 
     return {"task_id": task_id}
 

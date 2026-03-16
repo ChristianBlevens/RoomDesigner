@@ -88,6 +88,33 @@
       </div>
     </div>
 
+    <!-- Feedback button (fixed bottom-right) -->
+    <button id="seg-feedback-btn" class="seg-feedback-btn" title="Send Feedback">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+      </svg>
+    </button>
+
+    <!-- Feedback modal (self-contained for segmentation page) -->
+    <div id="seg-feedback-modal" class="seg-modal-overlay hidden">
+      <div class="seg-fix-modal" style="max-width:480px;">
+        <div class="seg-fix-header">
+          <h3>Send Feedback</h3>
+        </div>
+        <form id="seg-feedback-form" style="padding:16px;">
+          <textarea id="seg-feedback-message" rows="4" placeholder="Tell us what's on your mind..." required
+            style="width:100%;resize:vertical;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:var(--text-primary);padding:12px;font-family:inherit;"></textarea>
+          <div class="seg-fix-footer" style="padding:12px 0 0;">
+            <div></div>
+            <div class="seg-fix-actions">
+              <button type="button" id="seg-feedback-cancel" class="btn-secondary">Cancel</button>
+              <button type="submit" id="seg-feedback-submit" class="btn-primary">Send</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
