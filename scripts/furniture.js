@@ -313,34 +313,40 @@ function alignToSurface(model, surfaceNormal, contactAxis) {
  * @returns {number} Distance to offset along surface normal
  */
 function calculateBoundingBoxOffset(model, surfaceNormal) {
-  // Save current position and temporarily move to origin for local bbox calculation
+  // Compute LOCAL bounding box (no rotation, no position, keep scale)
+  // This gives the unrotated geometry bounds needed for OBB projection
   const savedPosition = model.position.clone();
+  const savedQuaternion = model.quaternion.clone();
   model.position.set(0, 0, 0);
-
-  // Force matrix update after position change (stale matrixWorld causes wrong AABB)
+  model.quaternion.identity();
   model.updateMatrixWorld(true);
 
-  // Compute bounding box with model at origin (gives us local-space bounds)
-  const box = new THREE.Box3().setFromObject(model);
+  const localBox = new THREE.Box3().setFromObject(model);
 
-  // Restore position
   model.position.copy(savedPosition);
+  model.quaternion.copy(savedQuaternion);
   model.updateMatrixWorld(true);
 
-  // Find the bounding box face that should touch the surface
-  // If normal points positive on an axis, contact face is at box min
-  // If normal points negative on an axis, contact face is at box max
-  const contactPoint = new THREE.Vector3(
-    surfaceNormal.x >= 0 ? box.min.x : box.max.x,
-    surfaceNormal.y >= 0 ? box.min.y : box.max.y,
-    surfaceNormal.z >= 0 ? box.min.z : box.max.z
-  );
+  const center = localBox.getCenter(new THREE.Vector3());
+  const halfExtents = localBox.getSize(new THREE.Vector3()).multiplyScalar(0.5);
 
-  // The offset is the distance from local origin (0,0,0) to contact face along the normal
-  // Negative because we want to push the model AWAY from the surface
-  const offset = -contactPoint.dot(surfaceNormal);
+  // OBB center in world space (rotation only, relative to object origin)
+  const centerWorld = center.applyQuaternion(savedQuaternion);
 
-  return offset;
+  // Local axes in world space (unit vectors from model rotation)
+  const axisX = new THREE.Vector3(1, 0, 0).applyQuaternion(savedQuaternion);
+  const axisY = new THREE.Vector3(0, 1, 0).applyQuaternion(savedQuaternion);
+  const axisZ = new THREE.Vector3(0, 0, 1).applyQuaternion(savedQuaternion);
+
+  // OBB support function: max extent projection from center along normal
+  const extentProjection =
+    Math.abs(surfaceNormal.dot(axisX)) * halfExtents.x +
+    Math.abs(surfaceNormal.dot(axisY)) * halfExtents.y +
+    Math.abs(surfaceNormal.dot(axisZ)) * halfExtents.z;
+
+  const centerProjection = centerWorld.dot(surfaceNormal);
+
+  return extentProjection - centerProjection;
 }
 
 /**
@@ -629,21 +635,18 @@ function dragOnRoomSurface(event) {
         // Valid surface - add to history for smoothing
         const smoothedNormal = addNormalToHistory(hitNormal);
 
-        // Calculate bounding box offset to keep furniture on surface
-        const bbOffset = calculateBoundingBoxOffset(hoveredObject, smoothedNormal);
-
-        // Position furniture on the surface
-        hoveredObject.position.copy(hit.point).add(
-          smoothedNormal.clone().multiplyScalar(bbOffset)
-        );
-
-        // Update surface normal and alignment
+        // Update surface normal and alignment BEFORE computing offset
+        // so OBB projection uses the correct rotation
         hoveredObject.userData.surfaceNormal = smoothedNormal.clone();
-
-        // Keep contact axis aligned to smoothed normal
         const contactAxis = hoveredObject.userData.contactAxis || DEFAULT_CONTACT_AXIS;
         alignContactAxisToSurface(hoveredObject, smoothedNormal, contactAxis);
         applyUprightCorrection(hoveredObject, smoothedNormal);
+
+        // Calculate OBB offset with correct rotation and set position
+        const bbOffset = calculateBoundingBoxOffset(hoveredObject, smoothedNormal);
+        hoveredObject.position.copy(hit.point).add(
+          smoothedNormal.clone().multiplyScalar(bbOffset)
+        );
 
         // Store as last valid state
         lastValidPosition.copy(hoveredObject.position);
@@ -1095,10 +1098,12 @@ export async function placeFurniture(entryId, position, surfaceNormal = null) {
   model.userData.surfaceNormal = normal.clone();
   model.userData.contactAxis = contactAxis;
 
-  // Model stays in natural upright orientation - no rotation applied
-  // User can manually rotate after placement, and drags will preserve that rotation
+  // Align model so its contact face is flush with the surface
+  alignContactAxisToSurface(model, normal, contactAxis);
+  applyUprightCorrection(model, normal);
 
   // Set position with bounding box offset so contact face sits on surface
+  // OBB offset accounts for model's aligned rotation
   if (position) {
     const bbOffset = calculateBoundingBoxOffset(model, normal);
     model.position.copy(position).add(normal.clone().multiplyScalar(bbOffset));
