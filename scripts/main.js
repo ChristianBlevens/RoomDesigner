@@ -1291,16 +1291,28 @@ function setupClearFurnitureModal() {
   document.getElementById('clear-furniture-no').addEventListener('click', async () => {
     pendingClearFurniture = false;
     pendingFloorHint = '';
-    pendingFloorHint = '';
     modalManager.closeModal('clear-furniture-modal');
     await processRoomAutomatically();
   });
+
+  // Cancel room creation if user clicks outside the modal
+  const clearModal = document.getElementById('clear-furniture-modal');
+  clearModal.addEventListener('click', (event) => {
+    if (event.target === clearModal) {
+      cancelRoomCreationFlow();
+    }
+  });
 }
+
+let currentBackgroundObjectUrl = null;
 
 function setBackgroundImage(blob, bringToFront = false) {
   const container = document.getElementById('background-container');
-  const url = URL.createObjectURL(blob);
-  container.style.backgroundImage = `url(${url})`;
+  if (currentBackgroundObjectUrl) {
+    URL.revokeObjectURL(currentBackgroundObjectUrl);
+  }
+  currentBackgroundObjectUrl = URL.createObjectURL(blob);
+  container.style.backgroundImage = `url(${currentBackgroundObjectUrl})`;
 
   // Bring background above canvas during processing (but below modals)
   if (bringToFront) {
@@ -1499,6 +1511,15 @@ async function processRoomAutomatically() {
     clearAllFurniture();
     undoManager.clear();
 
+    // Initialize previousRoomState for selective saves
+    previousRoomState = {
+      id: room.id,
+      placedFurniture: [],
+      lightingSettings: null,
+      roomScale: 1.0,
+      meterStick: null,
+    };
+
     // Brief pause to show success
     await new Promise(resolve => setTimeout(resolve, 800));
 
@@ -1541,20 +1562,17 @@ async function cancelRoomCreationFlow() {
   pendingRoomImage = null;
   pendingRoomName = null;
   pendingClearFurniture = false;
+  pendingFloorHint = '';
 
   modalManager.closeAllModals();
   resetBackgroundZIndex();
+  // Always clear CSS background — 3D plane handles it for loaded rooms
+  document.getElementById('background-container').style.backgroundImage = '';
 
   if (!currentRoomId) {
     // No room loaded yet (initial stage) - return to calendar modal
     document.getElementById('canvas-container').classList.add('hidden');
-    document.getElementById('background-container').style.backgroundImage = '';
     await openCalendarModal();
-  } else {
-    // Room already loaded (adding additional room) - restore current room's background
-    if (currentBackgroundImage) {
-      setBackgroundImage(currentBackgroundImage);
-    }
   }
 }
 
@@ -4373,7 +4391,7 @@ async function loadRoomById(roomId) {
 }
 
 async function saveCurrentRoom() {
-  if (!currentRoomId || !currentBackgroundImage) return;
+  if (!currentRoomId) return;
 
   const room = await dbLoadRoom(currentRoomId) || {};
 

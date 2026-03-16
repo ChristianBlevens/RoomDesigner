@@ -1105,7 +1105,7 @@ export async function placeFurniture(entryId, position, surfaceNormal = null) {
   }
 
   // Add to scene
-  addFurnitureToScene(model, entryId, position);
+  addFurnitureToScene(model, entryId);
 
   // Record undo action
   const command = new PlaceFurnitureCommand(scene, model, selectableObjects);

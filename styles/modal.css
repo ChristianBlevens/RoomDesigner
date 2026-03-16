@@ -590,6 +590,8 @@
 #layout-name-modal { z-index: 560; }
 #layout-replace-modal { z-index: 560; }
 #layout-missing-modal { z-index: 570; }
+#feedback-modal { z-index: 510; }
+#warning-modal { z-index: 510; }
 #confirm-delete-modal { z-index: 600; }
 
 /* ============ Form Error ============ */

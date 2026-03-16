@@ -268,10 +268,31 @@ def get_batch_availability(request: AvailabilityRequest, org_id: str = Depends(v
         if h[0] not in conflict_houses:
             conflict_houses[h[0]] = {"name": h[1], "start": str(h[2]), "end": str(h[3]), "type": "buffer"}
 
+    # Count furniture in other rooms of the current house (same-house usage)
+    same_house_query = "SELECT placed_furniture FROM rooms WHERE house_id = ?"
+    same_house_params = [request.currentHouseId]
+    if request.currentRoomId:
+        same_house_query += " AND id != ?"
+        same_house_params.append(request.currentRoomId)
+
+    same_house_rooms = houses_db.execute(same_house_query, same_house_params).fetchall()
+
+    same_house_counts = {entry_id: 0 for entry_id in request.entryIds}
+    for room_row in same_house_rooms:
+        placed_json = room_row[0]
+        if placed_json:
+            placed = json.loads(placed_json)
+            for furn in placed:
+                eid = furn.get('entryId')
+                if eid in same_house_counts:
+                    same_house_counts[eid] += 1
+
     if not conflict_houses:
         for entry_id in request.entryIds:
             total = quantities.get(entry_id, 0)
-            result[entry_id] = AvailabilityEntry(available=total, total=total)
+            same_used = same_house_counts.get(entry_id, 0)
+            available = max(0, total - same_used)
+            result[entry_id] = AvailabilityEntry(available=available, total=total)
         return result
 
     # Query rooms in all conflict houses for placed furniture
@@ -325,7 +346,8 @@ def get_batch_availability(request: AvailabilityRequest, org_id: str = Depends(v
                 if h_info["type"] == "overlap":
                     overlap_used += count
 
-        available = max(0, total - overlap_used)
+        same_used = same_house_counts.get(entry_id, 0)
+        available = max(0, total - overlap_used - same_used)
         result[entry_id] = AvailabilityEntry(
             available=available, total=total, conflicts=conflicts
         )
