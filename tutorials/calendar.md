@@ -13,6 +13,13 @@ The calendar is the landing page after signing in. It shows all your houses orga
 
 Tap the **"+" button** on any date to create a new house starting on that date. You'll be prompted to enter a name and end date.
 
+## Tools & Feedback
+
+Tap the **"Tools"** button at the bottom of the calendar to access:
+
+- **Furniture Segmenter** — open the segmentation tool in a new tab
+- **Send Feedback** — submit feedback or suggestions, and view your previous submissions with status updates
+
 ## Color Coding
 
 Each house gets a unique color for easy identification on the calendar grid.

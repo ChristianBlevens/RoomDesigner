@@ -50,3 +50,4 @@ If you don't need AI repair, just tap **"Export"** without selecting any cards �
 - Use **AI repair** on items that were partially hidden behind other furniture — it fills in the missing parts
 - Use **Reset** to clear all results and start over with new point placement
 - The tool works entirely in your browser after the AI segmentation and repair steps — no data is saved
+- Use the **feedback button** (bottom-right corner) to report issues or suggest improvements
