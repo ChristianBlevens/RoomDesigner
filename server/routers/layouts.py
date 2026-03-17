@@ -12,6 +12,7 @@ from db.connection import get_houses_db
 from models.layout import LayoutCreate, LayoutResponse
 from routers.auth import verify_token
 from routers.rooms import verify_room_ownership
+from activity import log_activity
 import r2
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,8 @@ def create_layout(room_id: str, layout: LayoutCreate, org_id: str = Depends(veri
          json.dumps(layout.placedFurniture), screenshot_path]
     )
 
+    log_activity("org", org_id, "create_layout", "layout", resource_id=layout_id, resource_name=layout.name,
+                 details={"room_id": room_id})
     row = db.execute(f"{LAYOUT_SELECT} WHERE id = ?", [layout_id]).fetchone()
     return row_to_response(row)
 
@@ -111,4 +114,5 @@ def delete_layout(room_id: str, layout_id: str, org_id: str = Depends(verify_tok
     if row[0]:
         r2.delete_object(row[0])
 
+    log_activity("org", org_id, "delete_layout", "layout", resource_id=layout_id, details={"room_id": room_id})
     return {"status": "deleted"}

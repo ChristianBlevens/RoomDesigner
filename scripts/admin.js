@@ -139,11 +139,12 @@ function updateExtraFilters() {
     container.appendChild(select);
   }
 
-  if (currentTab === 'meshy') {
+  if (currentTab === 'tasks') {
     const select = document.createElement('select');
     select.className = 'admin-filter';
     select.innerHTML = `
       <option value="">All Status</option>
+      <option value="queued">Queued</option>
       <option value="pending">Pending</option>
       <option value="creating">Creating</option>
       <option value="polling">Polling</option>
@@ -154,6 +155,18 @@ function updateExtraFilters() {
     select.addEventListener('change', () => loadTabData());
     select.id = 'admin-filter-status';
     container.appendChild(select);
+
+    const serviceSelect = document.createElement('select');
+    serviceSelect.className = 'admin-filter';
+    serviceSelect.id = 'admin-filter-task-service';
+    serviceSelect.innerHTML = `
+      <option value="">All Services</option>
+      <option value="model_3d">3D Generation</option>
+      <option value="modal">Modal (MoGe/SAM3)</option>
+      <option value="gemini">Gemini</option>
+    `;
+    serviceSelect.addEventListener('change', () => loadTabData());
+    container.appendChild(serviceSelect);
   }
 
   if (currentTab === 'usage') {
@@ -204,13 +217,15 @@ function updateExtraFilters() {
 // ============ Table Rendering ============
 
 const TAB_COLUMNS = {
-  orgs: ['Username', 'Demo', 'Houses', 'Furniture', 'Created'],
+  orgs: ['Username', 'Demo', 'Houses', 'Furniture', 'Last Login', 'Created'],
   houses: ['Name', 'Org', 'Dates', 'Rooms', 'Created'],
   rooms: ['Name', 'House', 'Org', 'Status', 'Furniture'],
   furniture: ['Name', 'Org', 'Category', 'Qty', 'Image', 'Model'],
-  meshy: ['Furniture', 'Org', 'Status', 'Progress', 'Retries', 'Created'],
+  tasks: ['Furniture', 'Org', 'Status', 'Progress', 'Retries', 'Created'],
   usage: ['Time', 'Org', 'Service', 'Action', 'Success', 'Duration', 'Admin'],
   feedback: ['Date', 'Org', 'Message', 'Status'],
+  activity: ['Time', 'Actor', 'Action', 'Resource', 'Name', 'Details'],
+  errors: ['Time', 'Type', 'Source', 'Message', 'Org', 'Endpoint'],
 };
 
 function renderTable(columns, rows) {
@@ -261,7 +276,9 @@ async function loadTabData() {
         cells: [
           o.username,
           o.demoMode ? badge('DEMO', 'warning') : '',
-          o.houseCount, o.furnitureCount, o.createdAt?.split('T')[0] || ''
+          o.houseCount, o.furnitureCount,
+          o.lastLogin ? o.lastLogin.split('.')[0].replace('T',' ') : 'Never',
+          o.createdAt?.split('T')[0] || ''
         ],
         actions: actionBtn('Enter', 'btn-primary', `window._adminEnterOrg('${o.id}','${o.username}')`)
           + actionBtn('View', 'btn-secondary', `window._adminDetail('org','${o.id}')`)
@@ -315,21 +332,52 @@ async function loadTabData() {
       })));
     }
 
-    else if (currentTab === 'meshy') {
+    else if (currentTab === 'tasks') {
       const statusFilter = document.getElementById('admin-filter-status');
+      const serviceFilter = document.getElementById('admin-filter-task-service');
       if (statusFilter && statusFilter.value) params.set('status', statusFilter.value);
+      if (serviceFilter && serviceFilter.value) params.set('service', serviceFilter.value);
 
-      const data = await apiGet(`/meshy-tasks?${params}`);
-      renderTable(TAB_COLUMNS.meshy, data.map(t => ({
+      const data = await apiGet(`/tasks?${params}`);
+
+      const asyncRows = (data.asyncTasks || []).map(t => ({
         id: t.id,
         cells: [
           t.furnitureName, t.orgUsername,
-          badge(t.status, t.status === 'completed' ? 'success' : t.status === 'failed' ? 'danger' : ''),
-          `${t.progress}%`, t.retryCount,
+          badge(t.status, t.stuck ? 'danger' : t.status === 'completed' ? 'success' : t.status === 'failed' ? 'danger' : ''),
+          `${t.progress}%` + (t.stuck ? ' <span style="color:var(--accent-red);font-size:0.75em;">STUCK</span>' : ''),
+          t.retryCount,
           t.createdAt?.split('T')[0] || ''
         ],
         actions: actionBtn('Delete', 'btn-danger', `window._adminDeleteTask('${t.id}')`)
-      })));
+      }));
+
+      const syncCols = ['Time', 'Org', 'Service', 'Action', 'Success', 'Duration'];
+      const syncRows = (data.recentCalls || []).map(c => ({
+        id: c.id,
+        cells: [
+          c.createdAt?.split('.')[0].replace('T',' ') || '',
+          c.orgUsername,
+          badge(c.service, ''),
+          c.action,
+          c.success ? badge('Yes', 'success') : badge('No', 'danger'),
+          c.durationMs ? `${c.durationMs}ms` : '-',
+        ],
+        actions: '',
+      }));
+
+      renderTable(TAB_COLUMNS.tasks, asyncRows);
+
+      if (syncRows.length > 0) {
+        const tbody = document.getElementById('admin-tbody');
+        tbody.insertAdjacentHTML('beforeend', `
+          <tr><td colspan="${TAB_COLUMNS.tasks.length + 1}" style="padding:16px 0 8px;font-weight:600;color:var(--text-secondary);border-bottom:1px solid var(--glass-border);">Recent Sync Calls (last 5 min)</td></tr>
+          <tr style="background:var(--glass-bg);">${syncCols.map(c => `<th style="padding:6px 10px;text-align:left;font-size:0.8em;">${c}</th>`).join('')}<th></th></tr>
+        `);
+        for (const row of syncRows) {
+          tbody.insertAdjacentHTML('beforeend', `<tr>${row.cells.map(c => `<td>${c}</td>`).join('')}<td></td></tr>`);
+        }
+      }
     }
 
     else if (currentTab === 'usage') {
@@ -374,6 +422,41 @@ async function loadTabData() {
         actions: actionBtn('View', 'btn-secondary', `window._adminDetailFeedback('${f.id}')`)
       })));
     }
+
+    else if (currentTab === 'activity') {
+      const data = await apiGet(`/activity?limit=100`);
+      renderTable(TAB_COLUMNS.activity, (data.activities || []).map(a => {
+        const detailStr = a.details ? JSON.stringify(a.details) : '';
+        return {
+          id: a.id,
+          cells: [
+            a.created_at?.split('.')[0].replace('T',' ') || '',
+            `${a.actor_type}${a.actor_id && a.actor_id !== a.actor_type ? ':' + a.actor_id.substring(0,8) : ''}`,
+            a.action,
+            a.resource_type,
+            a.resource_name || a.resource_id?.substring(0,8) || '',
+            detailStr.length > 50 ? detailStr.substring(0, 50) + '...' : detailStr,
+          ],
+          actions: '',
+        };
+      }));
+    }
+
+    else if (currentTab === 'errors') {
+      const data = await apiGet(`/errors?limit=100`);
+      renderTable(TAB_COLUMNS.errors, (data.errors || []).map(e => ({
+        id: e.id,
+        cells: [
+          e.created_at?.split('.')[0].replace('T',' ') || '',
+          badge(e.error_type, 'warning'),
+          e.source,
+          e.message.length > 60 ? e.message.substring(0, 60) + '...' : e.message,
+          e.org_id || '',
+          e.endpoint || '',
+        ],
+        actions: actionBtn('View', 'btn-secondary', `window._adminDetailError('${e.id}')`)
+      })));
+    }
   } catch (err) {
     showToast(`Error: ${err.message}`, 5000);
   }
@@ -399,10 +482,18 @@ async function showOrgDetail(orgId) {
   const name = org ? org.username : orgId;
   const isDemo = org ? org.demoMode : false;
 
+  const lastLogin = org?.lastLogin ? org.lastLogin.split('.')[0].replace('T',' ') : 'Never';
+  const loginCount = org?.loginCount || 0;
+
   showDetail(`Org: ${name}`, `
     <div class="detail-section">
       <h3>ID</h3>
       <p class="detail-mono">${orgId}</p>
+    </div>
+    <div class="detail-section">
+      <h3>Login Activity</h3>
+      <p>Last login: ${lastLogin}</p>
+      <p>Total logins: ${loginCount}</p>
     </div>
     <div class="detail-section">
       <h3>Demo Mode</h3>
@@ -438,6 +529,20 @@ async function showOrgDetail(orgId) {
       <div id="detail-allowances" class="detail-form">
         <p class="detail-sub">Loading...</p>
       </div>
+    </div>
+    <div class="detail-section">
+      <h3>Usage Reports</h3>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <select id="detail-report-period" class="admin-filter" style="width:auto;">
+          <option value="weekly">Weekly</option>
+          <option value="monthly" selected>Monthly</option>
+          <option value="yearly">Yearly</option>
+        </select>
+        <input type="date" id="detail-report-date" class="admin-filter" style="width:auto;">
+        <button id="detail-view-report" class="btn-secondary">View</button>
+        <button id="detail-download-csv" class="btn-secondary">CSV</button>
+      </div>
+      <div id="detail-report-content" style="margin-top:10px;"></div>
     </div>
   `);
 
@@ -504,6 +609,43 @@ async function showOrgDetail(orgId) {
   } catch (err) {
     document.getElementById('detail-allowances').innerHTML = `<p class="detail-sub">Error loading allowances</p>`;
   }
+
+  // Usage reports
+  document.getElementById('detail-report-date').value = new Date().toISOString().split('T')[0];
+
+  document.getElementById('detail-view-report').addEventListener('click', async () => {
+    const period = document.getElementById('detail-report-period').value;
+    const date = document.getElementById('detail-report-date').value;
+    const content = document.getElementById('detail-report-content');
+    content.innerHTML = '<p class="detail-sub">Loading...</p>';
+    try {
+      const params = new URLSearchParams({ period });
+      if (date) params.set('date', date);
+      const report = await apiGet(`/reports/${orgId}?${params}`);
+      const serviceRows = Object.entries(report.byService).map(([svc, d]) =>
+        `<tr><td>${svc}</td><td>${d.total}</td><td>${d.success}</td><td>${d.failed}</td><td>${d.totalDurationMs ? Math.round(d.totalDurationMs / 1000) + 's' : '-'}</td></tr>`
+      ).join('');
+      content.innerHTML = `
+        <p class="detail-sub">${report.startDate} — ${report.endDate}</p>
+        <p>Total calls: <strong>${report.totalCalls}</strong></p>
+        ${report.peakDay ? `<p>Peak day: ${report.peakDay} (${report.peakDayCount} calls)</p>` : ''}
+        <table class="admin-table" style="margin-top:8px;font-size:0.85em;">
+          <thead><tr><th>Service</th><th>Total</th><th>OK</th><th>Fail</th><th>Duration</th></tr></thead>
+          <tbody>${serviceRows || '<tr><td colspan="5">No usage data</td></tr>'}</tbody>
+        </table>
+      `;
+    } catch (err) {
+      content.innerHTML = `<p style="color:var(--accent-red);">${err.message}</p>`;
+    }
+  });
+
+  document.getElementById('detail-download-csv').addEventListener('click', () => {
+    const period = document.getElementById('detail-report-period').value;
+    const date = document.getElementById('detail-report-date').value;
+    const params = new URLSearchParams({ period });
+    if (date) params.set('date', date);
+    window.open(`${API_BASE}/reports/${orgId}/csv?${params}`, '_blank');
+  });
 }
 
 async function showHouseDetail(houseId) {
@@ -1118,6 +1260,32 @@ window._adminDetailFeedback = async (id) => {
     });
   } catch (err) {
     showToast(`Error: ${err.message}`, 5000);
+  }
+};
+
+window._adminDetailError = async (id) => {
+  try {
+    const data = await apiGet(`/errors?limit=200`);
+    const err = (data.errors || []).find(e => e.id === id);
+    if (!err) return;
+
+    showDetail(`Error: ${err.error_type}`, `
+      <div class="detail-section">
+        <h3>Source</h3>
+        <p>${err.source}</p>
+      </div>
+      <div class="detail-section">
+        <h3>Message</h3>
+        <p style="white-space:pre-wrap;">${err.message}</p>
+      </div>
+      ${err.endpoint ? `<div class="detail-section"><h3>Endpoint</h3><p>${err.endpoint}</p></div>` : ''}
+      ${err.org_id ? `<div class="detail-section"><h3>Org</h3><p>${err.org_id}</p></div>` : ''}
+      ${err.traceback ? `<div class="detail-section"><h3>Traceback</h3><pre style="white-space:pre-wrap;font-size:0.75rem;max-height:300px;overflow:auto;">${err.traceback}</pre></div>` : ''}
+      ${err.metadata ? `<div class="detail-section"><h3>Metadata</h3><pre style="white-space:pre-wrap;font-size:0.75rem;">${JSON.stringify(err.metadata, null, 2)}</pre></div>` : ''}
+      <p class="detail-sub">${err.created_at}</p>
+    `);
+  } catch (e) {
+    showToast(`Error: ${e.message}`, 5000);
   }
 };
 

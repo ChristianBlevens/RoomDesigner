@@ -20,6 +20,9 @@ from model_processor import ModelProcessor
 from db.connection import get_furniture_db
 from routers.auth import verify_token, verify_token_full
 from usage import check_allowance, log_usage
+from errors import log_exception
+from activity import log_activity
+from circuit_breaker import trellis_breaker
 
 logger = logging.getLogger(__name__)
 
@@ -385,6 +388,9 @@ async def process_task(task: MeshyTask):
     """Process a single task based on its current state."""
     try:
         if task.status == 'pending':
+            if MODEL_3D_BACKEND == 'trellis2' and not trellis_breaker.can_execute():
+                logger.warning(f"TRELLIS.2 circuit breaker OPEN — skipping task {task.id}")
+                return
             update_task(task.id, status='creating')
 
             if MODEL_3D_BACKEND == 'trellis2':
@@ -422,6 +428,9 @@ async def process_task(task: MeshyTask):
             await download_and_process_glb(task)
             update_task(task.id, status='completed', progress=100)
             logger.info(f"Completed processing for furniture {task.furniture_id}")
+            _log_task_completion(task, success=True)
+            log_activity("system", "system", "model_completed", "furniture", resource_id=task.furniture_id,
+                         details={"task_id": task.id, "backend": MODEL_3D_BACKEND})
 
     except RetryableError as e:
         handle_task_error(task, e, retryable=True)
@@ -429,6 +438,7 @@ async def process_task(task: MeshyTask):
         handle_task_error(task, e, retryable=False)
     except Exception as e:
         logger.exception(f"Unexpected error processing task {task.id}")
+        log_exception(e, "meshy.process_task", endpoint="polling_loop", metadata={"task_id": task.id, "status": task.status})
         handle_task_error(task, e, retryable=True)
 
 
@@ -456,8 +466,13 @@ async def _poll_trellis2_task(task: MeshyTask):
     if exc:
         raise exc
 
+    if MODEL_3D_BACKEND == 'trellis2':
+        trellis_breaker.record_success()
     update_task(task.id, status='completed', progress=100)
     logger.info(f"TRELLIS.2 completed for furniture {task.furniture_id}")
+    _log_task_completion(task, success=True)
+    log_activity("system", "system", "model_completed", "furniture", resource_id=task.furniture_id,
+                 details={"task_id": task.id, "backend": "trellis2"})
 
 
 async def _run_trellis2_generation(task: MeshyTask):
@@ -500,6 +515,24 @@ async def _run_trellis2_generation(task: MeshyTask):
     )
 
 
+def _log_task_completion(task: MeshyTask, success: bool, error_message: str = None):
+    """Log usage entry at task completion/failure with duration."""
+    duration_ms = None
+    if task.created_at:
+        created = task.created_at if isinstance(task.created_at, datetime) else datetime.fromisoformat(str(task.created_at))
+        duration_ms = int((datetime.now() - created).total_seconds() * 1000)
+    # Look up org_id from furniture
+    conn = get_furniture_db()
+    row = conn.execute("SELECT org_id FROM furniture WHERE id = ?", [task.furniture_id]).fetchone()
+    org_id = row[0] if row else None
+    if org_id:
+        log_usage(
+            org_id=org_id, service_category="model_3d", action="model_complete",
+            success=success, duration_ms=duration_ms, error_message=error_message,
+            metadata={"furniture_id": task.furniture_id, "task_id": task.id, "backend": MODEL_3D_BACKEND},
+        )
+
+
 def handle_task_error(task: MeshyTask, error: Exception, retryable: bool):
     """Handle task error with retry logic."""
     error_msg = str(error)
@@ -511,6 +544,12 @@ def handle_task_error(task: MeshyTask, error: Exception, retryable: bool):
     else:
         # Give up: mark as failed
         logger.error(f"Task {task.id} permanently failed: {error_msg}")
+        if MODEL_3D_BACKEND == 'trellis2':
+            trellis_breaker.record_failure()
+        log_exception(error, "meshy.handle_task_error", endpoint="polling_loop", metadata={"task_id": task.id, "furniture_id": task.furniture_id, "retries": task.retry_count})
+        _log_task_completion(task, success=False, error_message=error_msg)
+        log_activity("system", "system", "model_failed", "furniture", resource_id=task.furniture_id,
+                     details={"task_id": task.id, "error": error_msg})
         update_task(task.id, status='failed', error_message=error_msg)
 
 
@@ -538,6 +577,7 @@ async def polling_loop():
 
         except Exception as e:
             logger.exception(f"Error in polling loop: {e}")
+            log_exception(e, "meshy.polling_loop", endpoint="background_polling")
 
         await asyncio.sleep(POLL_INTERVAL)
 
@@ -595,6 +635,8 @@ async def generate_model(furniture_id: str, token: dict = Depends(verify_token_f
         metadata={"furniture_id": furniture_id, "task_id": task_id, "backend": MODEL_3D_BACKEND},
     )
 
+    log_activity("org", org_id, "generate_model", "furniture", resource_id=furniture_id,
+                 details={"task_id": task_id, "backend": MODEL_3D_BACKEND})
     return {"task_id": task_id}
 
 
@@ -626,7 +668,8 @@ async def get_tasks(org_id: str = Depends(verify_token)):
         "tasks": tasks,
         "active": active,
         "queued": queued,
-        "max": MAX_CONCURRENT_TASKS
+        "max": MAX_CONCURRENT_TASKS,
+        "backend": MODEL_3D_BACKEND,
     }
 
 

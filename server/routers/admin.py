@@ -18,8 +18,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.connection import get_auth_db, get_houses_db, get_furniture_db
 from routers.auth import verify_admin, create_impersonation_token
 from usage import DEFAULT_ALLOWANCES, create_default_allowances
+from activity import log_activity
 from model_processor import ModelProcessor
 from moge_client import process_image_with_modal, MoGeError
+from circuit_breaker import moge_breaker
 import r2
 
 logger = logging.getLogger(__name__)
@@ -40,12 +42,12 @@ def list_orgs(
 
     if q:
         orgs = auth_db.execute(
-            "SELECT id, username, created_at, demo_mode FROM orgs WHERE username ILIKE ?",
+            "SELECT id, username, created_at, demo_mode, last_login, login_count FROM orgs WHERE username ILIKE ?",
             [f"%{q}%"]
         ).fetchall()
     else:
         orgs = auth_db.execute(
-            "SELECT id, username, created_at, demo_mode FROM orgs ORDER BY created_at DESC"
+            "SELECT id, username, created_at, demo_mode, last_login, login_count FROM orgs ORDER BY created_at DESC"
         ).fetchall()
 
     result = []
@@ -62,6 +64,8 @@ def list_orgs(
             "username": org[1],
             "createdAt": str(org[2]) if org[2] else None,
             "demoMode": bool(org[3]),
+            "lastLogin": str(org[4]) if org[4] else None,
+            "loginCount": org[5] or 0,
             "houseCount": house_count,
             "furnitureCount": furniture_count,
         })
@@ -100,6 +104,8 @@ def create_org(body: dict, is_admin: bool = Depends(verify_admin)):
 
     create_default_allowances(org_id)
 
+    log_activity("admin", "admin", "admin_create_org", "org", resource_id=org_id, resource_name=username,
+                 details={"demo_mode": demo_mode})
     return {"id": org_id, "username": username, "demo_mode": demo_mode}
 
 
@@ -115,6 +121,7 @@ def impersonate_org(org_id: str, is_admin: bool = Depends(verify_admin)):
 
     token = create_impersonation_token(org_id)
 
+    log_activity("admin", "admin", "admin_impersonate", "org", resource_id=org_id, resource_name=row[1])
     return {
         "token": token,
         "org_id": row[0],
@@ -135,6 +142,7 @@ def set_demo_mode(org_id: str, body: dict, is_admin: bool = Depends(verify_admin
         "UPDATE orgs SET demo_mode = ? WHERE id = ?",
         [demo_mode, org_id]
     )
+    log_activity("admin", "admin", "admin_toggle_demo", "org", resource_id=org_id, details={"demo_mode": demo_mode})
     return {"status": "updated", "demo_mode": demo_mode}
 
 
@@ -157,6 +165,7 @@ def reset_org_password(org_id: str, body: dict, is_admin: bool = Depends(verify_
         "UPDATE orgs SET password_hash = ? WHERE id = ?",
         [password_hash, org_id]
     )
+    log_activity("admin", "admin", "admin_reset_password", "org", resource_id=org_id)
     return {"status": "updated"}
 
 
@@ -181,8 +190,14 @@ def delete_org(org_id: str, is_admin: bool = Depends(verify_admin)):
         for path in row[1:]:
             if path:
                 r2_keys.append(path)
-    furniture_db.execute("DELETE FROM meshy_tasks WHERE furniture_id IN (SELECT id FROM furniture WHERE org_id = ?)", [org_id])
-    furniture_db.execute("DELETE FROM furniture WHERE org_id = ?", [org_id])
+    furniture_db.execute("BEGIN TRANSACTION")
+    try:
+        furniture_db.execute("DELETE FROM meshy_tasks WHERE furniture_id IN (SELECT id FROM furniture WHERE org_id = ?)", [org_id])
+        furniture_db.execute("DELETE FROM furniture WHERE org_id = ?", [org_id])
+        furniture_db.execute("COMMIT")
+    except Exception:
+        furniture_db.execute("ROLLBACK")
+        raise
 
     # Delete all rooms R2 assets and records
     room_rows = houses_db.execute("""
@@ -216,27 +231,46 @@ def delete_org(org_id: str, is_admin: bool = Depends(verify_admin)):
     for lr in layout_rows:
         if lr[0]:
             r2_keys.append(lr[0])
-    houses_db.execute("""
-        DELETE FROM layouts
-        WHERE room_id IN (
-            SELECT id FROM rooms WHERE house_id IN (
-                SELECT id FROM houses WHERE org_id = ?
+    houses_db.execute("BEGIN TRANSACTION")
+    try:
+        houses_db.execute("""
+            DELETE FROM layouts
+            WHERE room_id IN (
+                SELECT id FROM rooms WHERE house_id IN (
+                    SELECT id FROM houses WHERE org_id = ?
+                )
             )
-        )
-    """, [org_id])
-    houses_db.execute("""
-        DELETE FROM rooms WHERE house_id IN (SELECT id FROM houses WHERE org_id = ?)
-    """, [org_id])
-    houses_db.execute("DELETE FROM houses WHERE org_id = ?", [org_id])
+        """, [org_id])
+        houses_db.execute("""
+            DELETE FROM rooms WHERE house_id IN (SELECT id FROM houses WHERE org_id = ?)
+        """, [org_id])
+        houses_db.execute("DELETE FROM houses WHERE org_id = ?", [org_id])
+        houses_db.execute("COMMIT")
+    except Exception:
+        houses_db.execute("ROLLBACK")
+        raise
 
-    # Delete org
-    auth_db.execute("DELETE FROM orgs WHERE id = ?", [org_id])
+    # Delete org-related auth.db records
+    auth_db.execute("BEGIN TRANSACTION")
+    try:
+        auth_db.execute("DELETE FROM usage_log WHERE org_id = ?", [org_id])
+        auth_db.execute("DELETE FROM feedback WHERE org_id = ?", [org_id])
+        auth_db.execute("DELETE FROM org_allowances WHERE org_id = ?", [org_id])
+        auth_db.execute("DELETE FROM activity_log WHERE actor_id = ?", [org_id])
+        auth_db.execute("DELETE FROM error_log WHERE org_id = ?", [org_id])
+        auth_db.execute("DELETE FROM orgs WHERE id = ?", [org_id])
+        auth_db.execute("COMMIT")
+    except Exception:
+        auth_db.execute("ROLLBACK")
+        raise
 
     # Batch delete R2 objects
     if r2_keys:
         r2.delete_objects(r2_keys)
 
     logger.info(f"Admin deleted org {org_id} with {len(furn_rows)} furniture, {len(room_rows)} rooms")
+    log_activity("admin", "admin", "admin_delete_org", "org", resource_id=org_id,
+                 details={"furniture_count": len(furn_rows), "room_count": len(room_rows), "r2_keys": len(r2_keys)})
     return {"status": "deleted", "r2_objects_deleted": len(r2_keys)}
 
 
@@ -397,6 +431,8 @@ def delete_house(house_id: str, is_admin: bool = Depends(verify_admin)):
     if r2_keys:
         r2.delete_objects(r2_keys)
 
+    log_activity("admin", "admin", "admin_delete_house", "house", resource_id=house_id,
+                 details={"room_count": len(rooms)})
     return {"status": "deleted", "r2_objects_deleted": len(r2_keys)}
 
 
@@ -527,6 +563,7 @@ def delete_room(room_id: str, is_admin: bool = Depends(verify_admin)):
     db.execute("DELETE FROM rooms WHERE id = ?", [room_id])
     r2.delete_objects(r2_keys)
 
+    log_activity("admin", "admin", "admin_delete_room", "room", resource_id=room_id)
     return {"status": "deleted"}
 
 
@@ -546,9 +583,13 @@ async def regenerate_mesh(room_id: str, is_admin: bool = Depends(verify_admin)):
         raise HTTPException(404, "Background image not found in storage")
 
     # Process with MoGe-2
+    if not moge_breaker.can_execute():
+        raise HTTPException(503, "MoGe-2 service is temporarily unavailable. Please try again in a few minutes.")
     try:
         result = await process_image_with_modal(image_bytes)
+        moge_breaker.record_success()
     except MoGeError as e:
+        moge_breaker.record_failure()
         raise HTTPException(502, f"Mesh generation failed: {str(e)}")
 
     # Upload new mesh to R2
@@ -739,6 +780,7 @@ def delete_furniture(furniture_id: str, is_admin: bool = Depends(verify_admin)):
     if r2_keys:
         r2.delete_objects(r2_keys)
 
+    log_activity("admin", "admin", "admin_delete_furniture", "furniture", resource_id=furniture_id)
     return {"status": "deleted"}
 
 
@@ -906,6 +948,99 @@ def list_meshy_tasks(
         "orgId": row[9],
         "orgUsername": org_names.get(row[9], "Unknown"),
     } for row in rows]
+
+
+# ============ Unified Tasks ============
+
+@router.get("/tasks")
+def list_tasks(
+    status: Optional[str] = Query(None),
+    org_id: Optional[str] = Query(None),
+    service: Optional[str] = Query(None),
+    is_admin: bool = Depends(verify_admin)
+):
+    """Unified tasks view: async 3D tasks + recent sync calls."""
+    from datetime import datetime, timedelta
+
+    db = get_furniture_db()
+    auth_db = get_auth_db()
+    now = datetime.now()
+    stuck_threshold = now - timedelta(minutes=10)
+
+    # --- Async tasks (Meshy/TRELLIS) ---
+    task_query = """
+        SELECT t.id, t.furniture_id, t.status, t.progress, t.retry_count,
+               t.error_message, t.created_at, t.updated_at,
+               f.name as furniture_name, f.org_id
+        FROM meshy_tasks t
+        LEFT JOIN furniture f ON t.furniture_id = f.id
+        WHERE 1=1
+    """
+    task_params = []
+    if status:
+        task_query += " AND t.status = ?"
+        task_params.append(status)
+    if org_id:
+        task_query += " AND f.org_id = ?"
+        task_params.append(org_id)
+    task_query += " ORDER BY t.created_at DESC"
+    task_rows = db.execute(task_query, task_params).fetchall()
+
+    org_ids = list(set(row[9] for row in task_rows if row[9]))
+
+    # --- Recent sync calls (last 5 minutes from usage_log) ---
+    sync_cutoff = now - timedelta(minutes=5)
+    sync_query = """
+        SELECT id, org_id, service_category, action, success, duration_ms, error_message, created_at
+        FROM usage_log WHERE created_at >= ?
+    """
+    sync_params = [sync_cutoff]
+    if org_id:
+        sync_query += " AND org_id = ?"
+        sync_params.append(org_id)
+    if service:
+        sync_query += " AND service_category = ?"
+        sync_params.append(service)
+    sync_query += " ORDER BY created_at DESC LIMIT 50"
+    sync_rows = auth_db.execute(sync_query, sync_params).fetchall()
+
+    sync_org_ids = [row[1] for row in sync_rows if row[1]]
+    all_org_ids = list(set(org_ids + sync_org_ids))
+
+    org_names = {}
+    for oid in all_org_ids:
+        org_row = auth_db.execute("SELECT username FROM orgs WHERE id = ?", [oid]).fetchone()
+        org_names[oid] = org_row[0] if org_row else "Unknown"
+
+    async_tasks = []
+    for row in task_rows:
+        updated = row[7]
+        is_stuck = False
+        if updated and row[2] in ('pending', 'creating', 'polling', 'downloading'):
+            if isinstance(updated, str):
+                updated_dt = datetime.fromisoformat(updated)
+            else:
+                updated_dt = updated
+            is_stuck = updated_dt < stuck_threshold
+        async_tasks.append({
+            "id": row[0], "furnitureId": row[1], "status": row[2],
+            "progress": row[3], "retryCount": row[4], "errorMessage": row[5],
+            "createdAt": str(row[6]) if row[6] else None,
+            "updatedAt": str(row[7]) if row[7] else None,
+            "furnitureName": row[8] or "Unknown",
+            "orgId": row[9], "orgUsername": org_names.get(row[9], "Unknown"),
+            "stuck": is_stuck,
+        })
+
+    recent_calls = [{
+        "id": row[0], "orgId": row[1], "orgUsername": org_names.get(row[1], "Unknown"),
+        "service": row[2], "action": row[3],
+        "success": bool(row[4]), "durationMs": row[5],
+        "errorMessage": row[6],
+        "createdAt": str(row[7]) if row[7] else None,
+    } for row in sync_rows]
+
+    return {"asyncTasks": async_tasks, "recentCalls": recent_calls}
 
 
 # ============ R2 Cleanup ============
@@ -1166,6 +1301,7 @@ def update_org_allowances(org_id: str, body: dict, is_admin: bool = Depends(veri
                DO UPDATE SET daily_limit = ?""",
             [org_id, service_category, daily_limit, daily_limit]
         )
+    log_activity("admin", "admin", "admin_update_allowances", "org", resource_id=org_id, details=body)
     return {"status": "saved"}
 
 
@@ -1230,4 +1366,254 @@ def update_feedback(feedback_id: str, body: dict, is_admin: bool = Depends(verif
 
     values.append(feedback_id)
     db.execute(f"UPDATE feedback SET {', '.join(updates)} WHERE id = ?", values)
+    log_activity("admin", "admin", "admin_update_feedback", "feedback", resource_id=feedback_id,
+                 details={k: body[k] for k in ["status", "admin_notes"] if k in body})
     return {"status": "saved"}
+
+
+# ── Error Log ──────────────────────────────────────────────────────────
+
+@router.get("/errors")
+def list_errors(
+    error_type: Optional[str] = None,
+    source: Optional[str] = None,
+    limit: int = Query(50, le=200),
+    offset: int = 0,
+    is_admin: bool = Depends(verify_admin),
+):
+    db = get_auth_db()
+    where = []
+    params = []
+    if error_type:
+        where.append("error_type = ?")
+        params.append(error_type)
+    if source:
+        where.append("source LIKE ?")
+        params.append(f"%{source}%")
+    clause = f"WHERE {' AND '.join(where)}" if where else ""
+    count = db.execute(f"SELECT COUNT(*) FROM error_log {clause}", params).fetchone()[0]
+    rows = db.execute(
+        f"SELECT id, error_type, source, message, traceback, org_id, endpoint, metadata, created_at "
+        f"FROM error_log {clause} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        params + [limit, offset]
+    ).fetchall()
+    return {
+        "total": count,
+        "errors": [
+            {
+                "id": r[0], "error_type": r[1], "source": r[2], "message": r[3],
+                "traceback": r[4], "org_id": r[5], "endpoint": r[6],
+                "metadata": json.loads(r[7]) if r[7] else None,
+                "created_at": str(r[8]) if r[8] else None,
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.delete("/errors")
+def clear_old_errors(days: int = Query(30, ge=1), is_admin: bool = Depends(verify_admin)):
+    db = get_auth_db()
+    result = db.execute(
+        "DELETE FROM error_log WHERE created_at < CURRENT_TIMESTAMP - INTERVAL ? DAY",
+        [days]
+    )
+    return {"status": "cleaned", "days_threshold": days}
+
+
+# ── Activity Log ───────────────────────────────────────────────────────
+
+@router.get("/activity")
+def list_activity(
+    actor_type: Optional[str] = None,
+    actor_id: Optional[str] = None,
+    action: Optional[str] = None,
+    resource_type: Optional[str] = None,
+    limit: int = Query(100, le=500),
+    offset: int = 0,
+    is_admin: bool = Depends(verify_admin),
+):
+    db = get_auth_db()
+    where = []
+    params = []
+    if actor_type:
+        where.append("actor_type = ?")
+        params.append(actor_type)
+    if actor_id:
+        where.append("actor_id = ?")
+        params.append(actor_id)
+    if action:
+        where.append("action LIKE ?")
+        params.append(f"%{action}%")
+    if resource_type:
+        where.append("resource_type = ?")
+        params.append(resource_type)
+    clause = f"WHERE {' AND '.join(where)}" if where else ""
+    count = db.execute(f"SELECT COUNT(*) FROM activity_log {clause}", params).fetchone()[0]
+    rows = db.execute(
+        f"SELECT id, actor_type, actor_id, action, resource_type, resource_id, resource_name, details, created_at "
+        f"FROM activity_log {clause} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        params + [limit, offset]
+    ).fetchall()
+    return {
+        "total": count,
+        "activities": [
+            {
+                "id": r[0], "actor_type": r[1], "actor_id": r[2], "action": r[3],
+                "resource_type": r[4], "resource_id": r[5], "resource_name": r[6],
+                "details": json.loads(r[7]) if r[7] else None,
+                "created_at": str(r[8]) if r[8] else None,
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.delete("/activity")
+def clear_old_activity(days: int = Query(90, ge=1), is_admin: bool = Depends(verify_admin)):
+    db = get_auth_db()
+    db.execute(
+        "DELETE FROM activity_log WHERE created_at < CURRENT_TIMESTAMP - INTERVAL ? DAY",
+        [days]
+    )
+    return {"status": "cleaned", "days_threshold": days}
+
+
+# ── Usage Reports ──────────────────────────────────────────────────────
+
+@router.get("/reports/{org_id}")
+def generate_usage_report(
+    org_id: str,
+    period: str = Query("monthly", pattern="^(weekly|monthly|yearly)$"),
+    date: Optional[str] = Query(None),
+    is_admin: bool = Depends(verify_admin),
+):
+    """Generate a usage report for an org."""
+    from datetime import datetime, timedelta
+
+    auth_db = get_auth_db()
+
+    org_row = auth_db.execute("SELECT username FROM orgs WHERE id = ?", [org_id]).fetchone()
+    if not org_row:
+        raise HTTPException(404, "Org not found")
+
+    ref_date = datetime.strptime(date, "%Y-%m-%d") if date else datetime.now()
+
+    if period == "weekly":
+        start = ref_date - timedelta(days=6)
+        end = ref_date
+    elif period == "monthly":
+        start = ref_date.replace(day=1)
+        next_month = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
+        end = next_month - timedelta(days=1)
+    else:  # yearly
+        start = ref_date.replace(month=1, day=1)
+        end = ref_date.replace(month=12, day=31)
+
+    start_str = start.strftime("%Y-%m-%d 00:00:00")
+    end_str = end.strftime("%Y-%m-%d 23:59:59")
+
+    rows = auth_db.execute("""
+        SELECT service_category, action, success, duration_ms, created_at
+        FROM usage_log WHERE org_id = ? AND created_at BETWEEN ? AND ?
+        ORDER BY created_at
+    """, [org_id, start_str, end_str]).fetchall()
+
+    by_service = {}
+    by_day = {}
+    for r in rows:
+        svc = r[0]
+        if svc not in by_service:
+            by_service[svc] = {"total": 0, "success": 0, "failed": 0, "totalDurationMs": 0, "actions": {}}
+        s = by_service[svc]
+        s["total"] += 1
+        if r[2]:
+            s["success"] += 1
+        else:
+            s["failed"] += 1
+        if r[3]:
+            s["totalDurationMs"] += r[3]
+
+        action = r[1]
+        if action not in s["actions"]:
+            s["actions"][action] = 0
+        s["actions"][action] += 1
+
+        day = str(r[4])[:10]
+        if day not in by_day:
+            by_day[day] = 0
+        by_day[day] += 1
+
+    peak_day = max(by_day, key=by_day.get) if by_day else None
+
+    allowances = auth_db.execute(
+        "SELECT service_category, daily_limit FROM org_allowances WHERE org_id = ?", [org_id]
+    ).fetchall()
+
+    return {
+        "orgId": org_id,
+        "orgUsername": org_row[0],
+        "period": period,
+        "startDate": start.strftime("%Y-%m-%d"),
+        "endDate": end.strftime("%Y-%m-%d"),
+        "byService": by_service,
+        "byDay": by_day,
+        "peakDay": peak_day,
+        "peakDayCount": by_day.get(peak_day, 0) if peak_day else 0,
+        "totalCalls": sum(s["total"] for s in by_service.values()),
+        "allowances": {a[0]: a[1] for a in allowances},
+    }
+
+
+@router.get("/reports/{org_id}/csv")
+def generate_usage_report_csv(
+    org_id: str,
+    period: str = Query("monthly", pattern="^(weekly|monthly|yearly)$"),
+    date: Optional[str] = Query(None),
+    is_admin: bool = Depends(verify_admin),
+):
+    """Generate a CSV usage report for an org."""
+    from datetime import datetime, timedelta
+    from fastapi.responses import Response
+
+    auth_db = get_auth_db()
+
+    org_row = auth_db.execute("SELECT username FROM orgs WHERE id = ?", [org_id]).fetchone()
+    if not org_row:
+        raise HTTPException(404, "Org not found")
+
+    ref_date = datetime.strptime(date, "%Y-%m-%d") if date else datetime.now()
+
+    if period == "weekly":
+        start = ref_date - timedelta(days=6)
+        end = ref_date
+    elif period == "monthly":
+        start = ref_date.replace(day=1)
+        next_month = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
+        end = next_month - timedelta(days=1)
+    else:
+        start = ref_date.replace(month=1, day=1)
+        end = ref_date.replace(month=12, day=31)
+
+    start_str = start.strftime("%Y-%m-%d 00:00:00")
+    end_str = end.strftime("%Y-%m-%d 23:59:59")
+
+    rows = auth_db.execute("""
+        SELECT service_category, action, success, duration_ms, error_message, admin_initiated, created_at
+        FROM usage_log WHERE org_id = ? AND created_at BETWEEN ? AND ?
+        ORDER BY created_at
+    """, [org_id, start_str, end_str]).fetchall()
+
+    lines = ["Date,Service,Action,Success,Duration(ms),Admin,Error"]
+    for r in rows:
+        error = (r[4] or "").replace(",", ";").replace("\n", " ")[:100]
+        lines.append(f"{r[6]},{r[0]},{r[1]},{r[2]},{r[3] or ''},{r[5]},{error}")
+
+    csv_content = "\n".join(lines)
+    filename = f"usage_{org_row[0]}_{period}_{start.strftime('%Y%m%d')}.csv"
+
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

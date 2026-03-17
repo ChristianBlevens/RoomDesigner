@@ -572,9 +572,6 @@ export async function saveFurnitureEntry(entry) {
   if (entry.image instanceof Blob) {
     await uploadFile(`/files/furniture/${entryId}/image`, entry.image, 'image.jpg');
   }
-  if (entry.model instanceof Blob) {
-    await uploadFile(`/files/furniture/${entryId}/model`, entry.model, 'model.glb');
-  }
 
   // Invalidate caches after save
   invalidateFurnitureCache();
@@ -834,5 +831,12 @@ export async function submitFeedback(message) {
 export async function getMyFeedback() {
   const response = await apiFetch('/feedback/');
   return response.json();
+}
+
+export async function submitErrorReport(data) {
+  await apiFetch('/feedback/error-report', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
 }
 

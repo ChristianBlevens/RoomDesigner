@@ -15,6 +15,7 @@ import jwt
 import bcrypt
 
 from db.connection import get_auth_db
+from activity import log_activity
 
 logger = logging.getLogger(__name__)
 
@@ -207,6 +208,12 @@ def sign_in(request: Request, body: SignInRequest):
         and body.username.strip() == admin_username
         and body.password == admin_password):
         token = create_admin_token()
+        log_activity("admin", "admin", "admin_signin", "admin")
+        try:
+            from email_notify import send_admin_login_alert
+            send_admin_login_alert()
+        except Exception:
+            pass
         return {"token": token, "org_id": "admin", "username": admin_username, "admin": True}
 
     # Normal org sign-in
@@ -227,6 +234,13 @@ def sign_in(request: Request, body: SignInRequest):
     ):
         raise HTTPException(401, "Invalid username or password")
 
+    # Track login
+    db.execute(
+        "UPDATE orgs SET last_login = CURRENT_TIMESTAMP, login_count = COALESCE(login_count, 0) + 1 WHERE id = ?",
+        [org_id]
+    )
+    log_activity("org", org_id, "signin", "org", resource_id=org_id, resource_name=username)
+
     token = create_token(org_id)
     return {
         "token": token,
@@ -246,6 +260,9 @@ def log_out(credentials: HTTPAuthorizationCredentials = Depends(security)):
         jti = payload.get("jti")
         if jti:
             _revoke_token(jti)
+        org_id = payload.get("org_id", "admin")
+        actor_type = "admin" if payload.get("admin") else "org"
+        log_activity(actor_type, org_id, "logout", "org" if actor_type == "org" else "admin")
     except jwt.InvalidTokenError:
         pass
     return {"status": "logged out"}

@@ -13,11 +13,17 @@ from slowapi.errors import RateLimitExceeded
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from db.connection import init_databases, close_databases
+import logging
+import traceback
+
+from db.connection import init_databases, close_databases, get_auth_db, get_houses_db, get_furniture_db
 from routers import houses, rooms, furniture, files, meshy, enhance, admin, layouts, share, segmentation, feedback
 from routers.auth import init_auth_secret
 from routers import auth
 from events import subscribe
+from errors import log_exception
+
+logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -54,9 +60,55 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if os.environ.get("SERVER_BASE_URL", "").startswith("https"):
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+
+@app.middleware("http")
+async def global_error_logging(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as e:
+        log_exception(e, "unhandled", endpoint=f"{request.method} {request.url.path}")
+        raise
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for monitoring."""
+    status = {"server": "ok", "databases": {}, "r2": "unknown"}
+    for name, get_db in [("auth", get_auth_db), ("houses", get_houses_db), ("furniture", get_furniture_db)]:
+        try:
+            get_db().execute("SELECT 1")
+            status["databases"][name] = "ok"
+        except Exception:
+            status["databases"][name] = "error"
+    try:
+        import r2 as r2_module
+        r2_module.get_client()
+        status["r2"] = "ok"
+    except Exception:
+        status["r2"] = "error"
+    from circuit_breaker import moge_breaker, gemini_breaker, trellis_breaker, sam3_breaker
+    status["circuit_breakers"] = {
+        b.service_name: b.get_status()
+        for b in [moge_breaker, gemini_breaker, trellis_breaker, sam3_breaker]
+    }
+    all_ok = all(v == "ok" for v in status["databases"].values()) and status["r2"] == "ok"
+    return {"status": "ok" if all_ok else "degraded", "services": status}
+
 
 # Auth routes (no auth required)
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])

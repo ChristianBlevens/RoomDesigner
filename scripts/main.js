@@ -87,7 +87,8 @@ import {
   getLayout,
   deleteLayout,
   submitFeedback,
-  getMyFeedback
+  getMyFeedback,
+  submitErrorReport
 } from './api.js';
 import {
   captureRoomScreenshot,
@@ -1409,18 +1410,11 @@ function setupOrientationModal() {
 
 // Reset orientation modal state when opening
 function resetOrientationModal() {
-  const applyBtn = document.getElementById('apply-orientation-btn');
-  const defaultInfo = document.getElementById('orientation-default-info');
   const loadingEl = document.getElementById('orientation-loading');
-  const resultEl = document.getElementById('orientation-result');
   const errorEl = document.getElementById('orientation-error');
 
-  defaultInfo.classList.remove('hidden');
-  loadingEl.classList.add('hidden');
-  resultEl.classList.add('hidden');
+  loadingEl.classList.remove('hidden');
   errorEl.classList.add('hidden');
-  applyBtn.textContent = 'Analyze Room';
-  applyBtn.disabled = false;
 }
 
 /**
@@ -1437,23 +1431,16 @@ async function processRoomAutomatically() {
   roomProcessingInProgress = true;
 
   // Use orientation modal as progress display
-  const applyBtn = document.getElementById('apply-orientation-btn');
-  const defaultInfo = document.getElementById('orientation-default-info');
   const loadingEl = document.getElementById('orientation-loading');
   const loadingText = document.getElementById('orientation-loading-text');
-  const resultEl = document.getElementById('orientation-result');
-  const fovInfo = document.getElementById('orientation-fov-info');
   const errorEl = document.getElementById('orientation-error');
 
   // Reset and show loading state
-  defaultInfo.classList.add('hidden');
-  resultEl.classList.add('hidden');
   errorEl.classList.add('hidden');
   loadingEl.classList.remove('hidden');
-  applyBtn.classList.add('hidden');
   loadingText.textContent = pendingClearFurniture
-    ? 'Clearing furniture and analyzing geometry (60-90 seconds)...'
-    : 'Creating room and analyzing geometry (30-60 seconds)...';
+    ? 'Clearing furniture...'
+    : 'Extracting room geometry...';
 
   modalManager.openModal('orientation-modal');
 
@@ -1491,11 +1478,6 @@ async function processRoomAutomatically() {
 
     console.log('Room geometry loaded and camera aligned');
 
-    // Show success
-    loadingEl.classList.add('hidden');
-    resultEl.classList.remove('hidden');
-    fovInfo.textContent = `FOV: ${fov.toFixed(1)}°`;
-
     // Set as current room
     currentRoomId = room.id;
     currentRoom = room;
@@ -1520,9 +1502,6 @@ async function processRoomAutomatically() {
       meterStick: null,
     };
 
-    // Brief pause to show success
-    await new Promise(resolve => setTimeout(resolve, 800));
-
     // Transition to room workspace
     setCurrentLoadedHouse(currentHouseId);
     resetFurnitureVisibility();
@@ -1532,8 +1511,6 @@ async function processRoomAutomatically() {
     await renderTabBar();
     modalManager.closeAllModals();
 
-    // Restore button visibility for future use
-    applyBtn.classList.remove('hidden');
     roomProcessingInProgress = false;
 
   } catch (err) {
@@ -1541,7 +1518,6 @@ async function processRoomAutomatically() {
 
     // Show error
     loadingEl.classList.add('hidden');
-    resultEl.classList.add('hidden');
     errorEl.classList.remove('hidden');
     document.getElementById('orientation-error-text').textContent =
       `Room creation failed: ${err.message}`;
@@ -1549,8 +1525,6 @@ async function processRoomAutomatically() {
     // Pause to show error
     await new Promise(resolve => setTimeout(resolve, 2500));
 
-    // Cancel the room creation flow
-    applyBtn.classList.remove('hidden');
     roomProcessingInProgress = false;
     await cancelRoomCreationFlow();
   }
@@ -2064,9 +2038,7 @@ function setupEntryEditor() {
   const form = document.getElementById('entry-form');
   const cancelBtn = document.getElementById('cancel-entry-btn');
   const uploadImageBtn = document.getElementById('upload-image-entry-btn');
-  const uploadModelBtn = document.getElementById('upload-model-btn');
   const imageInput = document.getElementById('entry-image-input');
-  const modelInput = document.getElementById('entry-model-input');
   const tagInput = document.getElementById('entry-tag-input');
   const categoryInput = document.getElementById('entry-category');
   const generateBtn = document.getElementById('generate-model-btn');
@@ -2075,10 +2047,8 @@ function setupEntryEditor() {
   cancelBtn.addEventListener('click', closeEntryEditor);
 
   uploadImageBtn.addEventListener('click', () => imageInput.click());
-  uploadModelBtn.addEventListener('click', () => modelInput.click());
 
   imageInput.addEventListener('change', handleEntryImageUpload);
-  modelInput.addEventListener('change', handleEntryModelUpload);
 
   // Category input with dropdown
   categoryInput.addEventListener('focus', () => {
@@ -2548,25 +2518,6 @@ function handleEntryImageUpload(event) {
   event.target.value = '';
 }
 
-async function handleEntryModelUpload(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-
-  if (!file.name.toLowerCase().endsWith('.glb')) {
-    showError('Please upload a GLB model file');
-    return;
-  }
-
-  // Store the GLB file
-  entryModelBlob = file;
-
-  const preview = document.getElementById('model-upload-preview');
-  preview.innerHTML = '<span style="color: #22c55e;">Model loaded</span>';
-  // 3D preview will be generated server-side during upload
-
-  event.target.value = '';
-}
-
 function showImagePreview(blob, container) {
   container.innerHTML = '';
   const img = document.createElement('img');
@@ -2772,8 +2723,11 @@ function updateMeshyTrackerUI() {
   let html = '';
   for (const task of sortedTasks) {
     let statusText;
+    const isTrellis = meshyServerStatus.backend === 'trellis2';
     if (task.status === 'queued') {
       statusText = 'queued';
+    } else if (task.status === 'polling' && isTrellis) {
+      statusText = '<span class="loading-spinner" style="width:14px;height:14px;display:inline-block;"></span>';
     } else if (task.status === 'polling') {
       statusText = `${task.progress}%`;
     } else {
@@ -2976,6 +2930,9 @@ let tutorialIndex = null;
 function setupTutorials() {
   const btn = document.getElementById('tutorial-btn');
   btn.addEventListener('click', openTutorialHub);
+
+  const calBtn = document.getElementById('calendar-tutorial-btn');
+  if (calBtn) calBtn.addEventListener('click', openTutorialHub);
 }
 
 async function openTutorialHub() {
@@ -3525,6 +3482,7 @@ async function openFeedbackModal() {
           <div style="font-size:0.85em;color:var(--text-secondary);">${new Date(f.createdAt).toLocaleDateString()}</div>
           <div style="margin:4px 0;">${f.message}</div>
           <span class="admin-badge ${f.status === 'completed' ? 'success' : f.status === 'in_progress' ? 'warning' : ''}">${f.status}</span>
+          ${f.adminNotes ? `<div style="margin-top:6px;padding:6px 10px;background:rgba(255,255,255,0.05);border-left:3px solid var(--accent-blue);border-radius:4px;font-size:0.85em;"><strong>Admin:</strong> ${f.adminNotes}</div>` : ''}
         </div>
       `).join('');
   } catch (_) {
@@ -4066,6 +4024,45 @@ function setupTabBar() {
     }
   });
 
+  // Double-click on tab name to rename
+  tabsContainer.addEventListener('dblclick', async (e) => {
+    const nameSpan = e.target.closest('.room-tab-name');
+    if (!nameSpan) return;
+    const tab = nameSpan.closest('.room-tab');
+    if (!tab) return;
+    const roomId = tab.dataset.roomId;
+
+    const currentName = nameSpan.textContent;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = currentName;
+    input.className = 'room-tab-rename-input';
+    input.style.cssText = 'background:var(--glass-bg);border:1px solid var(--glass-border);color:var(--text-primary);font-size:inherit;padding:2px 4px;width:100px;border-radius:4px;';
+    nameSpan.replaceWith(input);
+    input.focus();
+    input.select();
+
+    const finishRename = async () => {
+      const newName = input.value.trim();
+      const span = document.createElement('span');
+      span.className = 'room-tab-name';
+      if (newName && newName !== currentName) {
+        await saveRoom({ name: newName }, roomId);
+        span.textContent = newName;
+        if (currentRoom && currentRoom.id === roomId) currentRoom.name = newName;
+      } else {
+        span.textContent = currentName;
+      }
+      input.replaceWith(span);
+    };
+
+    input.addEventListener('blur', finishRename);
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') input.blur();
+      if (ev.key === 'Escape') { input.value = currentName; input.blur(); }
+    });
+  });
+
   // Add room button
   addRoomBtn.addEventListener('click', () => {
     document.getElementById('image-file-input').click();
@@ -4515,6 +4512,41 @@ async function closeHouse() {
 
   await openCalendarModal();
 }
+
+// ============ Frontend Error Reporting ============
+
+let _lastErrorSignature = '';
+let _lastErrorTime = 0;
+
+function _reportError(data) {
+  const sig = `${data.message}:${data.source}:${data.line}`;
+  const now = Date.now();
+  if (sig === _lastErrorSignature && now - _lastErrorTime < 60000) return;
+  _lastErrorSignature = sig;
+  _lastErrorTime = now;
+  submitErrorReport(data).catch(() => {});
+}
+
+window.addEventListener('error', (event) => {
+  _reportError({
+    message: event.message || 'Unknown error',
+    source: event.filename,
+    line: event.lineno,
+    column: event.colno,
+    stack: event.error?.stack,
+    url: window.location.href,
+    userAgent: navigator.userAgent,
+  });
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  _reportError({
+    message: event.reason?.message || String(event.reason),
+    stack: event.reason?.stack,
+    url: window.location.href,
+    userAgent: navigator.userAgent,
+  });
+});
 
 // Initialize on DOM ready
 document.addEventListener('DOMContentLoaded', init);

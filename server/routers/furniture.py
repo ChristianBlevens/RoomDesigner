@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.connection import get_furniture_db
 from models.furniture import FurnitureCreate, FurnitureUpdate, FurnitureResponse
 from routers.auth import verify_token
+from activity import log_activity
 import r2
 
 router = APIRouter()
@@ -108,6 +109,8 @@ def create_furniture(furniture: FurnitureCreate, org_id: str = Depends(verify_to
           furniture.quantity, furniture.dimensionX, furniture.dimensionY, furniture.dimensionZ,
           furniture.location, furniture.condition, furniture.conditionNotes])
 
+    log_activity("org", org_id, "create_furniture", "furniture", resource_id=furn_id, resource_name=furniture.name,
+                 details={"category": furniture.category, "quantity": furniture.quantity})
     return get_furniture(furn_id, org_id)
 
 @router.put("/{furniture_id}", response_model=FurnitureResponse)
@@ -157,13 +160,14 @@ def update_furniture(furniture_id: str, furniture: FurnitureUpdate, org_id: str 
         values.append(furniture_id)
         db.execute(f"UPDATE furniture SET {', '.join(updates)} WHERE id = ?", values)
 
+    log_activity("org", org_id, "update_furniture", "furniture", resource_id=furniture_id)
     return get_furniture(furniture_id, org_id)
 
 @router.delete("/{furniture_id}")
 def delete_furniture(furniture_id: str, org_id: str = Depends(verify_token)):
     db = get_furniture_db()
     existing = db.execute(
-        "SELECT id FROM furniture WHERE id = ? AND org_id = ?", [furniture_id, org_id]
+        "SELECT id, name FROM furniture WHERE id = ? AND org_id = ?", [furniture_id, org_id]
     ).fetchone()
     if not existing:
         raise HTTPException(404, "Furniture not found")
@@ -175,6 +179,7 @@ def delete_furniture(furniture_id: str, org_id: str = Depends(verify_token)):
         keys.append(f"furniture/previews_3d/{furniture_id}.{ext}")
     r2.delete_objects(keys)
 
+    log_activity("org", org_id, "delete_furniture", "furniture", resource_id=furniture_id, resource_name=existing[1])
     return {"status": "deleted"}
 
 

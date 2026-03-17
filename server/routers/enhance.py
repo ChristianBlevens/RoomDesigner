@@ -17,6 +17,9 @@ from gemini_client import edit_image
 from db.connection import get_houses_db
 from routers.auth import verify_token, verify_token_full
 from usage import check_allowance, log_usage, get_allowance_warning
+from errors import log_exception
+from activity import log_activity
+from circuit_breaker import gemini_breaker
 import r2
 
 logger = logging.getLogger(__name__)
@@ -101,6 +104,9 @@ async def enhance_screenshot(request: EnhanceRequest, token: dict = Depends(veri
     except Exception as e:
         raise HTTPException(400, f"Invalid image: {str(e)}")
 
+    if not gemini_breaker.can_execute():
+        raise HTTPException(503, "Gemini service is temporarily unavailable. Please try again in a few minutes.")
+
     prompt = ENHANCE_PROMPT
     if request.custom_prompt:
         prompt += f" Additional instructions: {request.custom_prompt}"
@@ -108,6 +114,7 @@ async def enhance_screenshot(request: EnhanceRequest, token: dict = Depends(veri
     start = time.time()
     try:
         result_bytes = await edit_image(image_bytes, prompt)
+        gemini_breaker.record_success()
         duration_ms = int((time.time() - start) * 1000)
         log_usage(
             org_id=org_id, service_category="gemini", action="enhance_screenshot",
@@ -115,6 +122,7 @@ async def enhance_screenshot(request: EnhanceRequest, token: dict = Depends(veri
             metadata={"room_id": request.room_id, "custom_prompt": request.custom_prompt, "full_prompt": prompt},
         )
     except Exception as e:
+        gemini_breaker.record_failure()
         duration_ms = int((time.time() - start) * 1000)
         log_usage(
             org_id=org_id, service_category="gemini", action="enhance_screenshot",
@@ -122,8 +130,10 @@ async def enhance_screenshot(request: EnhanceRequest, token: dict = Depends(veri
             metadata={"room_id": request.room_id, "custom_prompt": request.custom_prompt, "full_prompt": prompt},
         )
         logger.error(f"Screenshot enhancement failed: {e}")
+        log_exception(e, "enhance.enhance_screenshot", org_id=org_id, endpoint="POST /enhance/screenshot")
         raise HTTPException(502, f"Enhancement failed: {str(e)}")
 
+    log_activity("org", org_id, "enhance_screenshot", "room", resource_id=request.room_id)
     warning = get_allowance_warning(org_id, "gemini") if not is_admin else None
 
     return EnhanceResponse(
@@ -169,9 +179,13 @@ async def generate_wall_color(request: WallColorRequest, token: dict = Depends(v
     else:
         prompt = WALL_COLOR_PROMPT_NAME_ONLY.format(color_name=request.color_name)
 
+    if not gemini_breaker.can_execute():
+        raise HTTPException(503, "Gemini service is temporarily unavailable. Please try again in a few minutes.")
+
     start = time.time()
     try:
         result_bytes = await edit_image(bg_bytes, prompt, mime_type="image/jpeg")
+        gemini_breaker.record_success()
         duration_ms = int((time.time() - start) * 1000)
         log_usage(
             org_id=org_id, service_category="gemini", action="wall_color",
@@ -179,6 +193,7 @@ async def generate_wall_color(request: WallColorRequest, token: dict = Depends(v
             metadata={"room_id": request.room_id, "color_name": request.color_name, "color_hex": request.color_hex},
         )
     except Exception as e:
+        gemini_breaker.record_failure()
         duration_ms = int((time.time() - start) * 1000)
         log_usage(
             org_id=org_id, service_category="gemini", action="wall_color",
@@ -186,8 +201,11 @@ async def generate_wall_color(request: WallColorRequest, token: dict = Depends(v
             metadata={"room_id": request.room_id, "color_name": request.color_name, "color_hex": request.color_hex},
         )
         logger.error(f"Wall color generation failed: {e}")
+        log_exception(e, "enhance.wall_color", org_id=org_id, endpoint="POST /enhance/wall-color")
         raise HTTPException(502, f"Wall color generation failed: {str(e)}")
 
+    log_activity("org", org_id, "edit_wall_color", "room", resource_id=request.room_id,
+                 details={"color_name": request.color_name, "color_hex": request.color_hex})
     variant_id = str(uuid4())
     variant_key = f"rooms/wall-colors/{request.room_id}/{variant_id}.png"
     r2.upload_bytes(variant_key, result_bytes, "image/png")
@@ -253,6 +271,7 @@ async def delete_wall_color(room_id: str, variant_id: str, org_id: str = Depends
         [json.dumps(wall_colors), room_id]
     )
 
+    log_activity("org", org_id, "delete_wall_color", "room", resource_id=room_id, details={"variant_id": variant_id})
     return {"success": True, "activeVariantId": wall_colors["activeVariantId"]}
 
 

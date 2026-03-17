@@ -51,6 +51,16 @@ def init_databases():
     """)
     _auth_conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_orgs_username ON orgs(username)")
 
+    # Migration: add login tracking columns
+    try:
+        _auth_conn.execute("ALTER TABLE orgs ADD COLUMN last_login TIMESTAMP")
+    except Exception:
+        pass
+    try:
+        _auth_conn.execute("ALTER TABLE orgs ADD COLUMN login_count INTEGER DEFAULT 0")
+    except Exception:
+        pass
+
     _auth_conn.execute("""
         CREATE TABLE IF NOT EXISTS settings (
             key VARCHAR PRIMARY KEY,
@@ -104,6 +114,41 @@ def init_databases():
     """)
     _auth_conn.execute("CREATE INDEX IF NOT EXISTS idx_feedback_org ON feedback(org_id)")
     _auth_conn.execute("CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status)")
+
+    _auth_conn.execute("""
+        CREATE TABLE IF NOT EXISTS error_log (
+            id VARCHAR PRIMARY KEY,
+            error_type VARCHAR NOT NULL,
+            source VARCHAR NOT NULL,
+            message VARCHAR NOT NULL,
+            traceback TEXT,
+            org_id VARCHAR,
+            endpoint VARCHAR,
+            metadata JSON,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    _auth_conn.execute("CREATE INDEX IF NOT EXISTS idx_error_created ON error_log(created_at DESC)")
+    _auth_conn.execute("CREATE INDEX IF NOT EXISTS idx_error_type ON error_log(error_type)")
+    _auth_conn.execute("CREATE INDEX IF NOT EXISTS idx_error_source ON error_log(source)")
+
+    _auth_conn.execute("""
+        CREATE TABLE IF NOT EXISTS activity_log (
+            id VARCHAR PRIMARY KEY,
+            actor_type VARCHAR NOT NULL,
+            actor_id VARCHAR,
+            action VARCHAR NOT NULL,
+            resource_type VARCHAR NOT NULL,
+            resource_id VARCHAR,
+            resource_name VARCHAR,
+            details JSON,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    _auth_conn.execute("CREATE INDEX IF NOT EXISTS idx_activity_actor ON activity_log(actor_type, actor_id)")
+    _auth_conn.execute("CREATE INDEX IF NOT EXISTS idx_activity_action ON activity_log(action)")
+    _auth_conn.execute("CREATE INDEX IF NOT EXISTS idx_activity_resource ON activity_log(resource_type, resource_id)")
+    _auth_conn.execute("CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_log(created_at DESC)")
 
     # Houses database
     _houses_conn = _safe_connect(HOUSES_DB)

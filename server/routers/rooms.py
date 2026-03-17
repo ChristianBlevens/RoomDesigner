@@ -12,6 +12,9 @@ from models.room import RoomUpdate, RoomResponse
 from moge_client import process_image_with_modal, MoGeError
 from routers.auth import verify_token, verify_token_full
 from usage import check_allowance, log_usage, get_allowance_warning
+from errors import log_exception
+from activity import log_activity, diff_room_state
+from circuit_breaker import moge_breaker, gemini_breaker
 import time
 import r2
 
@@ -163,7 +166,15 @@ async def create_room(
     db = get_houses_db()
 
     room_id = str(uuid.uuid4())
+
+    # Validate image upload
+    ALLOWED_IMAGE_TYPES = {'image/jpeg', 'image/png', 'image/webp', 'image/gif'}
+    MAX_IMAGE_SIZE = 20 * 1024 * 1024
+    if image.content_type and image.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(400, "Only image files (JPEG, PNG, WebP, GIF) are allowed")
     image_bytes = await image.read()
+    if len(image_bytes) > MAX_IMAGE_SIZE:
+        raise HTTPException(400, f"File size exceeds {MAX_IMAGE_SIZE // (1024*1024)}MB limit")
 
     ext = "jpg"
     if image.content_type == "image/png":
@@ -179,6 +190,8 @@ async def create_room(
         r2.upload_bytes(original_bg_key, image_bytes, image.content_type or "image/jpeg")
 
         logger.info(f"Clearing furniture from room {room_id} via Gemini...")
+        if not gemini_breaker.can_execute():
+            raise HTTPException(status_code=503, detail="Gemini service is temporarily unavailable. Please try again in a few minutes.")
         from gemini_client import edit_image
         from routers.enhance import ROOM_CLEAR_PROMPT
         clear_prompt = ROOM_CLEAR_PROMPT
@@ -194,9 +207,11 @@ async def create_room(
                 success=True, duration_ms=duration_ms, admin_initiated=is_admin,
                 metadata={"room_id": room_id, "floor_hint": floorHint.strip(), "full_prompt": clear_prompt},
             )
+            gemini_breaker.record_success()
             moge_input_bytes = cleared_bytes
             image_bytes = cleared_bytes
         except Exception as e:
+            gemini_breaker.record_failure()
             duration_ms = int((time.time() - start_clear) * 1000)
             log_usage(
                 org_id=org_id, service_category="gemini", action="room_clear",
@@ -204,13 +219,17 @@ async def create_room(
                 metadata={"room_id": room_id, "floor_hint": floorHint.strip(), "full_prompt": clear_prompt},
             )
             logger.error(f"Room {room_id} furniture clearing failed: {e}")
+            log_exception(e, "rooms.create_room", org_id=org_id, endpoint="POST /rooms", metadata={"room_id": room_id, "action": "clear_furniture"})
             r2.delete_object(original_bg_key)
             raise HTTPException(status_code=502, detail=f"Furniture clearing failed: {str(e)}")
 
     logger.info(f"Processing room {room_id} with Modal...")
+    if not moge_breaker.can_execute():
+        raise HTTPException(status_code=503, detail="MoGe-2 service is temporarily unavailable. Please try again in a few minutes.")
     start_moge = time.time()
     try:
         result = await process_image_with_modal(moge_input_bytes)
+        moge_breaker.record_success()
         duration_ms = int((time.time() - start_moge) * 1000)
         log_usage(
             org_id=org_id, service_category="modal", action="room_create",
@@ -218,6 +237,7 @@ async def create_room(
             metadata={"room_id": room_id, "house_id": houseId, "clear_furniture": should_clear},
         )
     except MoGeError as e:
+        moge_breaker.record_failure()
         duration_ms = int((time.time() - start_moge) * 1000)
         log_usage(
             org_id=org_id, service_category="modal", action="room_create",
@@ -225,6 +245,7 @@ async def create_room(
             metadata={"room_id": room_id, "house_id": houseId, "clear_furniture": should_clear},
         )
         logger.error(f"Room {room_id} mesh generation failed: {e}")
+        log_exception(e, "rooms.create_room", org_id=org_id, endpoint="POST /rooms", metadata={"room_id": room_id, "action": "moge"})
         if original_bg_key:
             r2.delete_object(original_bg_key)
         raise HTTPException(status_code=502, detail=f"Mesh generation failed: {str(e)}")
@@ -255,6 +276,8 @@ async def create_room(
     )
 
     logger.info(f"Room {room_id} created successfully" + (" (furniture cleared)" if should_clear else ""))
+    log_activity("org", org_id, "create_room", "room", resource_id=room_id, resource_name=name,
+                 details={"house_id": houseId, "clear_furniture": should_clear})
 
     return RoomResponse(
         id=room_id,
@@ -273,6 +296,20 @@ async def create_room(
 def update_room(room_id: str, room: RoomUpdate, org_id: str = Depends(verify_token)):
     verify_room_ownership(room_id, org_id)
     db = get_houses_db()
+
+    # Fetch current state for diff-based activity logging
+    old_row = db.execute(
+        "SELECT placed_furniture, lighting_settings, room_scale, meter_stick FROM rooms WHERE id = ?",
+        [room_id]
+    ).fetchone()
+    old_state = {}
+    if old_row:
+        old_state = {
+            'placed_furniture': json.loads(old_row[0]) if old_row[0] else [],
+            'lighting_settings': json.loads(old_row[1]) if old_row[1] else None,
+            'room_scale': old_row[2],
+            'meter_stick': json.loads(old_row[3]) if old_row[3] else None,
+        }
 
     updates = []
     values = []
@@ -300,6 +337,37 @@ def update_room(room_id: str, room: RoomUpdate, org_id: str = Depends(verify_tok
         values.append(room_id)
         db.execute(f"UPDATE rooms SET {', '.join(updates)} WHERE id = ?", values)
 
+    # Diff-based activity logging
+    new_state = {
+        'placed_furniture': [f.model_dump() for f in room.placedFurniture] if room.placedFurniture is not None else None,
+        'lighting_settings': room.lightingSettings.model_dump() if room.lightingSettings is not None else None,
+        'room_scale': room.roomScale,
+        'meter_stick': room.meterStick,
+    }
+    # Only diff fields that were actually sent
+    diff_old = {}
+    diff_new = {}
+    if room.placedFurniture is not None:
+        diff_old['placed_furniture'] = old_state.get('placed_furniture', [])
+        diff_new['placed_furniture'] = new_state['placed_furniture']
+    if room.lightingSettings is not None:
+        diff_old['lighting_settings'] = old_state.get('lighting_settings')
+        diff_new['lighting_settings'] = new_state['lighting_settings']
+    if room.roomScale is not None:
+        diff_old['room_scale'] = old_state.get('room_scale')
+        diff_new['room_scale'] = new_state['room_scale']
+    if 'meterStick' in room.model_fields_set:
+        diff_old['meter_stick'] = old_state.get('meter_stick')
+        diff_new['meter_stick'] = new_state['meter_stick']
+
+    if diff_old or diff_new:
+        changes = diff_room_state(diff_old, diff_new)
+        for change in changes:
+            log_activity("org", org_id, change['action'], "room", resource_id=room_id, details=change.get('details'))
+
+    if room.name is not None:
+        log_activity("org", org_id, "rename_room", "room", resource_id=room_id, details={"name": room.name})
+
     return get_room(room_id, org_id)
 
 
@@ -316,8 +384,15 @@ def delete_room(room_id: str, org_id: str = Depends(verify_token)):
     layout_rows = db.execute(
         "SELECT screenshot_path FROM layouts WHERE room_id = ?", [room_id]
     ).fetchall()
-    db.execute("DELETE FROM layouts WHERE room_id = ?", [room_id])
-    db.execute("DELETE FROM rooms WHERE id = ?", [room_id])
+
+    db.execute("BEGIN TRANSACTION")
+    try:
+        db.execute("DELETE FROM layouts WHERE room_id = ?", [room_id])
+        db.execute("DELETE FROM rooms WHERE id = ?", [room_id])
+        db.execute("COMMIT")
+    except Exception:
+        db.execute("ROLLBACK")
+        raise
 
     keys_to_delete = [f"rooms/meshes/{room_id}.glb"]
     if row and row[0]:
@@ -341,4 +416,5 @@ def delete_room(room_id: str, org_id: str = Depends(verify_token)):
 
     r2.delete_objects(keys_to_delete)
 
+    log_activity("org", org_id, "delete_room", "room", resource_id=room_id)
     return {"status": "deleted"}

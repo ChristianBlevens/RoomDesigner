@@ -17,6 +17,7 @@ from pydantic import BaseModel
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.connection import get_houses_db, get_furniture_db
 from routers.auth import verify_token
+from activity import log_activity
 import r2
 
 logger = logging.getLogger(__name__)
@@ -272,6 +273,7 @@ def generate_share_token(house_id: str, org_id: str = Depends(verify_token)):
             [token, house_id]
         )
 
+    log_activity("org", org_id, "create_share", "house", resource_id=house_id)
     return {"shareToken": token, "shareUrl": f"/share/{token}"}
 
 
@@ -290,6 +292,7 @@ def revoke_share_token(house_id: str, org_id: str = Depends(verify_token)):
         "UPDATE houses SET share_token = NULL WHERE id = ?",
         [house_id]
     )
+    log_activity("org", org_id, "revoke_share", "house", resource_id=house_id)
     return {"status": "revoked"}
 
 
@@ -339,6 +342,7 @@ def upload_final_image(room_id: str, request: FinalImageRequest, org_id: str = D
         [r2_key, room_id]
     )
 
+    log_activity("org", org_id, "upload_final_image", "room", resource_id=room_id)
     return {"finalImageUrl": r2.get_public_url(r2_key)}
 
 

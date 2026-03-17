@@ -11,6 +11,9 @@ from pydantic import BaseModel
 import sam3_client
 from routers.auth import verify_token_full
 from usage import check_allowance, log_usage
+from errors import log_exception
+from activity import log_activity
+from circuit_breaker import sam3_breaker, gemini_breaker
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -70,9 +73,13 @@ async def segment_image(request: SegmentRequest, token: dict = Depends(verify_to
         ]
         total_points = sum(len(g.points) for g in request.point_groups)
 
+    if not sam3_breaker.can_execute():
+        raise HTTPException(status_code=503, detail="SAM 3 service is temporarily unavailable. Please try again in a few minutes.")
+
     start = time.time()
     try:
         result = await sam3_client.segment_image(image_bytes, groups)
+        sam3_breaker.record_success()
         duration_ms = int((time.time() - start) * 1000)
         log_usage(
             org_id=org_id, service_category="modal", action="segment",
@@ -80,8 +87,10 @@ async def segment_image(request: SegmentRequest, token: dict = Depends(verify_to
             admin_initiated=is_admin,
             metadata={"point_group_count": len(groups) if groups else 0, "total_points": total_points},
         )
+        log_activity("org", org_id, "segment_image", "segmentation", details={"point_group_count": len(groups) if groups else 0})
         return result
     except sam3_client.SAM3Error as e:
+        sam3_breaker.record_failure()
         duration_ms = int((time.time() - start) * 1000)
         log_usage(
             org_id=org_id, service_category="modal", action="segment",
@@ -89,6 +98,7 @@ async def segment_image(request: SegmentRequest, token: dict = Depends(verify_to
             admin_initiated=is_admin,
             metadata={"point_group_count": len(groups) if groups else 0, "total_points": total_points},
         )
+        log_exception(e, "segmentation.segment", org_id=org_id, endpoint="POST /segmentation/segment")
         raise HTTPException(status_code=502, detail=str(e))
 
 
@@ -119,6 +129,9 @@ async def fix_segment(request: FixSegmentRequest, token: dict = Depends(verify_t
     if not allowed:
         raise HTTPException(status_code=429, detail=msg)
 
+    if not gemini_breaker.can_execute():
+        raise HTTPException(status_code=503, detail="Gemini service is temporarily unavailable. Please try again in a few minutes.")
+
     from gemini_client import edit_image
 
     image_b64 = request.image_base64
@@ -133,6 +146,7 @@ async def fix_segment(request: FixSegmentRequest, token: dict = Depends(verify_t
     start = time.time()
     try:
         result_bytes = await edit_image(image_bytes, FIX_SEGMENT_PROMPT, mime_type="image/png")
+        gemini_breaker.record_success()
         duration_ms = int((time.time() - start) * 1000)
         log_usage(
             org_id=org_id, service_category="gemini", action="fix_segment",
@@ -140,7 +154,9 @@ async def fix_segment(request: FixSegmentRequest, token: dict = Depends(verify_t
             admin_initiated=is_admin,
             metadata={"full_prompt": FIX_SEGMENT_PROMPT},
         )
+        log_activity("org", org_id, "fix_segment", "segmentation")
     except Exception as e:
+        gemini_breaker.record_failure()
         duration_ms = int((time.time() - start) * 1000)
         log_usage(
             org_id=org_id, service_category="gemini", action="fix_segment",
@@ -149,6 +165,7 @@ async def fix_segment(request: FixSegmentRequest, token: dict = Depends(verify_t
             metadata={"full_prompt": FIX_SEGMENT_PROMPT},
         )
         logger.error(f"Segment fix failed: {e}")
+        log_exception(e, "segmentation.fix_segment", org_id=org_id, endpoint="POST /segmentation/fix")
         raise HTTPException(status_code=502, detail=f"AI repair failed: {str(e)}")
 
     return FixSegmentResponse(

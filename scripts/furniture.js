@@ -40,6 +40,9 @@ let mouseDownPosition = null;
 let dragStartPosition = null;
 let activePointerId = null;
 
+// Parent indicator dot
+let parentIndicatorDot = null;
+
 // Place-on-top mode state
 let placeOnTopTarget = null;
 
@@ -812,6 +815,9 @@ function selectFurniture(object, event) {
   const transformControls = getTransformControls();
   transformControls.detach();
 
+  // Show parent indicator if this is a child
+  showParentIndicator(object);
+
   // Show gizmo menu
   showGizmoMenu(event);
 
@@ -831,11 +837,39 @@ export function deselectFurniture() {
   transformControls.setMode('translate');
 
   hideGizmoMenu();
+  removeParentIndicator();
   selectedObject = null;
 
   transformStartPosition = null;
   transformStartRotation = null;
   transformStartScale = null;
+}
+
+function showParentIndicator(childObject) {
+  removeParentIndicator();
+  if (!childObject?.userData?.isChild || childObject.userData.parentIndex == null) return;
+  const scene = getScene();
+  const allFurniture = scene.children.filter(c => c.userData?.isFurniture);
+  const parent = allFurniture.find(f => f.userData?.childIds?.includes(childObject.userData.entryId));
+  if (!parent) return;
+  const geo = new THREE.SphereGeometry(0.02, 8, 8);
+  const mat = new THREE.MeshBasicMaterial({ color: 0x888888, depthTest: false });
+  parentIndicatorDot = new THREE.Mesh(geo, mat);
+  parentIndicatorDot.renderOrder = 999;
+  parentIndicatorDot.layers.set(2);
+  const box = new THREE.Box3().setFromObject(parent);
+  const center = box.getCenter(new THREE.Vector3());
+  parentIndicatorDot.position.copy(center);
+  scene.add(parentIndicatorDot);
+}
+
+function removeParentIndicator() {
+  if (parentIndicatorDot) {
+    parentIndicatorDot.parent?.remove(parentIndicatorDot);
+    parentIndicatorDot.geometry?.dispose();
+    parentIndicatorDot.material?.dispose();
+    parentIndicatorDot = null;
+  }
 }
 
 function showGizmoMenu(event) {

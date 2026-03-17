@@ -9,9 +9,24 @@ from db.connection import get_houses_db, get_furniture_db
 from utils import IMAGE_EXTENSIONS
 from model_processor import ModelProcessor
 from routers.auth import verify_token
+from activity import log_activity
 import r2
 
 router = APIRouter()
+
+MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB
+ALLOWED_IMAGE_TYPES = {'image/jpeg', 'image/png', 'image/webp', 'image/gif'}
+
+
+async def validate_image_upload(file: UploadFile) -> bytes:
+    """Validate uploaded file is an image within size limits."""
+    if file.content_type and file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(400, "Only image files (JPEG, PNG, WebP, GIF) are allowed")
+    contents = await file.read()
+    if len(contents) > MAX_IMAGE_SIZE:
+        raise HTTPException(400, f"File size exceeds {MAX_IMAGE_SIZE // (1024*1024)}MB limit")
+    await file.seek(0)
+    return contents
 
 
 def verify_furniture_ownership(furniture_id: str, org_id: str):
@@ -48,6 +63,7 @@ async def save_image_file(
     if ext not in IMAGE_EXTENSIONS:
         ext = 'jpg'
 
+    await validate_image_upload(file)
     content = await file.read()
 
     for old_ext in IMAGE_EXTENSIONS:
@@ -66,9 +82,11 @@ async def upload_furniture_image(
 ):
     verify_furniture_ownership(furniture_id, org_id)
     db = get_furniture_db()
-    return await save_image_file(
+    result = await save_image_file(
         file, "furniture/images", furniture_id, db, "furniture", "image_path"
     )
+    log_activity("org", org_id, "upload_image", "furniture", resource_id=furniture_id)
+    return result
 
 @router.get("/furniture/{furniture_id}/image")
 def get_furniture_image(furniture_id: str, org_id: str = Depends(verify_token)):
@@ -97,43 +115,6 @@ def get_furniture_preview3d(furniture_id: str, org_id: str = Depends(verify_toke
     if not row or not row[0]:
         raise HTTPException(404, "3D preview not found")
     return RedirectResponse(r2.get_public_url(row[0]), status_code=302)
-
-@router.post("/furniture/{furniture_id}/model")
-async def upload_furniture_model(
-    furniture_id: str,
-    file: UploadFile = File(...),
-    org_id: str = Depends(verify_token)
-):
-    """Upload a furniture model (GLB file). Processes to fix bounds, recenter origin, generate 3D preview."""
-    verify_furniture_ownership(furniture_id, org_id)
-    content = await file.read()
-
-    db = get_furniture_db()
-    row = db.execute("SELECT image_path FROM furniture WHERE id = ?", [furniture_id]).fetchone()
-    has_image = row and row[0]
-
-    processor = ModelProcessor()
-    result = processor.process_glb(
-        content, origin_placement='bottom-center', generate_preview=not has_image
-    )
-
-    model_key = f"furniture/models/{furniture_id}.glb"
-    r2.upload_bytes(model_key, result['glb'], 'model/gltf-binary')
-
-    preview_key = None
-    if result['preview']:
-        preview_key = f"furniture/previews_3d/{furniture_id}.png"
-        r2.upload_bytes(preview_key, result['preview'], 'image/png')
-
-    if preview_key:
-        db.execute(
-            "UPDATE furniture SET model_path = ?, preview_3d_path = ? WHERE id = ?",
-            [model_key, preview_key, furniture_id]
-        )
-    else:
-        db.execute("UPDATE furniture SET model_path = ? WHERE id = ?", [model_key, furniture_id])
-
-    return {"status": "uploaded", "url": r2.get_public_url(model_key)}
 
 @router.get("/furniture/{furniture_id}/model")
 def get_furniture_model(furniture_id: str, org_id: str = Depends(verify_token)):

@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.connection import get_houses_db
 from models.house import HouseCreate, HouseUpdate, HouseResponse
 from routers.auth import verify_token
+from activity import log_activity
 import r2
 
 router = APIRouter()
@@ -52,6 +53,8 @@ def create_house(house: HouseCreate, org_id: str = Depends(verify_token)):
         "INSERT INTO houses (id, org_id, name, start_date, end_date) VALUES (?, ?, ?, ?, ?)",
         [house_id, org_id, house.name, house.start_date, house.end_date]
     )
+    log_activity("org", org_id, "create_house", "house", resource_id=house_id, resource_name=house.name,
+                 details={"start_date": house.start_date, "end_date": house.end_date})
     return get_house(house_id, org_id)
 
 @router.put("/{house_id}", response_model=HouseResponse)
@@ -78,6 +81,11 @@ def update_house(house_id: str, house: HouseUpdate, org_id: str = Depends(verify
     if updates:
         values.append(house_id)
         db.execute(f"UPDATE houses SET {', '.join(updates)} WHERE id = ?", values)
+        changed = {}
+        if house.name is not None: changed['name'] = house.name
+        if house.start_date is not None: changed['start_date'] = house.start_date
+        if house.end_date is not None: changed['end_date'] = house.end_date
+        log_activity("org", org_id, "update_house", "house", resource_id=house_id, details={"changed": changed})
 
     return get_house(house_id, org_id)
 
@@ -114,15 +122,22 @@ def delete_house(house_id: str, org_id: str = Depends(verify_token)):
         if wc_row[2]:
             wc_r2_keys.append(wc_row[2])
 
-    db.execute("""
-        DELETE FROM layouts
-        WHERE room_id IN (SELECT id FROM rooms WHERE house_id = ?)
-    """, [house_id])
-    db.execute("DELETE FROM rooms WHERE house_id = ?", [house_id])
-    db.execute("DELETE FROM houses WHERE id = ?", [house_id])
+    db.execute("BEGIN TRANSACTION")
+    try:
+        db.execute("""
+            DELETE FROM layouts
+            WHERE room_id IN (SELECT id FROM rooms WHERE house_id = ?)
+        """, [house_id])
+        db.execute("DELETE FROM rooms WHERE house_id = ?", [house_id])
+        db.execute("DELETE FROM houses WHERE id = ?", [house_id])
+        db.execute("COMMIT")
+    except Exception:
+        db.execute("ROLLBACK")
+        raise
 
     all_keys = layout_r2_keys + wc_r2_keys
     if all_keys:
         r2.delete_objects(all_keys)
 
+    log_activity("org", org_id, "delete_house", "house", resource_id=house_id)
     return {"status": "deleted"}
