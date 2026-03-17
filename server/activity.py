@@ -2,6 +2,7 @@
 
 import json
 import logging
+from datetime import date, datetime
 from uuid import uuid4
 
 from db.connection import get_auth_db
@@ -29,7 +30,7 @@ def log_activity(actor_type: str, actor_id: str, action: str, resource_type: str
                (id, actor_type, actor_id, action, resource_type, resource_id, resource_name, details)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             [str(uuid4()), actor_type, actor_id, action, resource_type,
-             resource_id, resource_name, json.dumps(details) if details else None]
+             resource_id, resource_name, json.dumps(details, default=str) if details else None]
         )
     except Exception as e:
         logger.error(f"Failed to log activity: {e}")

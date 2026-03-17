@@ -405,7 +405,6 @@ export async function getAllFurniture({ includeImages = false, includePreview3d 
   const transformed = entries.map(entry => {
     const result = transformFurnitureResponse(entry);
     result._imageUrl = entry.imageUrl;
-    result._preview3dUrl = entry.preview3dUrl;
     result._modelUrl = entry.modelUrl;
     return result;
   });
@@ -445,13 +444,6 @@ async function enrichFurnitureWithBlobs(entries, { includeImages = false, includ
       });
     }
 
-    if (includePreview3d && entry._preview3dUrl && !entry.preview3d) {
-      fetchTasks.push({
-        index: i,
-        type: 'preview3d',
-        url: entry._preview3dUrl,
-      });
-    }
   }
 
   // Process in batches
@@ -480,7 +472,6 @@ async function enrichFurnitureWithBlobs(entries, { includeImages = false, includ
  * @param {string} id - Furniture entry ID
  * @param {Object} options
  * @param {boolean} options.includeImage - Fetch image blob (default: true for backwards compat)
- * @param {boolean} options.includePreview3d - Fetch 3D preview blob (default: true)
  * @param {boolean} options.includeModel - Fetch model blob (default: true)
  * @param {boolean} options.metadataOnly - Only fetch metadata, no blobs (default: false)
  * @param {boolean} options.skipCache - Force fresh fetch (default: false)
@@ -488,7 +479,6 @@ async function enrichFurnitureWithBlobs(entries, { includeImages = false, includ
  */
 export async function getFurnitureEntry(id, {
   includeImage = true,
-  includePreview3d = true,
   includeModel = true,
   metadataOnly = false,
   skipCache = false,
@@ -505,7 +495,6 @@ export async function getFurnitureEntry(id, {
 
     // Store raw URLs for blob fetching
     entry._imageUrl = data.imageUrl;
-    entry._preview3dUrl = data.preview3dUrl;
     entry._modelUrl = data.modelUrl;
 
     setCached(cacheKey, entry);
@@ -521,10 +510,6 @@ export async function getFurnitureEntry(id, {
 
   if (includeImage && entry._imageUrl && !result.image) {
     result.image = await fetchAsBlob(entry._imageUrl);
-  }
-
-  if (includePreview3d && entry._preview3dUrl && !result.preview3d) {
-    result.preview3d = await fetchAsBlob(entry._preview3dUrl);
   }
 
   if (includeModel && entry._modelUrl && !result.model) {

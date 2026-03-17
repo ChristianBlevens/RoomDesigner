@@ -149,24 +149,10 @@ function updateExtraFilters() {
       <option value="creating">Creating</option>
       <option value="polling">Polling</option>
       <option value="downloading">Downloading</option>
-      <option value="completed">Completed</option>
-      <option value="failed">Failed</option>
     `;
     select.addEventListener('change', () => loadTabData());
     select.id = 'admin-filter-status';
     container.appendChild(select);
-
-    const serviceSelect = document.createElement('select');
-    serviceSelect.className = 'admin-filter';
-    serviceSelect.id = 'admin-filter-task-service';
-    serviceSelect.innerHTML = `
-      <option value="">All Services</option>
-      <option value="model_3d">3D Generation</option>
-      <option value="modal">Modal (MoGe/SAM3)</option>
-      <option value="gemini">Gemini</option>
-    `;
-    serviceSelect.addEventListener('change', () => loadTabData());
-    container.appendChild(serviceSelect);
   }
 
   if (currentTab === 'usage') {
@@ -334,50 +320,20 @@ async function loadTabData() {
 
     else if (currentTab === 'tasks') {
       const statusFilter = document.getElementById('admin-filter-status');
-      const serviceFilter = document.getElementById('admin-filter-task-service');
       if (statusFilter && statusFilter.value) params.set('status', statusFilter.value);
-      if (serviceFilter && serviceFilter.value) params.set('service', serviceFilter.value);
 
       const data = await apiGet(`/tasks?${params}`);
-
-      const asyncRows = (data.asyncTasks || []).map(t => ({
+      renderTable(TAB_COLUMNS.tasks, (data.tasks || []).map(t => ({
         id: t.id,
         cells: [
           t.furnitureName, t.orgUsername,
-          badge(t.status, t.stuck ? 'danger' : t.status === 'completed' ? 'success' : t.status === 'failed' ? 'danger' : ''),
+          badge(t.status, t.stuck ? 'danger' : ''),
           `${t.progress}%` + (t.stuck ? ' <span style="color:var(--accent-red);font-size:0.75em;">STUCK</span>' : ''),
           t.retryCount,
           t.createdAt?.split('T')[0] || ''
         ],
         actions: actionBtn('Delete', 'btn-danger', `window._adminDeleteTask('${t.id}')`)
-      }));
-
-      const syncCols = ['Time', 'Org', 'Service', 'Action', 'Success', 'Duration'];
-      const syncRows = (data.recentCalls || []).map(c => ({
-        id: c.id,
-        cells: [
-          c.createdAt?.split('.')[0].replace('T',' ') || '',
-          c.orgUsername,
-          badge(c.service, ''),
-          c.action,
-          c.success ? badge('Yes', 'success') : badge('No', 'danger'),
-          c.durationMs ? `${c.durationMs}ms` : '-',
-        ],
-        actions: '',
-      }));
-
-      renderTable(TAB_COLUMNS.tasks, asyncRows);
-
-      if (syncRows.length > 0) {
-        const tbody = document.getElementById('admin-tbody');
-        tbody.insertAdjacentHTML('beforeend', `
-          <tr><td colspan="${TAB_COLUMNS.tasks.length + 1}" style="padding:16px 0 8px;font-weight:600;color:var(--text-secondary);border-bottom:1px solid var(--glass-border);">Recent Sync Calls (last 5 min)</td></tr>
-          <tr style="background:var(--glass-bg);">${syncCols.map(c => `<th style="padding:6px 10px;text-align:left;font-size:0.8em;">${c}</th>`).join('')}<th></th></tr>
-        `);
-        for (const row of syncRows) {
-          tbody.insertAdjacentHTML('beforeend', `<tr>${row.cells.map(c => `<td>${c}</td>`).join('')}<td></td></tr>`);
-        }
-      }
+      })));
     }
 
     else if (currentTab === 'usage') {

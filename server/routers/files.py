@@ -97,25 +97,6 @@ def get_furniture_image(furniture_id: str, org_id: str = Depends(verify_token)):
         raise HTTPException(404, "Image not found")
     return RedirectResponse(r2.get_public_url(row[0]), status_code=302)
 
-@router.post("/furniture/{furniture_id}/preview3d")
-async def upload_furniture_preview3d(
-    furniture_id: str, file: UploadFile = File(...), org_id: str = Depends(verify_token)
-):
-    verify_furniture_ownership(furniture_id, org_id)
-    db = get_furniture_db()
-    return await save_image_file(
-        file, "furniture/previews_3d", furniture_id, db, "furniture", "preview_3d_path"
-    )
-
-@router.get("/furniture/{furniture_id}/preview3d")
-def get_furniture_preview3d(furniture_id: str, org_id: str = Depends(verify_token)):
-    verify_furniture_ownership(furniture_id, org_id)
-    db = get_furniture_db()
-    row = db.execute("SELECT preview_3d_path FROM furniture WHERE id = ?", [furniture_id]).fetchone()
-    if not row or not row[0]:
-        raise HTTPException(404, "3D preview not found")
-    return RedirectResponse(r2.get_public_url(row[0]), status_code=302)
-
 @router.get("/furniture/{furniture_id}/model")
 def get_furniture_model(furniture_id: str, org_id: str = Depends(verify_token)):
     verify_furniture_ownership(furniture_id, org_id)

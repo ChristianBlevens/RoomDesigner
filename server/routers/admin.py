@@ -846,31 +846,19 @@ async def reupload_furniture_model(
         raise HTTPException(404, "Furniture not found")
 
     content = await file.read()
-    has_image = row[0] is not None
 
     processor = ModelProcessor()
     result = processor.process_glb(
-        content, origin_placement='bottom-center', generate_preview=not has_image
+        content, origin_placement='bottom-center', generate_preview=False
     )
 
     model_key = f"furniture/models/{furniture_id}.glb"
     r2.upload_bytes(model_key, result['glb'], 'model/gltf-binary')
 
-    preview_key = None
-    if result['preview']:
-        preview_key = f"furniture/previews_3d/{furniture_id}.png"
-        r2.upload_bytes(preview_key, result['preview'], 'image/png')
-
-    if preview_key:
-        db.execute(
-            "UPDATE furniture SET model_path = ?, preview_3d_path = ? WHERE id = ?",
-            [model_key, preview_key, furniture_id]
-        )
-    else:
-        db.execute(
-            "UPDATE furniture SET model_path = ? WHERE id = ?",
-            [model_key, furniture_id]
-        )
+    db.execute(
+        "UPDATE furniture SET model_path = ? WHERE id = ?",
+        [model_key, furniture_id]
+    )
 
     return {"status": "uploaded", "url": r2.get_public_url(model_key)}
 
@@ -956,10 +944,9 @@ def list_meshy_tasks(
 def list_tasks(
     status: Optional[str] = Query(None),
     org_id: Optional[str] = Query(None),
-    service: Optional[str] = Query(None),
     is_admin: bool = Depends(verify_admin)
 ):
-    """Unified tasks view: async 3D tasks + recent sync calls."""
+    """Active 3D generation tasks — what's processing right now."""
     from datetime import datetime, timedelta
 
     db = get_furniture_db()
@@ -967,16 +954,17 @@ def list_tasks(
     now = datetime.now()
     stuck_threshold = now - timedelta(minutes=10)
 
-    # --- Async tasks (Meshy/TRELLIS) ---
+    active_statuses = ('queued', 'pending', 'creating', 'polling', 'downloading')
+
     task_query = """
         SELECT t.id, t.furniture_id, t.status, t.progress, t.retry_count,
                t.error_message, t.created_at, t.updated_at,
                f.name as furniture_name, f.org_id
         FROM meshy_tasks t
         LEFT JOIN furniture f ON t.furniture_id = f.id
-        WHERE 1=1
+        WHERE t.status IN (?, ?, ?, ?, ?)
     """
-    task_params = []
+    task_params = list(active_statuses)
     if status:
         task_query += " AND t.status = ?"
         task_params.append(status)
@@ -987,42 +975,19 @@ def list_tasks(
     task_rows = db.execute(task_query, task_params).fetchall()
 
     org_ids = list(set(row[9] for row in task_rows if row[9]))
-
-    # --- Recent sync calls (last 5 minutes from usage_log) ---
-    sync_cutoff = now - timedelta(minutes=5)
-    sync_query = """
-        SELECT id, org_id, service_category, action, success, duration_ms, error_message, created_at
-        FROM usage_log WHERE created_at >= ?
-    """
-    sync_params = [sync_cutoff]
-    if org_id:
-        sync_query += " AND org_id = ?"
-        sync_params.append(org_id)
-    if service:
-        sync_query += " AND service_category = ?"
-        sync_params.append(service)
-    sync_query += " ORDER BY created_at DESC LIMIT 50"
-    sync_rows = auth_db.execute(sync_query, sync_params).fetchall()
-
-    sync_org_ids = [row[1] for row in sync_rows if row[1]]
-    all_org_ids = list(set(org_ids + sync_org_ids))
-
     org_names = {}
-    for oid in all_org_ids:
+    for oid in org_ids:
         org_row = auth_db.execute("SELECT username FROM orgs WHERE id = ?", [oid]).fetchone()
         org_names[oid] = org_row[0] if org_row else "Unknown"
 
-    async_tasks = []
+    tasks = []
     for row in task_rows:
         updated = row[7]
         is_stuck = False
-        if updated and row[2] in ('pending', 'creating', 'polling', 'downloading'):
-            if isinstance(updated, str):
-                updated_dt = datetime.fromisoformat(updated)
-            else:
-                updated_dt = updated
+        if updated:
+            updated_dt = datetime.fromisoformat(str(updated)) if isinstance(updated, str) else updated
             is_stuck = updated_dt < stuck_threshold
-        async_tasks.append({
+        tasks.append({
             "id": row[0], "furnitureId": row[1], "status": row[2],
             "progress": row[3], "retryCount": row[4], "errorMessage": row[5],
             "createdAt": str(row[6]) if row[6] else None,
@@ -1032,15 +997,7 @@ def list_tasks(
             "stuck": is_stuck,
         })
 
-    recent_calls = [{
-        "id": row[0], "orgId": row[1], "orgUsername": org_names.get(row[1], "Unknown"),
-        "service": row[2], "action": row[3],
-        "success": bool(row[4]), "durationMs": row[5],
-        "errorMessage": row[6],
-        "createdAt": str(row[7]) if row[7] else None,
-    } for row in sync_rows]
-
-    return {"asyncTasks": async_tasks, "recentCalls": recent_calls}
+    return {"tasks": tasks}
 
 
 # ============ R2 Cleanup ============

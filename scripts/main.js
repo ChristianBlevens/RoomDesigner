@@ -2280,7 +2280,6 @@ async function openEntryEditor(entryId) {
   const nameInput = document.getElementById('entry-name');
   const categoryInput = document.getElementById('entry-category');
   const imagePreview = document.getElementById('image-upload-preview');
-  const modelPreview = document.getElementById('model-upload-preview');
   const generateBtn = document.getElementById('generate-model-btn');
   const tagsList = document.getElementById('entry-tags-list');
   const tagInput = document.getElementById('entry-tag-input');
@@ -2300,7 +2299,6 @@ async function openEntryEditor(entryId) {
   categoryInput.value = '';
   qtyInput.value = '1';
   imagePreview.innerHTML = '<span>No image</span>';
-  modelPreview.innerHTML = '<span>No model</span>';
   generateBtn.style.display = 'none';
   generateBtn.textContent = 'Generate 3D Model';
   generateBtn.disabled = false;
@@ -2343,7 +2341,6 @@ async function openEntryEditor(entryId) {
 
       if (entry.model) {
         entryModelBlob = entry.model;
-        modelPreview.innerHTML = '<span style="color: #22c55e;">Model loaded</span>';
       }
 
       // Show generate button only if: image exists AND no model exists AND not currently generating
@@ -2646,9 +2643,7 @@ async function pollMeshyTasks() {
 
           // Update entry editor if open
           if (editingEntryId === task.furniture_id) {
-            const modelPreview = document.getElementById('model-upload-preview');
             const generateBtn = document.getElementById('generate-model-btn');
-            if (modelPreview) modelPreview.innerHTML = '<span style="color: #22c55e;">Model generated</span>';
             if (generateBtn) generateBtn.style.display = 'none';
             const entry = await getFurnitureEntry(task.furniture_id);
             if (entry) entryModelBlob = entry.model;

@@ -349,37 +349,23 @@ def _process_glb_sync(glb_content: bytes, furniture_id: str) -> dict:
     """Synchronous GLB processing (for thread pool)."""
     import r2 as r2_module
 
-    conn = get_furniture_db()
-    row = conn.execute("SELECT image_path FROM furniture WHERE id = ?", [furniture_id]).fetchone()
-    has_image = row and row[0]
-
     processor = ModelProcessor()
     result = processor.process_glb(
         glb_content,
         origin_placement='bottom-center',
-        generate_preview=not has_image
+        generate_preview=False
     )
 
     model_key = f"furniture/models/{furniture_id}.glb"
     r2_module.upload_bytes(model_key, result['glb'], 'model/gltf-binary')
 
-    preview_key = None
-    if result['preview']:
-        preview_key = f"furniture/previews_3d/{furniture_id}.png"
-        r2_module.upload_bytes(preview_key, result['preview'], 'image/png')
+    conn = get_furniture_db()
+    conn.execute(
+        "UPDATE furniture SET model_path = ? WHERE id = ?",
+        [model_key, furniture_id]
+    )
 
-    if preview_key:
-        conn.execute(
-            "UPDATE furniture SET model_path = ?, preview_3d_path = ? WHERE id = ?",
-            [model_key, preview_key, furniture_id]
-        )
-    else:
-        conn.execute(
-            "UPDATE furniture SET model_path = ? WHERE id = ?",
-            [model_key, furniture_id]
-        )
-
-    return {"model_key": model_key, "preview_key": preview_key}
+    return {"model_key": model_key}
 
 
 # ============ Background Polling Loop ============
