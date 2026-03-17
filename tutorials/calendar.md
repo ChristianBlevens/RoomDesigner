@@ -18,7 +18,8 @@ Tap the **"+" button** on any date to create a new house starting on that date. 
 Tap the **"Tools"** button at the bottom of the calendar to access:
 
 - **Furniture Segmenter** — open the segmentation tool in a new tab
-- **Send Feedback** — submit feedback or suggestions, and view your previous submissions with status updates
+- **Send Feedback** — submit feedback or suggestions, and view your previous submissions with status updates and admin responses
+- **Tutorials** — browse help guides for all features (also accessible via the **?** button in the calendar footer)
 
 ## Color Coding
 

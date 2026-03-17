@@ -4,7 +4,7 @@ Each house contains one or more rooms. A room is created from a photograph, whic
 
 ## Room Tabs
 
-Rooms appear as tabs at the bottom of the screen. Tap a tab to switch rooms. The "+" tab adds a new room.
+Rooms appear as tabs at the bottom of the screen. Tap a tab to switch rooms. The "+" tab adds a new room. **Double-click** a room tab name to rename it inline — press Enter or click away to save.
 
 ## Room Data
 

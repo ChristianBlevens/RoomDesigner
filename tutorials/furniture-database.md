@@ -12,7 +12,7 @@ The furniture database is shared across your organization. All houses and rooms 
 
 Each card shows:
 
-- A **thumbnail** (2D photo if available, 3D preview as fallback)
+- A **thumbnail** from the uploaded photo
 - A **"3D" badge** if the entry has a placeable 3D model
 - **Availability** badge based on the current house's date range:
   - **Green** — available. Hover/tap the badge to see which houses are using it
@@ -37,9 +37,8 @@ In the furniture modal header, between the tag filter and the Add Entry button, 
 3. Set the **location** — where the item is stored (e.g., "Warehouse B, Aisle 3")
 4. Set the **condition** — rate the item as Excellent, Good, Fair, or Poor
 5. Add **condition notes** — describe any damage or wear
-6. Upload a **photo** of the furniture (optional but recommended)
-7. Upload a **3D model** in GLB format, or generate one from the photo using Meshy.ai
-8. Set the **quantity** — how many of this item your organization owns
+6. Upload a **photo** of the furniture (required for 3D model generation)
+7. Set the **quantity** — how many of this item your organization owns
 9. Save the entry
 
 Location and condition information appears on the share page's delivery manifest, helping delivery teams find and assess items.

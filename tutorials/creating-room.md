@@ -9,8 +9,8 @@
    - **"Clear Room"** — AI removes existing furniture and clutter, producing a clean empty room. Best for rooms that are already furnished
    - **"Keep As-Is"** — uses the original photo unchanged
    - Optionally enter a **floor type hint** (e.g., "hardwood", "carpet", "tile") to help the AI reconstruct floors hidden under furniture
-5. Wait for **AI processing** — the app extracts 3D room geometry. This takes 30-60 seconds (60-90 seconds if clearing furniture)
-6. The room loads with the photo as background and an invisible 3D mesh for surface interaction
+5. The room automatically begins **AI processing** — a spinner with status text shows progress as the app extracts 3D room geometry. This takes 30-60 seconds (60-90 seconds if clearing furniture)
+6. When processing completes, the room **opens automatically** with the photo as background and an invisible 3D mesh for surface interaction
 
 ## Cleared vs Original Photo
 
